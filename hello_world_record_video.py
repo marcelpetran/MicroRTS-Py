@@ -1,22 +1,21 @@
 import numpy as np
-
-# if you want to record videos, install stable-baselines3 and use its `VecVideoRecorder`
-from stable_baselines3.common.vec_env import VecVideoRecorder
-
+import imageio
 from gym_microrts import microrts_ai
 from gym_microrts.envs.vec_env import MicroRTSGridModeVecEnv
 
-envs = MicroRTSGridModeVecEnv(
-    num_selfplay_envs=2,
+env = MicroRTSGridModeVecEnv(
+    num_selfplay_envs=0,
     num_bot_envs=1,
     max_steps=2000,
     render_theme=2,
-    ai2s=[microrts_ai.coacAI for _ in range(1)],
-    map_paths=["maps/16x16/basesWorkers16x16.xml"],
+    ai2s=[microrts_ai.coacAI],
+    # map_paths=["maps/16x16/basesWorkers16x16.xml"],
+    map_paths=["maps/4x4/base4x4.xml"],
     reward_weight=np.array([10.0, 1.0, 1.0, 0.2, 1.0, 4.0]),
 )
-envs = VecVideoRecorder(envs, "videos", record_video_trigger=lambda x: x % 4000 == 0, video_length=2000)
 
+obs = env.reset()
+frames = []
 
 def softmax(x, axis=None):
     x = x - x.max(axis=axis, keepdims=True)
@@ -32,14 +31,9 @@ def sample(logits):
     choices = (u < c).argmax(axis=1)
     return choices.reshape(-1, 1)
 
-
-envs.action_space.seed(0)
-envs.reset()
-nvec = envs.action_space.nvec
-
-for i in range(10000):
-    envs.render()
-    action_mask = envs.get_action_mask()
+# Step through and manually grab each frame:
+for _ in range(2000):
+    action_mask = env.get_action_mask()
     action_mask = action_mask.reshape(-1, action_mask.shape[-1])
     action_mask[action_mask == 0] = -9e8
     # sample valid actions
@@ -52,11 +46,18 @@ for i in range(10000):
             sample(action_mask[:, 18:22]),  # produce_direction parameter
             sample(action_mask[:, 22:29]),  # produce_unit_type parameter
             # attack_target parameter
-            sample(action_mask[:, 29 : sum(envs.action_space.nvec[1:])]),
+            sample(action_mask[:, 29 : sum(env.action_space.nvec[1:])]),
         ),
         axis=1,
     )
-    # doing the following could result in invalid actions
-    # action = np.array([envs.action_space.sample()])
-    next_obs, reward, done, info = envs.step(action)
-envs.close()
+    obs, reward, done, info = env.step(action)
+    # grab a numpy image instead of the default human render
+    frame = env.render(mode='rgb_array')
+    frames.append(frame)
+    if done:
+        break
+
+# 3) Save as mp4 at 30 fps
+imageio.mimsave('microrts_episode.mp4', frames, fps=30)
+
+env.close()

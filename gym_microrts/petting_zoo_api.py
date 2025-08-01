@@ -5,10 +5,12 @@ from gym import spaces
 from pettingzoo import AECEnv
 from pettingzoo.utils import agent_selector
 
-from gym_microrts.envs.vec_env import MicroRTSGridModeSharedMemVecEnv
+# from gym_microrts.envs.vec_env import MicroRTSGridModeSharedMemVecEnv
+from gym_microrts.envs.vec_env import MicroRTSGridModeVecEnv
 
 
-class PettingZooMicroRTSGridModeSharedMemVecEnv(AECEnv, MicroRTSGridModeSharedMemVecEnv):
+# class PettingZooMicroRTSGridModeSharedMemVecEnv(AECEnv, MicroRTSGridModeSharedMemVecEnv):
+class PettingZooMicroRTSGridModeSharedMemVecEnv(AECEnv, MicroRTSGridModeVecEnv):
 
     metadata = {"render.modes": ["human"], "name": "micrortsEnv-v0"}
 
@@ -21,7 +23,7 @@ class PettingZooMicroRTSGridModeSharedMemVecEnv(AECEnv, MicroRTSGridModeSharedMe
         render_theme=2,
         frame_skip=0,
         ai2s=[],
-        map_paths=["maps/10x10/basesTwoWorkers10x10.xml"],
+        map_paths=["maps/8x8/TwoBasesWorkers8x8.xml"], # ["maps/10x10/basesTwoWorkers10x10.xml"],
         reward_weight=np.array([0.0, 1.0, 0.0, 0.0, 0.0, 5.0]),
     ):
         # Initialize Parent
@@ -57,6 +59,10 @@ class PettingZooMicroRTSGridModeSharedMemVecEnv(AECEnv, MicroRTSGridModeSharedMe
 
         map_size = self.agent_action_space.shape[0] / 7
 
+      #   "action_masks": spaces.Box(low=0, high=1, shape=(map_size, 78), dtype=np.int32),
+      #   _low = np.full(shape, low, dtype=float) if np.isscalar(low) else low
+      #   a = empty(shape, dtype, order, device=device)
+      # TypeError: 'float' object cannot be interpreted as an integer
         self.observation_spaces = {
             agent: spaces.Dict(
                 {
@@ -68,10 +74,12 @@ class PettingZooMicroRTSGridModeSharedMemVecEnv(AECEnv, MicroRTSGridModeSharedMe
         }
 
     def render(self, mode="human"):
-        super(MicroRTSGridModeSharedMemVecEnv, self).render(mode)
+        # super(MicroRTSGridModeSharedMemVecEnv, self).render(mode)
+        super(MicroRTSGridModeVecEnv, self).render(mode)
 
     def close(self):
-        super(MicroRTSGridModeSharedMemVecEnv, self).close()
+        # super(MicroRTSGridModeSharedMemVecEnv, self).close()
+        super(MicroRTSGridModeVecEnv, self).close()
 
     def observation_space(self, agent):
         return self.observation_spaces[agent]
@@ -80,7 +88,8 @@ class PettingZooMicroRTSGridModeSharedMemVecEnv(AECEnv, MicroRTSGridModeSharedMe
         return self.action_spaces[agent]
 
     def reset(self):
-        _ = MicroRTSGridModeSharedMemVecEnv.reset(self)
+        # _ = MicroRTSGridModeSharedMemVecEnv.reset(self)
+        _ = MicroRTSGridModeVecEnv.reset(self)
 
         self.agents = self.possible_agents[:]
         self.rewards = {agent: 0 for agent in self.agents}

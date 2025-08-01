@@ -275,6 +275,7 @@ class MicroRTSGridModeVecEnv:
 
     def close(self):
         if jpype._jpype.isStarted():
+            print("Closing the Microrts client...")
             self.vec_client.close()
             jpype.shutdownJVM()
 
