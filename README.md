@@ -2,6 +2,8 @@
     <img src="https://raw.githubusercontent.com/Farama-Foundation/MicroRTS-Py/master/micrortspy-text.png" width="500px"/>
 </p>
 
+**Aug 11, 2025: This project has been deprecated due to a lack of wide spread community use, and is no longer planned to receive any additional updates or support.**
+
 Formerly Gym-μRTS/Gym-MicroRTS
 
 [<img src="https://img.shields.io/badge/discord-gym%20microrts-green?label=Discord&logo=discord&logoColor=ffffff&labelColor=7289DA&color=2c2f33">](https://discord.gg/DdJsrdry6F)
@@ -232,3 +234,4 @@ To cite the invalid action masking technique used in our training script:
   bibsource = {dblp computer science bibliography, https://dblp.org}
 }
 ```
+
