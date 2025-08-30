@@ -8,12 +8,12 @@ from gym_microrts.envs.vec_env import MicroRTSGridModeVecEnv
 
 
 envs = MicroRTSGridModeVecEnv(
-    num_selfplay_envs=2,
+    num_selfplay_envs=0,
     num_bot_envs=1,
     max_steps=2000,
     render_theme=2,
     ai2s=[microrts_ai.coacAI for _ in range(1)],
-    map_paths=["maps/16x16/basesWorkers16x16.xml"],
+    map_paths=["maps/4x4/base4x4.xml"],
     reward_weight=np.array([10.0, 1.0, 1.0, 0.2, 1.0, 4.0]),
 )
 # envs = VecVideoRecorder(envs, 'videos', record_video_trigger=lambda x: x % 4000 == 0, video_length=2000)
@@ -38,7 +38,7 @@ envs.action_space.seed(0)
 envs.reset()
 nvec = envs.action_space.nvec
 
-for i in range(10000):
+for i in range(1):
     # envs.render()
     action_mask = envs.get_action_mask()
     action_mask = action_mask.reshape(-1, action_mask.shape[-1])
@@ -60,4 +60,5 @@ for i in range(10000):
     # doing the following could result in invalid actions
     # action = np.array([envs.action_space.sample()])
     next_obs, reward, done, info = envs.step(action)
+    print(next_obs.shape, next_obs)
 envs.close()

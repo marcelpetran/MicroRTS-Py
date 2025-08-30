@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as torch_f
 import math
+import numpy as np
 
 # A standard positional encoding layer for transformers
 class PositionalEncoding(nn.Module):
@@ -104,6 +105,13 @@ class TransformerCVAE(nn.Module):
             nn.Linear(d_model, size) for size in feature_split_sizes
         ])
 
+        # set xavier initialization for all linear layers
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
     def encode(self, x, c):
         x_embedded = self.embedd(x)
         c_embedded = self.embedd(c)
@@ -161,6 +169,10 @@ class TransformerVAE(nn.Module):
         # --- Decoder ---
         self.latent_to_decoder_input = nn.Linear(latent_dim, self.seq_len * d_model)
         self.decoder_pos_encoder = PositionalEncoding(d_model, seq_len=self.seq_len, dropout=self.dropout)
+        # In a VAE, we don't have a memory sequence to attend to
+        # we only have the latent vector z to reconstruct from
+        # TransformerEncoder is simply a stack of self-attention blocks
+        # which is exactly what we need to reconstruct a sequence from a starting point
         decoder_layer = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, batch_first=True)
         self.transformer_decoder = nn.TransformerEncoder(decoder_layer, num_decoder_layers)
         
@@ -168,6 +180,13 @@ class TransformerVAE(nn.Module):
         self.output_projectors = nn.ModuleList([
             nn.Linear(d_model, size) for size in feature_split_sizes
         ])
+
+        # set xavier initialization for all linear layers
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
 
     def encode(self, x):
         x_embedded = self.embedd(x)
@@ -254,17 +273,14 @@ def generate_data(batch_size, h, w, feature_split_sizes):
     F = sum(feature_split_sizes)
     x = torch.zeros(batch_size, h, w, F)
     
-    for b in range(batch_size):
-        for h_idx in range(h):
-            for w_idx in range(w):
-                # Randomly set one-hot features
-                for i, size in enumerate(feature_split_sizes):
-                    # idx = torch.randint(0, size, (1,)) # Randomly choose an index for the feature group
-                    idx = torch.randint(0, 1, (1,)) # For simplicity, we just set the first index to 1
-                    if i > 0:
-                        idx = torch.randint(0, 2, (1,))
-                    x[b, h_idx, w_idx, sum(feature_split_sizes[:i]) + idx] = 1
-    
+    current_f_offset = 0
+    for size in feature_split_sizes:
+        # For each pixel, choose a random index within this feature group
+        indices = torch.randint(0, size, (batch_size, h, w, 1))
+        # Place 1 at that random index
+        x.scatter_(3, indices + current_f_offset, 1)
+        current_f_offset += size
+        
     return x
 
 if __name__ == '__main__':
@@ -279,7 +295,7 @@ if __name__ == '__main__':
     
     # --- Create Dataset ---
     from torch.utils.data import TensorDataset, DataLoader
-    dataset_size = 1024
+    dataset_size = 32
     full_dataset_x = generate_data(dataset_size, H, W, FEATURE_SPLITS)
     print("Generated dataset with shape:", full_dataset_x[0])
     train_dataset = TensorDataset(full_dataset_x)
@@ -287,26 +303,27 @@ if __name__ == '__main__':
     
     print("Dataset created. Starting training...")
 
-    # --- Model Initialization ---
+    # --- Model Init ---
     model = TransformerVAE(
         h=H,
         w=W,
         feature_split_sizes=FEATURE_SPLITS,
-        latent_dim=64,
-        d_model=256,
-        nhead=8,
-        num_encoder_layers=3,
-        num_decoder_layers=3,
-        dim_feedforward=512,
+        latent_dim=8,
+        d_model=32,
+        nhead=2,
+        num_encoder_layers=1,
+        num_decoder_layers=1,
+        dim_feedforward=64,
         dropout=0.01
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
+    loss_collector = []
+    x_collector = []
     # --- Train Loop ---
-    epochs = 100
+    epochs = 30_000
+    logg = 100
     for epoch in range(epochs):
-
-      print(f"Epoch {epoch}/{epochs}")
       for batch in train_loader:
         x = batch[0]  # Get the input state tensor (B, H, W, F)
         model.train()
@@ -320,8 +337,11 @@ if __name__ == '__main__':
         loss.backward()
         optimizer.step()
 
-      if epoch % 10 == 0 and epoch > 0:
-        print(f"Epoch {epoch}/{epochs}")
+      # --- Logging every 'logg' epochs ---
+      if (epoch + 1) % logg == 0:
+        loss_collector.append(loss.item())
+        x_collector.append(epoch+1)
+        print(f"Epoch {epoch+1}/{epochs}")
         print("Input state shape:", x.shape)
         print("Reconstructed state shape:", reconstructed_state.shape)
         print("Mu shape:", mu.shape)
@@ -331,13 +351,25 @@ if __name__ == '__main__':
     # --- Test the model ---
     model.eval()
     with torch.no_grad():
-        test_x = generate_data(1, H, W, FEATURE_SPLITS)
+        test_x = generate_data(4, H, W, FEATURE_SPLITS)
         reconstructed_x_logits, mu, logvar = model(test_x)
         reconstructed_state = reconstruct_state(reconstructed_x_logits, H, W, FEATURE_SPLITS)
-        print("Test Input State:", test_x[0])
-        print("Reconstructed State:", reconstructed_state[0])
-        print("Reconstructed logits:", reconstructed_x_logits[0])
+        print("Test Input State:\n", test_x[0])
+        print("Reconstructed State:\n", reconstructed_state[0])
+        print("Reconstructed logits:\n", reconstructed_x_logits[0])
         print("Mu:", mu)
         print("Logvar:", logvar)
         print("Reconstruction Loss:", loss_function(reconstructed_x_logits, test_x, mu, logvar, FEATURE_SPLITS).item())
     print("Training complete.")
+
+    # --- Plotting the loss curve ---
+    from matplotlib import pyplot as plt
+
+    loss_collector = np.array(loss_collector)
+    x_collector = np.array(x_collector)
+
+    plt.plot(x_collector, loss_collector)
+    plt.xlabel('Iteration')
+    plt.ylabel('Loss')
+    plt.title('Training Loss over Time')
+    plt.show()
