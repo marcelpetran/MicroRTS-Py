@@ -257,7 +257,8 @@ def reconstruct_state(reconstructed_state_logits, feature_split_sizes):
         probs = torch_f.softmax(reconstructed_state_logits[:, :, :, start_idx:end_idx], dim=-1)
         # Sample indices from the probabilities
         # indices = torch.multinomial(probs.view(-1, size), num_samples=1).view(B, h, w) + start_idx
-        indices = torch.argmax(probs, dim=-1) + start_idx # Get the index of the max probability
+        # or alternatively, take the argmax
+        indices = torch.argmax(probs, dim=-1) + start_idx
         # Set the corresponding one-hot feature to 1
         reconstructed_state.scatter_(3, indices.unsqueeze(-1), 1.0)
         start_idx = end_idx

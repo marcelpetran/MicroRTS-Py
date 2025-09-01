@@ -74,7 +74,7 @@ def main(episodes=1, render=False):
     if render:
         env.render()
 
-    # wait until enter key is pressed
+    # for debugging / to see the obs description
     input("Press Enter to continue...")
     return
 
