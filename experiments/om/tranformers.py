@@ -282,10 +282,28 @@ def generate_data(batch_size, h, w, feature_split_sizes):
     return x
 
 if __name__ == '__main__':
-    # --- Example Usage ---
-    B = 4   # Batch size
-    H = 4  # Map height
-    W = 4  # Map width
+    import argparse
+    parser = argparse.ArgumentParser(description="Simple test of VAE transformer.")
+
+    parser.add_argument('--batch-size', type=int, default=4, help='Batch size for training')
+    parser.add_argument('--h', type=int, default=4, help='Height of the map')
+    parser.add_argument('--w', type=int, default=4, help='Width of the map')
+    parser.add_argument('--dataset-size', type=int, default=32, help='Size of the dataset to generate')
+    parser.add_argument('--latent-dim', type=int, default=8, help='Dimensionality of the latent space')
+    parser.add_argument('--d-model', type=int, default=32, help='Dimensionality of the transformer model')
+    parser.add_argument('--nhead', type=int, default=2, help='Number of attention heads')
+    parser.add_argument('--num-encoder-layers', type=int, default=1, help='Number of encoder layers')
+    parser.add_argument('--num-decoder-layers', type=int, default=1, help='Number of decoder layers')
+    parser.add_argument('--dim-feedforward', type=int, default=64, help='Dimensionality of the feedforward network')
+    parser.add_argument('--dropout', type=float, default=0.01, help='Dropout rate')
+    parser.add_argument('--epochs', type=int, default=30000, help='Number of training epochs')
+    parser.add_argument('--logg', type=int, default=100, help='Logging interval')
+    args = parser.parse_args()
+
+    # --- Example Usage of VAE transformer ---
+    B = args.batch_size   # Batch size
+    H = args.h       # Map height
+    W = args.w       # Map width
     
     # Example: F is composed of a 3-class one-hot vector and a 4-class one-hot vector
     FEATURE_SPLITS = [3, 4] 
@@ -293,7 +311,7 @@ if __name__ == '__main__':
     
     # --- Create Dataset ---
     from torch.utils.data import TensorDataset, DataLoader
-    dataset_size = 32
+    dataset_size = args.dataset_size
     full_dataset_x = generate_data(dataset_size, H, W, FEATURE_SPLITS)
     print("Generated dataset with shape:", full_dataset_x[0])
     train_dataset = TensorDataset(full_dataset_x)
@@ -306,21 +324,21 @@ if __name__ == '__main__':
         h=H,
         w=W,
         feature_split_sizes=FEATURE_SPLITS,
-        latent_dim=8,
-        d_model=32,
-        nhead=2,
-        num_encoder_layers=1,
-        num_decoder_layers=1,
-        dim_feedforward=64,
-        dropout=0.01
+        latent_dim=args.latent_dim,
+        d_model=args.d_model,
+        nhead=args.nhead,
+        num_encoder_layers=args.num_encoder_layers,
+        num_decoder_layers=args.num_decoder_layers,
+        dim_feedforward=args.dim_feedforward,
+        dropout=args.dropout
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
     loss_collector = []
     x_collector = []
     # --- Train Loop ---
-    epochs = 30_000
-    logg = 100
+    epochs = args.epochs
+    logg = args.logg
     for epoch in range(epochs):
       for batch in train_loader:
         x = batch[0]  # Get the input state tensor (B, H, W, F)
