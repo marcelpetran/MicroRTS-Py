@@ -245,13 +245,11 @@ def loss_function(reconstructed_x, x, mu, logvar, feature_split_sizes):
     
     return recon_loss + kld_loss
 
-def reconstruct_state(reconstructed_state_logits, h, w, feature_split_sizes):
+def reconstruct_state(reconstructed_state_logits, feature_split_sizes):
     """
     Convert the reconstructed logit tensor back to one-hot encoded state.
     """
-    B, _, _, F = reconstructed_state_logits.shape
-    reconstructed_state = torch.zeros(B, h, w, sum(feature_split_sizes), device=reconstructed_state_logits.device)
-    
+    reconstructed_state = torch.zeros_like(reconstructed_state_logits, device=reconstructed_state_logits.device)
     start_idx = 0
     for size in feature_split_sizes:
         end_idx = start_idx + size
@@ -351,9 +349,9 @@ if __name__ == '__main__':
     # --- Test the model ---
     model.eval()
     with torch.no_grad():
-        test_x = generate_data(4, H, W, FEATURE_SPLITS)
+        test_x = generate_data(B, H, W, FEATURE_SPLITS)
         reconstructed_x_logits, mu, logvar = model(test_x)
-        reconstructed_state = reconstruct_state(reconstructed_x_logits, H, W, FEATURE_SPLITS)
+        reconstructed_state = reconstruct_state(reconstructed_x_logits, FEATURE_SPLITS)
         print("Test Input State:\n", test_x[0])
         print("Reconstructed State:\n", reconstructed_state[0])
         print("Reconstructed logits:\n", reconstructed_x_logits[0])
