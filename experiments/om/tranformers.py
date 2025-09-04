@@ -268,6 +268,7 @@ def reconstruct_state(reconstructed_state_logits, feature_split_sizes):
 def generate_data(batch_size, h, w, feature_split_sizes):
     """
     Generates dummy data for testing the TransformerVAE model.
+    Data format: (B, H, W, F) where F is sum of feature_split_sizes. Each feature group is one-hot encoded.
     """
     F = sum(feature_split_sizes)
     x = torch.zeros(batch_size, h, w, F)
