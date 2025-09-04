@@ -178,7 +178,7 @@ class TransformerVAE(nn.Module):
         self.seq_len = h * w
         self.dropout = dropout
 
-        # --- Feature Embedding (Now a single, clean module) ---
+        # --- Feature Embedding ---
         self.embedd = StateEmbeddings(h, w, feature_split_sizes, d_model, dropout)
 
         # --- Encoder ---
@@ -236,6 +236,14 @@ class TransformerVAE(nn.Module):
         return reconstructed_x
     
     def forward(self, x):
+        """
+        Args:
+            x (Tensor): Input state of shape (B, H, W, F)
+        Returns:
+            Tensor: Reconstructed state of shape (B, H, W, F)
+            Tensor: Mean of the latent distribution (B, latent_dim)
+            Tensor: Log-variance of the latent distribution (B, latent_dim)
+        """
         mu, logvar = self.encode(x)
         z = self.reparameterize(mu, logvar)
         reconstructed_x = self.decode(z)
