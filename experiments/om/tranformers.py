@@ -89,12 +89,17 @@ class StateEmbeddings(nn.Module):
         
 # Main CVAE Model using Transformer architecture
 class TransformerCVAE(nn.Module):
+    """
+    Conditional Variational Autoencoder with Transformer architecture.
+    The encoder takes both the input state and a conditioning trajectory.
+    TODO: change the conditioning to take historical trajectory {s_0, ..., a^{i}_{t-1}, a^{-i}_{t-1}, s_{t-1}}
+    """
     def __init__(self, h, w, feature_split_sizes, latent_dim, d_model=256, nhead=8, num_encoder_layers=6, num_decoder_layers=6, dim_feedforward=1024, dropout=0.1):
         super().__init__()
         self.seq_len = h * w
         self.droput = dropout
 
-        # --- Feature Embedding (Now a single, clean module) ---
+        # --- Feature Embedding ---
         self.embedd = StateEmbeddings(h, w, feature_split_sizes, d_model, dropout)
 
         # --- Encoder ---
@@ -134,7 +139,6 @@ class TransformerCVAE(nn.Module):
         return mu, logvar
 
     def reparameterize(self, mu, logvar):
-        # (Same as before)
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return mu + eps * std
@@ -154,7 +158,15 @@ class TransformerCVAE(nn.Module):
         return reconstructed_x
 
     def forward(self, x, c):
-        # (Same as before)
+        """
+        Args:
+            x (Tensor): Input state of shape (B, H, W, F)
+            c (Tensor): Conditioning trajectory of shape (B, H, W, F)
+        Returns:
+            Tensor: Reconstructed state of shape (B, H, W, F)
+            Tensor: Mean of the latent distribution (B, latent_dim)
+            Tensor: Log-variance of the latent distribution (B, latent_dim)
+        """
         mu, logvar = self.encode(x, c)
         z = self.reparameterize(mu, logvar)
         reconstructed_x = self.decode(z, c)
