@@ -6,8 +6,11 @@ import torch.nn.functional as torch_f
 import math
 import numpy as np
 
-# A standard positional encoding layer for transformers
 class PositionalEncoding(nn.Module):
+    """
+    Standard positional encoding as used in the original Transformer paper.
+    Adds sine and cosine functions of different frequencies to the input embeddings.
+    """
     def __init__(self, d_model: int , seq_len: int, dropout: float):
         super(PositionalEncoding, self).__init__()
         self.d_model = d_model
@@ -27,6 +30,12 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pe', pe)
 
     def forward(self, x):
+        """
+        Args:
+            x (Tensor): Input tensor of shape (Batch, Seq_len, d_model)
+        Returns:
+            Tensor: Output tensor of the same shape as input with positional encoding added
+        """
         # x is expected to be (Batch, Seq_len, d_model)
         x = x + (self.pe[:, :x.size(1), :]).requires_grad_(False) # We don't want to train the positional encodings
         return self.dropout(x)
