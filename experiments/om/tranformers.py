@@ -127,6 +127,8 @@ class TransformerCVAE(nn.Module):
                     nn.init.zeros_(m.bias)
 
     def encode(self, x, c):
+        # TODO: change the conditioning to take historical trajectory {s_0, ..., a^{i}_{t-1}, a^{-i}_{t-1}, s_{t-1}}
+        # we will need different embedding layers for state and action features
         x_embedded = self.embedd(x)
         c_embedded = self.embedd(c)
         
