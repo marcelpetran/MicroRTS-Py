@@ -119,7 +119,7 @@ class TransformerCVAE(nn.Module):
             nn.Linear(d_model, size) for size in feature_split_sizes
         ])
 
-        # set xavier initialization for all linear layers
+        # Set xavier initialization for all linear layers
         for m in self.modules():
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
