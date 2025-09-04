@@ -313,8 +313,7 @@ if __name__ == '__main__':
     
     # --- Create Dataset ---
     from torch.utils.data import TensorDataset, DataLoader
-    dataset_size = args.dataset_size
-    full_dataset_x = generate_data(dataset_size, H, W, FEATURE_SPLITS)
+    full_dataset_x = generate_data(args.dataset_size, H, W, FEATURE_SPLITS)
     print("Generated dataset with shape:", full_dataset_x[0])
     train_dataset = TensorDataset(full_dataset_x)
     train_loader = DataLoader(train_dataset, batch_size=B, shuffle=True)
