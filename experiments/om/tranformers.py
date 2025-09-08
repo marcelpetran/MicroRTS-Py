@@ -132,14 +132,48 @@ class TransformerCVAE(nn.Module):
                 nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
+    
+    def get_history_embeddings(self, history):
+        """
+        Aggregates and embeds the historical trajectory into a single sequence.
+        Args:
+            history (dict): A dictionary containing historical states and actions.
+                            Expected keys: 'states', 'actions', 'opp_actions' (if applicable)
+        Returns:
+            List[Tensor]: A list of embedded tensors forming the history sequence.
+        """
+        history_embeddings = []
+        for i in range(len(history['states'])):
+            s_t = history['states'][i]
+            a_t = history['actions'][i]
+            # A_t = history['opp_actions'][i]
 
-    def encode(self, x, c):
-        # TODO: change the conditioning to take historical trajectory {s_0, ..., a^{i}_{t-1}, a^{-i}_{t-1}, s_{t-1}}
-        # we will need different embedding layers for state and action features
-        x_embedded = self.embedd(x)
-        c_embedded = self.embedd(c)
+            # Embed state and action and add to our history sequence
+            s_t_embedded = self.state_embedder(s_t)
+            a_t_embedded = self.action_embedder(a_t)
+            history_embeddings.extend([s_t_embedded, a_t_embedded])
+        return history_embeddings
+
+    def encode(self, x, history):
+        """
+        Encodes the input state x conditioned on the historical trajectory.
+        Args:
+            x (Tensor): Input state of shape (B, H, W, F)
+            history (dict): A dictionary containing historical states and actions.
+                            Expected keys: 'states', 'actions', 'opp_actions' (if applicable)
+        Returns:
+            Tensor: Mean of the latent distribution (B, latent_dim)
+            Tensor: Log-variance of the latent distribution (B, latent_dim)
+        """
+        x_embedded = self.state_embedder(x)
+
+        # Process the historical trajectory to form the condition
+        history_embeddings = self.get_history_embeddings(history)
         
-        combined_seq = torch.cat([x_embedded, c_embedded], dim=1)
+        # Concatenate all history elements into a single long sequence
+        condition_seq = torch.cat(history_embeddings, dim=1)
+        
+        combined_seq = torch.cat([x_embedded, condition_seq], dim=1)
         encoder_output = self.transformer_encoder(combined_seq)
         aggregated_output = encoder_output[:, 0, :]
         
@@ -152,9 +186,19 @@ class TransformerCVAE(nn.Module):
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def decode(self, z, c):
+    def decode(self, z, history_seq):
+        """
+        Decodes a latent vector z conditioned on an embedded history sequence.
+        
+        Args:
+            z (Tensor): The latent vector. Shape: (B, latent_dim)
+            history_seq (Tensor): The pre-embedded and concatenated history sequence
+                                  that acts as memory for the decoder.
+        Returns:
+            Tensor: Reconstructed state of shape (B, H, W, F)
+        """
         B = z.shape[0]
-        memory = self.embedd(c)
+        memory = history_seq
         
         decoder_input = self.latent_to_decoder_input(z).view(B, self.seq_len, -1)
         tgt = self.decoder_pos_encoder(decoder_input)
@@ -163,10 +207,10 @@ class TransformerCVAE(nn.Module):
         
         reconstructed_features = [proj(decoder_output) for proj in self.output_projectors]
         reconstructed_x_flat = torch.cat(reconstructed_features, dim=-1)
-        reconstructed_x = reconstructed_x_flat.view(B, self.embedd.h, self.embedd.w, -1)
+        reconstructed_x = reconstructed_x_flat.view(B, self.state_embedder.h, self.state_embedder.w, -1)
         return reconstructed_x
 
-    def forward(self, x, c):
+    def forward(self, x, history):
         """
         Args:
             x (Tensor): Input state of shape (B, H, W, F)
@@ -176,9 +220,10 @@ class TransformerCVAE(nn.Module):
             Tensor: Mean of the latent distribution (B, latent_dim)
             Tensor: Log-variance of the latent distribution (B, latent_dim)
         """
-        mu, logvar = self.encode(x, c)
+        history_seq = torch.cat(self.get_history_embeddings(history), dim=1)
+        mu, logvar = self.encode(x, history)
         z = self.reparameterize(mu, logvar)
-        reconstructed_x = self.decode(z, c)
+        reconstructed_x = self.decode(z, history_seq)
         return reconstructed_x, mu, logvar
 
 class TransformerVAE(nn.Module):
