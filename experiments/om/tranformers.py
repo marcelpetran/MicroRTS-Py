@@ -372,6 +372,39 @@ def reconstruct_state(reconstructed_state_logits, feature_split_sizes):
     
     return reconstructed_state
 
+# experimental data generation for testing CVAE
+def generate_conditional_data(batch_size, h, w):
+    """
+    Generates a batch of (target, condition) pairs with a learnable rule.
+    - Condition 'c' has one "goal" pixel.
+    - Target 'x' has one "player" pixel near the goal.
+    """
+    # For simplicity, we'll use a single feature plane (F=1)
+    # The concept extends to your multi-feature setup
+    
+    # --- Create the Condition 'c' ---
+    c = torch.zeros(batch_size, h, w, 1)
+    # Pick a random "goal" location for each item in the batch
+    goal_coords_h = torch.randint(0, h, (batch_size,))
+    goal_coords_w = torch.randint(0, w, (batch_size,))
+    # Place the "goal" pixel
+    c[torch.arange(batch_size), goal_coords_h, goal_coords_w, 0] = 1
+
+    # --- Create the Target 'x' ---
+    x = torch.zeros(batch_size, h, w, 1)
+    # Player position is a small random offset from the goal
+    offset_h = torch.randint(-1, 2, (batch_size,)) # Offset of -1, 0, or 1
+    offset_w = torch.randint(-1, 2, (batch_size,))
+    
+    # Calculate player coordinates and clamp them to stay within the grid
+    player_coords_h = torch.clamp(goal_coords_h + offset_h, 0, h - 1)
+    player_coords_w = torch.clamp(goal_coords_w + offset_w, 0, w - 1)
+    
+    # Place the "player" pixel
+    x[torch.arange(batch_size), player_coords_h, player_coords_w, 0] = 1
+    
+    return x, c
+
 def generate_data(batch_size, h, w, feature_split_sizes):
     """
     Generates dummy data for testing the TransformerVAE model.
