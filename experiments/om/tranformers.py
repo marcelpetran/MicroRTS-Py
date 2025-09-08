@@ -303,8 +303,32 @@ class TransformerVAE(nn.Module):
         reconstructed_x = self.decode(z)
         return reconstructed_x, mu, logvar
     
-# Loss function for the CVAE
-def loss_function(reconstructed_x, x, mu, logvar, feature_split_sizes):
+def cvae_loss(predicted_mu, target_mu):
+    """
+    Loss function to train encoder to match the latent distribution of a pre-trained VAE.
+    Uses Mean Squared Error between the predicted and target means.
+    We do not need to use decoder, or we simply copy the weights from the pre-trained VAE.
+    Args:
+        predicted_mu (Tensor): Predicted mean from the CVAE encoder. Shape: (B, latent_dim)
+        target_mu (Tensor): Target mean from the pre-trained VAE encoder. Shape: (B, latent_dim)
+    Returns:
+        Tensor: Computed MSE loss.
+    """
+    return torch_f.mse_loss(predicted_mu, target_mu)
+    
+# Loss function for the VAE
+def vae_loss(reconstructed_x, x, mu, logvar, feature_split_sizes):
+    """
+    Loss function for VAE combining reconstruction loss and KL divergence.
+    Args:
+        reconstructed_x (Tensor): Reconstructed state of shape (B, H, W, F)
+        x (Tensor): Original input state of shape (B, H, W, F)
+        mu (Tensor): Mean of the latent distribution (B, latent_dim)
+        logvar (Tensor): Log-variance of the latent distribution (B, latent_dim)
+        feature_split_sizes (List[int]): List of sizes for each one-hot feature group.
+    Returns:
+        Tensor: Computed VAE loss.
+    """
     # Reconstruction Loss
     # We use Binary Cross Entropy with Logits for each one-hot feature group
     # as it's suitable for multi-label classification style outputs
@@ -430,7 +454,7 @@ if __name__ == '__main__':
 
         # --- Forward Pass and Loss Calculation ---
         reconstructed_state, mu, logvar = model(x)
-        loss = loss_function(reconstructed_state, x, mu, logvar, FEATURE_SPLITS)
+        loss = vae_loss(reconstructed_state, x, mu, logvar, FEATURE_SPLITS)
 
         # --- Backward Pass ---
         optimizer.zero_grad()
@@ -459,7 +483,7 @@ if __name__ == '__main__':
         print("Reconstructed logits:\n", reconstructed_x_logits[0])
         print("Mu:", mu)
         print("Logvar:", logvar)
-        print("Reconstruction Loss:", loss_function(reconstructed_x_logits, test_x, mu, logvar, FEATURE_SPLITS).item())
+        print("Reconstruction Loss:", vae_loss(reconstructed_x_logits, test_x, mu, logvar, FEATURE_SPLITS).item())
     print("Training complete.")
 
     # --- Plotting the loss curve ---
