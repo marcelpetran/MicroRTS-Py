@@ -86,21 +86,28 @@ class StateEmbeddings(nn.Module):
 
         # Add positional encoding
         return self.position_encoder(embedded)
-        
+class ActionEmbeddings(StateEmbeddings):
+    """
+    Handles embedding of grid-like action tensors.
+    Inherits from StateEmbeddings since the logic is identical.
+    """
+    def __init__(self, h, w, action_feature_splits, d_model, dropout):
+        super().__init__(h, w, action_feature_splits, d_model, dropout)
+
 # Main CVAE Model using Transformer architecture
 class TransformerCVAE(nn.Module):
     """
     Conditional Variational Autoencoder with Transformer architecture.
     The encoder takes both the input state and a conditioning trajectory.
-    TODO: change the conditioning to take historical trajectory {s_0, ..., a^{i}_{t-1}, a^{-i}_{t-1}, s_{t-1}}
     """
-    def __init__(self, h, w, feature_split_sizes, latent_dim, d_model=256, nhead=8, num_encoder_layers=6, num_decoder_layers=6, dim_feedforward=1024, dropout=0.1):
+    def __init__(self, h, w, state_feature_splits, action_feature_splits , latent_dim, d_model=256, nhead=8, num_encoder_layers=6, num_decoder_layers=6, dim_feedforward=1024, dropout=0.1):
         super().__init__()
         self.seq_len = h * w
         self.droput = dropout
 
         # --- Feature Embedding ---
-        self.embedd = StateEmbeddings(h, w, feature_split_sizes, d_model, dropout)
+        self.state_embedder = StateEmbeddings(h, w, state_feature_splits, d_model, dropout)
+        self.action_embedder = ActionEmbeddings(h, w, action_feature_splits, d_model, dropout)
 
         # --- Encoder ---
         encoder_layer = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, batch_first=True)
@@ -116,7 +123,7 @@ class TransformerCVAE(nn.Module):
         
         # --- Output Projection ---
         self.output_projectors = nn.ModuleList([
-            nn.Linear(d_model, size) for size in feature_split_sizes
+            nn.Linear(d_model, size) for size in state_feature_splits
         ])
 
         # Set xavier initialization for all linear layers
