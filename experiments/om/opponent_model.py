@@ -1,12 +1,15 @@
+import re
 import tranformers as t
 import torch
 import torch.nn as nn
+import torch.nn.functional as torch_f
+import numpy as np
 
 class SubGoalSelector:
     def __init__(self):
         pass
     
-    def select_subgoal(self, vae, policy, s_t: torch.Tensor, future_states: torch.Tensor):
+    def select_subgoal(self, vae, eval_policy, s_t: torch.Tensor, future_states: torch.Tensor):
         """
         Selects a subgoal by encoding future states to latent space s_g = encode(s_t+K), 
         selecting suitable future state by policy argmin Q-value(s_t, s_g), 
