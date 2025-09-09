@@ -303,11 +303,12 @@ class TransformerVAE(nn.Module):
         reconstructed_x = self.decode(z)
         return reconstructed_x, mu, logvar
     
-def latent_matching_loss(predicted_mu, target_mu):
+def simple_cvae_loss(predicted_mu, target_mu):
     """
-    Loss function to train encoder to match the latent distribution of a pre-trained VAE.
+    Very simple loss function to train encoder to match the latent distribution of a pre-trained VAE.
     Uses Mean Squared Error between the predicted and target means.
     We do not need to use decoder, or we simply copy the weights from the pre-trained VAE.
+    Not usable for OM! -> We also need KL
     Args:
         predicted_mu (Tensor): Predicted mean from the CVAE encoder. Shape: (B, latent_dim)
         target_mu (Tensor): Target mean from the pre-trained VAE encoder. Shape: (B, latent_dim)
