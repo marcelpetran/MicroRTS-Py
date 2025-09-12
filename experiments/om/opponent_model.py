@@ -2,14 +2,26 @@ import re
 import tranformers as t
 import torch
 import torch.nn as nn
-import torch.nn.functional as torch_f
+import torch.nn.functional as F
 import numpy as np
 
 class SubGoalSelector:
     def __init__(self):
         pass
     
-    def select_subgoal(self, vae, eval_policy, s_t: torch.Tensor, future_states: torch.Tensor):
+    def gumbel_max_sample(self, logits):
+        """
+        Samples from a categorical distribution using the Gumbel-max trick.
+        Args:
+            logits (Tensor): Logits of shape (N,) representing the unnormalized log probabilities.
+        Returns:
+            int: Index of the sampled category.
+        """
+        gumbel_noise = -torch.log(-torch.log(torch.rand_like(logits)))
+        # return torch.argmax(logits + gumbel_noise)
+        return torch.argmin(logits + gumbel_noise)  # for argmin
+    
+    def select(self, vae, eval_policy, s_t: torch.Tensor, future_states: torch.Tensor):
         """
         Selects a subgoal by encoding future states to latent space s_g = encode(s_t+K), 
         selecting suitable future state by policy argmin Q-value(s_t, s_g), 
@@ -22,25 +34,24 @@ class SubGoalSelector:
         Returns:
             Tensor: latent subgoal of shape (latent_dim)
         """
-        self.model.eval()
+        self.vae.eval()
         with torch.no_grad():
-            mu, _ = self.model.encode(future_states)
+            mu, _ = self.vae.encode(future_states)
             values = eval_policy.q_value(s_t, mu) # TODO: when policy is implemented, check compatibility
-            best_idx = torch.argmin(values)
+            # Gumbel-max trick for differentiable argmin
+            best_idx = self.gumbel_max_sample(-values.squeeze(0))
             best_future_state = future_states[best_idx].unsqueeze(0)
             subgoal, vae_log_var = vae.encode(best_future_state)
         return subgoal, vae_log_var
 
 class OpponentModel:
-    def __init__(self, cvae: t.TransformerCVAE, vae: t.TransformerVAE, selector: SubGoalSelector, optimizer, device, max_history=5, alpha=1.0, eta=1.0):
+    def __init__(self, cvae: t.TransformerCVAE, vae: t.TransformerVAE, selector: SubGoalSelector, optimizer, device, args):
         self.inference_model = cvae
-        self.target_prior = vae
+        self.prior_model = vae # The pre-trained "teacher" VAE
         self.subgoal_selector = selector
         self.optimizer = optimizer
         self.device = device
-        self.max_history = max_history
-        self.alpha = alpha
-        self.eta = eta
+        self.args = args
         self.mse_loss = nn.MSELoss()
     
     def reconstruct_state(reconstructed_state_logits, feature_split_sizes):
