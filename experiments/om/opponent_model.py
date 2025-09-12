@@ -63,7 +63,7 @@ class OpponentModel:
       for size in feature_split_sizes:
           end_idx = start_idx + size
           # Apply softmax to the logits to get probabilities
-          probs = torch_f.softmax(reconstructed_state_logits[:, :, :, start_idx:end_idx], dim=-1)
+          probs = F.softmax(reconstructed_state_logits[:, :, :, start_idx:end_idx], dim=-1)
           # Sample indices from the probabilities
           # indices = torch.multinomial(probs.view(-1, size), num_samples=1).view(B, h, w) + start_idx
           # or alternatively, take the argmax
