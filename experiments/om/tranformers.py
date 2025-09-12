@@ -2,7 +2,7 @@ import re
 from turtle import forward
 import torch
 import torch.nn as nn
-import torch.nn.functional as torch_f
+import torch.nn.functional as F
 import math
 import numpy as np
 
@@ -345,7 +345,7 @@ def vae_loss(reconstructed_x, x, mu, logvar, feature_split_sizes):
     recon_split = torch.split(recon_flat, feature_split_sizes, dim=-1)
     
     for recon_group, x_group in zip(recon_split, x_split):
-        recon_loss += torch_f.binary_cross_entropy_with_logits(recon_group, x_group, reduction='sum')
+        recon_loss += F.binary_cross_entropy_with_logits(recon_group, x_group, reduction='sum')
 
     # KL Divergence Loss
     # -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
@@ -362,7 +362,7 @@ def reconstruct_state(reconstructed_state_logits, feature_split_sizes):
     for size in feature_split_sizes:
         end_idx = start_idx + size
         # Apply softmax to the logits to get probabilities
-        probs = torch_f.softmax(reconstructed_state_logits[:, :, :, start_idx:end_idx], dim=-1)
+        probs = F.softmax(reconstructed_state_logits[:, :, :, start_idx:end_idx], dim=-1)
         # Sample indices from the probabilities
         # indices = torch.multinomial(probs.view(-1, size), num_samples=1).view(B, h, w) + start_idx
         # or alternatively, take the argmax
