@@ -74,65 +74,76 @@ class OpponentModel:
       
       return reconstructed_state
 
-    def inference_loss(self, batch, eval_policy):
-      """
-      Loss function to train encoder to match the latent distribution of a pre-trained VAE.
-      Uses Mean Squared Error between the predicted and target means.
-      We do not need to use decoder, or we simply copy the weights from the pre-trained VAE.
-      Args:
-          predicted_mu (Tensor): Predicted mean from the CVAE encoder. Shape: (B, latent_dim)
-          target_mu (Tensor): Target mean from the pre-trained VAE encoder. Shape: (B, latent_dim)
-      Returns:
-          Tensor: Computed MSE loss.
-      """
-      # TODO: simplify the code below, remove unnecessary parts, put them in train_step if not needed here
-      terminated = batch["terminated"][:, :-1].float().squeeze(-1)
-      infer_mu = batch["infer_mu"][:, :-1].float().squeeze(-1)
-      infer_log_var = batch["infer_log_var"][:, :-1].float().squeeze(-1)
-      mask = batch["filled"][:, :-1].float().squeeze(-1)
-      mask[:, 1:] = mask[:, 1:] * (1 - terminated[:, :-1])
+    def loss_function(self, reconstructed_x, x, cvae_mu, cvae_log_var, vae_mu, vae_log_var, infer_mu, infer_log_var):
+        """
+        Calculates the full OMG loss for the CVAE.
+        """
+        # --- 1. Reconstruction Loss ---
+        # This part trains the CVAE's decoder
+        # This forces the CVAE to faithfully represent the current state
+        recon_loss = 0
+        recon_flat = reconstructed_x.view(-1, sum(self.args.state_feature_splits))
+        x_flat = x.view(-1, sum(self.args.state_feature_splits))
+        
+        x_split = torch.split(x_flat, self.args.state_feature_splits, dim=-1)
+        recon_split = torch.split(recon_flat, self.args.state_feature_splits, dim=-1)
+        
+        for recon_group, x_group in zip(recon_split, x_split):
+            recon_loss += F.binary_cross_entropy_with_logits(recon_group, x_group, reduction='mean')
 
-      vae_mu, vae_log_var = self.subgoal_selector.select_subgoal(self.target_prior, eval_policy, batch["states"][:, :-1], batch["future_states"][:, :-1])
-      cvae_input = batch["states"][:, 1:].float()
-      cvae_recon, cvae_mu, cvae_log_var = self.inference_model(batch["states"][:, :-1].float(), batch["history"])
-
-      recons_loss = self.mse_loss(cvae_recon, cvae_input, reduction='none').mean(dim=-1)
-      recons_loss = recons_loss * mask
-
-      if self.args.eta < np.random.random():
-          omg_loss = -0.5 * torch.sum(1 + cvae_log_var - vae_log_var.detach() - ((vae_mu.detach() - cvae_mu) ** 2 + cvae_log_var.exp())/vae_log_var.detach().exp(), dim=-1)
-      else:
-          omg_loss = -0.5 * torch.sum(1 + cvae_log_var - infer_log_var.detach() - ((infer_mu.detach() - cvae_mu) ** 2 + cvae_log_var.exp())/infer_log_var.detach().exp(), dim=-1)
-      omg_loss = omg_loss * mask
-
-      loss = recons_loss.mean() + self.args.omg_cvae_alpha * omg_loss.mean()
-      return loss
+        # --- 2. Inference Loss ---
+        # This part trains the CVAE's encoder
+        # This forces the CVAE latent vector g_hat to point towards high-probability future
+        if self.args.eta < np.random.random(): # eta goes to 0 over time (eq. (8) in the paper)
+             # Use the model's own inference (g_hat) as the target
+            target_mu, target_log_var = infer_mu.detach(), infer_log_var.detach()
+        else:
+            # Use the pre-trained VAE's output (g_bar) as the target
+            target_mu, target_log_var = vae_mu.detach(), vae_log_var.detach()
+        
+        # KL Divergence between CVAE's prediction and the target distribution
+        omg_loss = -0.5 * torch.sum(1 + cvae_log_var - target_log_var - 
+                                    (((target_mu - cvae_mu) ** 2 + cvae_log_var.exp()) / target_log_var.exp()), 
+                                    dim=-1)
+        
+        # The final loss is a weighted sum of reconstruction and inference loss
+        total_loss = recon_loss.mean() + self.args.alpha * omg_loss.mean()
+        return total_loss
     
     def train_step(self, batch, eval_policy):
         """
-        TODO
         Performs a single training step for the opponent model.
         Args:
-            x (Tensor): Input state of shape (1, H, W, F)
-            history (dict): A dictionary containing historical states and actions.
-                            Expected keys: 'states', 'actions', 'opp_actions' (if applicable)
+            batch (dict): A batch of data from the replay buffer containing:
+                - 'state': Tensor of shape (B, T, H, W, F)
+                - 'history': Dict of lists of Tensors for historical data
+                - 'future_states': Tensor of shape (B, K, H, W, F)
+                - 'infer_mu': Tensor of shape (B, latent_dim)
+                - 'infer_log_var': Tensor of shape (B, latent_dim)
+            eval_policy (Policy): The current evaluation policy used for subgoal selection.
         Returns:
-            float: The training loss for this step.
+            float: The computed loss for the batch.
         """
-        x = batch["states"][:, :-1].float()
-        history = {k: v[:, :-1] for k, v in batch["history"].items()}
-
+        # Unpack the batch from the replay buffer
+        states = batch['state'].to(self.device)
+        history = {k: [item.to(self.device) for item in v] for k, v in batch['history'].items()}
+        future_states = batch['future_states'].to(self.device)
+        infer_mu = batch['infer_mu'].to(self.device)
+        infer_log_var = batch['infer_log_var'].to(self.device)
+        
         self.inference_model.train()
         self.optimizer.zero_grad()
 
-        # Encode with CVAE to get predicted latent distribution
-        predicted_mu, predicted_logvar = self.inference_model.encode(x, history)
+        x = states[:, 0:, ...]
+        reconstructed_x, cvae_mu, cvae_log_var = self.inference_model(x, history)
 
-        # Encode with pre-trained VAE to get target latent distribution
         with torch.no_grad():
-            target_mu, target_logvar = self.target_prior.encode(x)
+            
+            vae_mu, vae_log_var = self.subgoal_selector.select(self.prior_model, eval_policy, 
+                                                              x, future_states)
 
-        loss = self.inference_loss(batch, eval_policy)
+        loss = self.loss_function(reconstructed_x, x, cvae_mu, cvae_log_var, 
+                                  vae_mu, vae_log_var, infer_mu, infer_log_var)
 
         loss.backward()
         self.optimizer.step()
