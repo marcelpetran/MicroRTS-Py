@@ -303,20 +303,6 @@ class TransformerVAE(nn.Module):
         reconstructed_x = self.decode(z)
         return reconstructed_x, mu, logvar
     
-def simple_cvae_loss(predicted_mu, target_mu):
-    """
-    Very simple loss function to train encoder to match the latent distribution of a pre-trained VAE.
-    Uses Mean Squared Error between the predicted and target means.
-    We do not need to use decoder, or we simply copy the weights from the pre-trained VAE.
-    Not usable for OM! -> We also need KL
-    Args:
-        predicted_mu (Tensor): Predicted mean from the CVAE encoder. Shape: (B, latent_dim)
-        target_mu (Tensor): Target mean from the pre-trained VAE encoder. Shape: (B, latent_dim)
-    Returns:
-        Tensor: Computed MSE loss.
-    """
-    return torch_f.mse_loss(predicted_mu, target_mu)
-    
 # Loss function for the VAE
 def vae_loss(reconstructed_x, x, mu, logvar, feature_split_sizes):
     """
@@ -411,8 +397,8 @@ def generate_data(batch_size, h, w, feature_split_sizes):
     Generates dummy data for testing the TransformerVAE model.
     Data format: (B, H, W, F) where F is sum of feature_split_sizes. Each feature group is one-hot encoded.
     """
-    F = sum(feature_split_sizes)
-    x = torch.zeros(batch_size, h, w, F)
+    f_sum = sum(feature_split_sizes)
+    x = torch.zeros(batch_size, h, w, f_sum)
     
     current_f_offset = 0
     for size in feature_split_sizes:
@@ -449,8 +435,7 @@ if __name__ == '__main__':
     W = args.w       # Map width
     
     # Example: F is composed of a 3-class one-hot vector and a 4-class one-hot vector
-    FEATURE_SPLITS = [3, 4] 
-    F = sum(FEATURE_SPLITS)
+    FEATURE_SPLITS = [3, 4]
     
     # --- Create Dataset ---
     from torch.utils.data import TensorDataset, DataLoader
