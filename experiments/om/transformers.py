@@ -1,10 +1,11 @@
-import re
 from turtle import forward
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
 import numpy as np
+from q_agent import ReplayBuffer
+from simple_foraging_env import RandomAgent
 
 class PositionalEncoding(nn.Module):
     """
@@ -86,6 +87,24 @@ class StateEmbeddings(nn.Module):
 
         # Add positional encoding
         return self.position_encoder(embedded)
+    
+class DiscreteActionEmbedder(nn.Module):
+    """Embeds simple discrete actions into a d_model vector."""
+    def __init__(self, num_actions, d_model):
+        super().__init__()
+        self.embedding = nn.Embedding(num_actions, d_model)
+        self.d_model = d_model
+
+    def forward(self, actions):
+        """
+        Args:
+            actions (Tensor): A tensor of action indices, shape (B,).
+        Returns:
+            Tensor: Embedded actions, shape (B, 1, d_model) ready for sequence concatenation.
+        """
+        # (B,) -> (B, d_model) -> (B, 1, d_model)
+        return self.embedding(actions).unsqueeze(1)
+    
 class ActionEmbeddings(StateEmbeddings):
     """
     Handles embedding of grid-like action tensors.
@@ -100,14 +119,15 @@ class TransformerCVAE(nn.Module):
     Conditional Variational Autoencoder with Transformer architecture.
     The encoder takes both the input state and a conditioning trajectory.
     """
-    def __init__(self, h, w, state_feature_splits, action_feature_splits , latent_dim, d_model=256, nhead=8, num_encoder_layers=6, num_decoder_layers=6, dim_feedforward=1024, dropout=0.1):
+    def __init__(self, h, w, state_feature_splits, num_actions , latent_dim, d_model=256, nhead=8, num_encoder_layers=6, num_decoder_layers=6, dim_feedforward=1024, dropout=0.1):
         super().__init__()
         self.seq_len = h * w
         self.droput = dropout
 
         # --- Feature Embedding ---
         self.state_embedder = StateEmbeddings(h, w, state_feature_splits, d_model, dropout)
-        self.action_embedder = ActionEmbeddings(h, w, action_feature_splits, d_model, dropout)
+        # self.action_embedder = ActionEmbeddings(h, w, action_feature_splits, d_model, dropout)
+        self.action_embedder = DiscreteActionEmbedder(num_actions, d_model)
 
         # --- Encoder ---
         encoder_layer = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, batch_first=True)
@@ -143,15 +163,22 @@ class TransformerCVAE(nn.Module):
             List[Tensor]: A list of embedded tensors forming the history sequence.
         """
         history_embeddings = []
+        if 'actions' not in history or len(history['states']) != len(history['actions']):
+            # If no actions, just use states
+            for s_t in history['states']:
+                history_embeddings.append(self.state_embedder(s_t))
+            return history_embeddings
+
         for i in range(len(history['states'])):
             s_t = history['states'][i]
-            a_t = history['actions'][i]
-            # A_t = history['opp_actions'][i]
+            a_t = history['actions'][i] # (B,) of long integers
 
-            # Embed state and action and add to our history sequence
-            s_t_embedded = self.state_embedder(s_t)
-            a_t_embedded = self.action_embedder(a_t)
-            history_embeddings.extend([s_t_embedded, a_t_embedded])
+            s_t_embedded = self.state_embedder(s_t) # (B, H*W, d_model)
+            a_t_embedded = self.action_embedder(a_t) # (B, 1, d_model)
+            
+            combined_step = torch.cat([s_t_embedded, a_t_embedded], dim=1)
+            history_embeddings.append(combined_step)
+            
         return history_embeddings
 
     def encode(self, x, history):
@@ -359,38 +386,58 @@ def reconstruct_state(reconstructed_state_logits, feature_split_sizes):
     
     return reconstructed_state
 
-# experimental data generation for testing CVAE
-def generate_conditional_data(batch_size, h, w):
-    """
-    Generates a batch of (target, condition) pairs with a learnable rule.
-    - Condition 'c' has one "goal" pixel.
-    - Target 'x' has one "player" pixel near the goal.
-    """
-    # For simplicity, we'll use a single feature plane (F=1)
-    # The concept extends to your multi-feature setup
-    
-    # --- Create the Condition 'c' ---
-    c = torch.zeros(batch_size, h, w, 1)
-    # Pick a random "goal" location for each item in the batch
-    goal_coords_h = torch.randint(0, h, (batch_size,))
-    goal_coords_w = torch.randint(0, w, (batch_size,))
-    # Place the "goal" pixel
-    c[torch.arange(batch_size), goal_coords_h, goal_coords_w, 0] = 1
+def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_epochs=10000, batch_size=32, max_steps=None, logg=100):
+    def collect_single_episode():
+        agent1 = RandomAgent(agent_id=0)
+        agent2 = RandomAgent(agent_id=1)
+        obs = env.reset()
+        done = False
+        step = 0
+        ep_ret = 0.0
 
-    # --- Create the Target 'x' ---
-    x = torch.zeros(batch_size, h, w, 1)
-    # Player position is a small random offset from the goal
-    offset_h = torch.randint(-1, 2, (batch_size,)) # Offset of -1, 0, or 1
-    offset_w = torch.randint(-1, 2, (batch_size,))
+        while not done and (max_steps is None or step < max_steps):
+            a = agent1.select_action(obs[0])
+            a_opponent = agent2.select_action(obs[1])
+            actions = {0: a, 1: a_opponent}
+            next_obs, reward, done, info = env.step(actions)
+
+            # store transition
+            replay.push({
+                "state": obs[0].copy(),
+                "action": a,
+                "reward": float(reward),
+                "next_state": next_obs[0].copy(),
+                "done": bool(done),
+            })
+
+            ep_ret += reward
+            obs = next_obs
+            step += 1
     
-    # Calculate player coordinates and clamp them to stay within the grid
-    player_coords_h = torch.clamp(goal_coords_h + offset_h, 0, h - 1)
-    player_coords_w = torch.clamp(goal_coords_w + offset_w, 0, w - 1)
+    for i in range(num_epochs):
+        # Collect a new episode
+        collect_single_episode()
+
+        # fill the buffer so we can at least sample
+        while (replay.__len__() < batch_size):
+          collect_single_episode()
+
+        # Sample a batch from the replay buffer
+        batch = replay.sample(batch_size)
+        state_batch = torch.from_numpy(np.array([b['state'] for b in batch])).float()  # (B, H, W, F)
+
+        model.train()
+        reconstructed_state, mu, logvar = model(state_batch)
+        loss = vae_loss(reconstructed_state, state_batch, mu, logvar, model.embedd.feature_split_sizes)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        if (i + 1) % logg == 0:
+            print(f"Epoch {i+1}/{num_epochs}, Loss: {loss.item()}")
     
-    # Place the "player" pixel
-    x[torch.arange(batch_size), player_coords_h, player_coords_w, 0] = 1
-    
-    return x, c
+    return model
 
 def generate_data(batch_size, h, w, feature_split_sizes):
     """
