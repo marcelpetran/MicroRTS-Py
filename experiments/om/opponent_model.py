@@ -1,13 +1,12 @@
-import re
-import tranformers as t
+import experiments.om.transformers as t
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
 class SubGoalSelector:
-    def __init__(self):
-        pass
+    def __init__(self, args):
+        self.args = args
     
     def gumbel_max_sample(self, logits):
         """
@@ -18,8 +17,10 @@ class SubGoalSelector:
             int: Index of the sampled category.
         """
         gumbel_noise = -torch.log(-torch.log(torch.rand_like(logits)))
-        # return torch.argmax(logits + gumbel_noise)
-        return torch.argmin(logits + gumbel_noise)  # for argmin
+        if self.args.selector_mode == "optimistic":
+            return torch.argmax(logits + gumbel_noise)
+        elif self.args.selector_mode == "conservative":
+            return torch.argmin(logits + gumbel_noise)
     
     def select(self, vae, eval_policy, s_t: torch.Tensor, future_states: torch.Tensor):
         """
@@ -34,12 +35,27 @@ class SubGoalSelector:
         Returns:
             Tensor: latent subgoal of shape (latent_dim)
         """
-        self.vae.eval()
+        vae.eval()
         with torch.no_grad():
-            mu, _ = self.vae.encode(future_states)
-            values = eval_policy.q_value(s_t, mu) # TODO: when policy is implemented, check compatibility
+            if future_states.dim() == 5: # (B, K, H, W, F)
+                future_states = future_states.squeeze(0) # Assume B=1 for selection
+
+            mu, _ = self.vae.encode(future_states) # (K, g_dim)
+            #  The policy expects a batch dim for state and subgoal
+            # The policy expects a batch dim for state and subgoal
+            s_t_batch = s_t if s_t.dim() == 4 else s_t.unsqueeze(0) # (1, H, W, F)
+            mu_batch = mu.unsqueeze(0) # (1, K, g_dim)
+            
+            # The Q-net needs to broadcast s_t over all K subgoals
+            # s_t: (1, 1, D_s), mu: (1, K, D_g) -> Q(1, K, A)
+            s_t_expanded = s_t_batch.repeat(1, mu.shape[0], 1, 1, 1).view(-1, *s_t.shape[1:])
+            mu_expanded = mu_batch.view(-1, mu.shape[-1])
+            
+            values_flat = eval_policy.value(s_t_expanded, mu_expanded) # (K, A)
+            values = values_flat.mean(dim=-1) # V(s,g) = mean_a Q(s,g,a)
+
             # Gumbel-max trick for differentiable argmin
-            best_idx = self.gumbel_max_sample(-values.squeeze(0))
+            best_idx = self.gumbel_max_sample(values)
             best_future_state = future_states[best_idx].unsqueeze(0)
             subgoal, vae_log_var = vae.encode(best_future_state)
         return subgoal, vae_log_var
@@ -47,7 +63,7 @@ class SubGoalSelector:
 class OpponentModel:
     def __init__(self, cvae: t.TransformerCVAE, vae: t.TransformerVAE, selector: SubGoalSelector, optimizer, device, args):
         self.inference_model = cvae
-        self.prior_model = vae # The pre-trained "teacher" VAE
+        self.prior_model = vae # The pre-trained VAE
         self.subgoal_selector = selector
         self.optimizer = optimizer
         self.device = device
@@ -80,7 +96,7 @@ class OpponentModel:
         """
         # --- 1. Reconstruction Loss ---
         # This part trains the CVAE's decoder
-        # This forces the CVAE to faithfully represent the current state
+        # This forces the CVAE to represent the current state
         recon_loss = 0
         recon_flat = reconstructed_x.view(-1, sum(self.args.state_feature_splits))
         x_flat = x.view(-1, sum(self.args.state_feature_splits))
@@ -125,9 +141,9 @@ class OpponentModel:
             float: The computed loss for the batch.
         """
         # Unpack the batch from the replay buffer
-        states = batch['state'].to(self.device)
-        history = {k: [item.to(self.device) for item in v] for k, v in batch['history'].items()}
-        future_states = batch['future_states'].to(self.device)
+        states = batch['state'].to(self.device) # (B, T, H, W, F)
+        history = batch['history']  # A dict of state/action lists up to s_t-1
+        future_states = batch['future_states'].to(self.device) # (B, K, H, W, F)
         infer_mu = batch['infer_mu'].to(self.device)
         infer_log_var = batch['infer_log_var'].to(self.device)
         
