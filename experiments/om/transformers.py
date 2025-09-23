@@ -411,12 +411,12 @@ def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_e
             replay.push({
                 "state": obs[0].copy(),
                 "action": a,
-                "reward": float(reward),
+                "reward": float(reward[0]),
                 "next_state": next_obs[0].copy(),
                 "done": bool(done),
             })
 
-            ep_ret += reward
+            ep_ret += reward[0]
             obs = next_obs
             step += 1
     

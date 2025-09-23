@@ -326,7 +326,7 @@ class QLearningAgent:
             step_info = {
                 "state": obs[0].copy(),
                 "action": a,
-                "reward": float(reward),
+                "reward": float(reward[0]),
                 "next_state": next_obs[0].copy(),
                 "done": bool(done),
                 "infer_mu": ghat_mu.detach().cpu(),
