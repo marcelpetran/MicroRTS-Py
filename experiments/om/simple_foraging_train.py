@@ -13,35 +13,41 @@ H, W, F = obs_sample[0].shape
 NUM_ACTIONS = 4 # Up, Down, Left, Right
 
 args = OMGArgs(
+    batch_size=16,
+    capacity=100_000,
     horizon_H=3,
     selector_mode="conservative",
-    state_feature_splits=(F,),
-    g_dim=16, # Latent dimension
     alpha=0.1, # Weight for the KL loss
-    eta=1.0, # Starting value for eta (will anneal in agent)
+    state_shape=obs_sample[0].shape,
+    H=H, W=W,
+    state_feature_splits=(F,),
+    action_dim=NUM_ACTIONS,
+    latent_dim=8,
+    d_model=128,
+    nhead=2,
+    num_encoder_layers=2,
+    num_decoder_layers=2,
+    dim_feedforward=512,
+    dropout=0.1
 )
 
 # VAE (Teacher)
-vae = t.TransformerVAE(
-    h=H, w=W, feature_split_sizes=args.state_feature_splits,
-    latent_dim=args.g_dim, d_model=64, nhead=4, num_encoder_layers=2,
-    num_decoder_layers=2, dim_feedforward=128, dropout=0.1
-).to(device)
+vae = t.TransformerVAE(args).to(device)
 
 # CVAE (Student)
-cvae = t.TransformerCVAE(
-    h=H, w=W, state_feature_splits=args.state_feature_splits,
-    num_actions=NUM_ACTIONS, latent_dim=args.g_dim, d_model=64, nhead=4,
-    num_encoder_layers=2, num_decoder_layers=2, dim_feedforward=128, dropout=0.1
-).to(device)
+cvae = t.TransformerCVAE(args).to(device)
 
 # --- Pre-train the VAE ---
-print("Pre-training VAE...")
-vae_optimizer = torch.optim.Adam(vae.parameters(), lr=1e-3)
-vae_replay = ReplayBuffer(10000)
+if args.train_vae:
+  print("Pre-training VAE...")
+  vae_optimizer = torch.optim.Adam(vae.parameters(), lr=1e-3)
+  vae_replay = ReplayBuffer(10_000)
 
-t.train_vae(env, vae, vae_replay, vae_optimizer, num_epochs=5000)
-print("VAE pre-training complete.")
+  t.train_vae(env, vae, vae_replay, vae_optimizer, num_epochs=5_000_000, save_every_n_epochs=100_000, batch_size=16, max_steps=50, logg=1_000)
+  print("VAE pre-training complete.")
+else:
+  vae.load_state_dict(torch.load("./trained_VAE/vae_simple_foraging.pth", map_location=device))
+  print("Loaded pre-trained VAE.")
 
 selector = SubGoalSelector(args)
 cvae_optimizer = torch.optim.Adam(cvae.parameters(), lr=3e-4)

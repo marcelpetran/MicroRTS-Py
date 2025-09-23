@@ -36,51 +36,55 @@ class OMGArgs:
 
     # OMG-specific
     gmix_eps_start: float = 1.0      # Eq.(8): start using mostly g_bar
-    gmix_eps_end: float = 0.0        # anneal to 0 -> use g_hat only
+    gmix_eps_end: float = 0.0        # goes to 0 -> use g_hat only
     gmix_eps_decay_steps: int = 50_000
     horizon_H: int = 3
     selector_mode: str = "conservative"  # "conservative" => Eq.(7), "optimistic" => Eq.(6)
+    train_vae: bool = False
 
-    # State & model dims (set from env/opponent model)
-    state_shape: Tuple[int, int, int] = None  # (H, W, F)
-    g_dim: int = 32
-    action_dim: int = 5
-
-    # OpponentModel/Transformer training coefficients expected by your code
+    # Transformer architecture params
     alpha: float = 1.0
-    # feature splits for your one-hot channel groups (if your CVAE/VAE use them)
+    state_shape: Tuple[int, int, int] = None  # (H, W, F)
+    H: int = 5 # grid height
+    W: int = 5 # grid width
     state_feature_splits: Tuple[int, ...] = ()
-
-
+    action_dim: int = None                          # for DiscreteActionEmbedder - !at least one mustn't be None!
+    action_feature_splits: Tuple[int, ...] = None   # for ActionEmbeddings - !at least one mustn't be None!
+    latent_dim: int = 32
+    d_model: int = 256
+    nhead: int = 8
+    num_encoder_layers: int = 6
+    num_decoder_layers: int = 6
+    dim_feedforward: int = 1024
+    dropout: float = 0.1
 
 class QNet(nn.Module):
     """
     Simple MLP Q-network for Q(s, g, a)
     state_shape: (H, W, F)
-    g_dim: dimension of latent opponent representation
+    latent_dim: dimension of latent opponent representation
     action_dim: number of discrete actions
     Returns Q-values for all actions.
     """
-    def __init__(self, state_shape: Tuple[int, int, int], g_dim: int, action_dim: int):
+    def __init__(self, state_shape: Tuple[int, int, int], latent_dim: int, action_dim: int):
         super().__init__()
         H, W, F_dim = state_shape
         self.state_dim = H * W * F_dim
-        self.g_dim = g_dim
+        self.latent_dim = latent_dim
         self.action_dim = action_dim
 
         hidden = 256
         self.net = nn.Sequential(
-            nn.Linear(self.state_dim + g_dim, hidden),
+            nn.Linear(self.state_dim + latent_dim, hidden),
             nn.ReLU(),
             nn.Linear(hidden, hidden),
             nn.ReLU(),
             nn.Linear(hidden, action_dim),
         )
 
-    def forward(self, state_bchw: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
-        # state_bchw: (B, H, W, F) float
-        B, H, W, F_dim = state_bchw.shape
-        s = state_bchw.view(B, H * W * F_dim)
+    def forward(self, batch: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
+        B, H, W, F_dim = batch.shape # (B, H, W, F) float
+        s = batch.view(B, H * W * F_dim)
         x = torch.cat([s, g], dim=-1)
         return self.net(x)  # (B, A)
 
@@ -135,8 +139,8 @@ class QLearningAgent:
         self.args.action_dim = len(self.env.action_space) if hasattr(self.env.action_space, "__len__") else int(self.env.action_space)
 
         # Networks
-        self.q = QNet(self.args.state_shape, self.args.g_dim, self.args.action_dim).to(self.device)
-        self.q_tgt = QNet(self.args.state_shape, self.args.g_dim, self.args.action_dim).to(self.device)
+        self.q = QNet(self.args.state_shape, self.args.latent_dim, self.args.action_dim).to(self.device)
+        self.q_tgt = QNet(self.args.state_shape, self.args.latent_dim, self.args.action_dim).to(self.device)
         self.q_tgt.load_state_dict(self.q.state_dict())
         self.opt = torch.optim.Adam(self.q.parameters(), lr=self.args.lr)
 
@@ -161,7 +165,7 @@ class QLearningAgent:
     @torch.no_grad()
     def value(self, s_t: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
         """
-        s_t: (1, H, W, F), g: (1, g_dim) -> Q(1, A)
+        s_t: (1, H, W, F), g: (1, latent_dim) -> Q(1, A)
         used by subgoal selector to compute V(s,g) = mean_a Q(s,g,a)
         """
         self.q.eval()

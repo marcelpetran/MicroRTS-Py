@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 import numpy as np
-from q_agent import ReplayBuffer
+from q_agent import ReplayBuffer, OMGArgs
 from simple_foraging_env import RandomAgent
 
 class PositionalEncoding(nn.Module):
@@ -119,31 +119,36 @@ class TransformerCVAE(nn.Module):
     Conditional Variational Autoencoder with Transformer architecture.
     The encoder takes both the input state and a conditioning trajectory.
     """
-    def __init__(self, h, w, state_feature_splits, num_actions , latent_dim, d_model=256, nhead=8, num_encoder_layers=6, num_decoder_layers=6, dim_feedforward=1024, dropout=0.1):
+    def __init__(self, args: OMGArgs):
         super().__init__()
-        self.seq_len = h * w
-        self.droput = dropout
+        self.seq_len = args.H * args.W
+        self.droput = args.dropout
+        self.args = args
 
         # --- Feature Embedding ---
-        self.state_embedder = StateEmbeddings(h, w, state_feature_splits, d_model, dropout)
-        # self.action_embedder = ActionEmbeddings(h, w, action_feature_splits, d_model, dropout)
-        self.action_embedder = DiscreteActionEmbedder(num_actions, d_model)
+        self.state_embedder = StateEmbeddings(args.H, args.W, args.state_feature_splits, args.d_model, args.dropout)
+        if args.action_dim is None:
+          if args.action_feature_splits is None:
+            raise ValueError("Either action_dim or action_feature_splits must be provided.")
+          self.action_embedder = ActionEmbeddings(args.H, args.W, args.action_feature_splits, args.d_model, args.dropout)
+        else:
+          self.action_embedder = DiscreteActionEmbedder(args.action_dim, args.d_model)
 
         # --- Encoder ---
-        encoder_layer = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, batch_first=True)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_encoder_layers)
-        self.fc_mu = nn.Linear(d_model, latent_dim)
-        self.fc_logvar = nn.Linear(d_model, latent_dim)
+        encoder_layer = nn.TransformerEncoderLayer(args.d_model, args.nhead, args.dim_feedforward, batch_first=True)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, args.num_encoder_layers)
+        self.fc_mu = nn.Linear(args.d_model, args.latent_dim)
+        self.fc_logvar = nn.Linear(args.d_model, args.latent_dim)
 
         # --- Decoder ---
-        self.latent_to_decoder_input = nn.Linear(latent_dim, self.seq_len * d_model)
-        self.decoder_pos_encoder = PositionalEncoding(d_model, seq_len=self.seq_len, dropout=self.droput)
-        decoder_layer = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward, batch_first=True)
-        self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_decoder_layers)
+        self.latent_to_decoder_input = nn.Linear(args.latent_dim, self.seq_len * args.d_model)
+        self.decoder_pos_encoder = PositionalEncoding(args.d_model, seq_len=self.seq_len, dropout=self.droput)
+        decoder_layer = nn.TransformerDecoderLayer(args.d_model, args.nhead, args.dim_feedforward, batch_first=True)
+        self.transformer_decoder = nn.TransformerDecoder(decoder_layer, args.num_decoder_layers)
         
         # --- Output Projection ---
         self.output_projectors = nn.ModuleList([
-            nn.Linear(d_model, size) for size in state_feature_splits
+            nn.Linear(args.d_model, size) for size in args.state_feature_splits
         ])
 
         # Set xavier initialization for all linear layers
@@ -254,33 +259,34 @@ class TransformerCVAE(nn.Module):
         return reconstructed_x, mu, logvar
 
 class TransformerVAE(nn.Module):
-    def __init__(self, h, w, feature_split_sizes, latent_dim, d_model=256, nhead=8, num_encoder_layers=6, num_decoder_layers=6, dim_feedforward=1024, dropout=0.1):
+    def __init__(self, args: OMGArgs):
         super().__init__()
-        self.seq_len = h * w
-        self.dropout = dropout
+        self.seq_len = args.H * args.W
+        self.dropout = args.dropout
+        self.args = args
 
         # --- Feature Embedding ---
-        self.embedd = StateEmbeddings(h, w, feature_split_sizes, d_model, dropout)
+        self.embedd = StateEmbeddings(args.H, args.W, args.state_feature_splits, args.d_model, args.dropout)
 
         # --- Encoder ---
-        encoder_layer = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, batch_first=True)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_encoder_layers)
-        self.fc_mu = nn.Linear(d_model, latent_dim)
-        self.fc_logvar = nn.Linear(d_model, latent_dim)
+        encoder_layer = nn.TransformerEncoderLayer(args.d_model, args.nhead, args.dim_feedforward, batch_first=True)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, args.num_encoder_layers)
+        self.fc_mu = nn.Linear(args.d_model, args.latent_dim)
+        self.fc_logvar = nn.Linear(args.d_model, args.latent_dim)
 
         # --- Decoder ---
-        self.latent_to_decoder_input = nn.Linear(latent_dim, self.seq_len * d_model)
-        self.decoder_pos_encoder = PositionalEncoding(d_model, seq_len=self.seq_len, dropout=self.dropout)
+        self.latent_to_decoder_input = nn.Linear(args.latent_dim, self.seq_len * args.d_model)
+        self.decoder_pos_encoder = PositionalEncoding(args.d_model, seq_len=self.seq_len, dropout=self.dropout)
         # In a VAE, we don't have a memory sequence to attend to
-        # we only have the latent vector z to reconstruct from
+        # we only have the latent vector z to reconstruct from.
         # TransformerEncoder is simply a stack of self-attention blocks
         # which is exactly what we need to reconstruct a sequence from a starting point
-        decoder_layer = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, batch_first=True)
-        self.transformer_decoder = nn.TransformerEncoder(decoder_layer, num_decoder_layers)
+        decoder_layer = nn.TransformerEncoderLayer(args.d_model, args.nhead, args.dim_feedforward, batch_first=True)
+        self.transformer_decoder = nn.TransformerEncoder(decoder_layer, args.num_decoder_layers)
         
         # --- Output Projection ---
         self.output_projectors = nn.ModuleList([
-            nn.Linear(d_model, size) for size in feature_split_sizes
+            nn.Linear(args.d_model, size) for size in args.state_feature_splits
         ])
 
         # set xavier initialization for all linear layers
