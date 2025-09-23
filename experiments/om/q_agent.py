@@ -275,10 +275,12 @@ class QLearningAgent:
             "infer_mu": torch.stack([b["infer_mu"] for b in batch_list], dim=0),
             "infer_log_var": torch.stack([b["infer_log_var"] for b in batch_list], dim=0),
         }
-        _ = self.model.train_step(om_batch, self)
+        model_loss = self.model.train_step(om_batch, self)
 
         if self.global_step % self.args.target_update_every == 0:
             self.q_tgt.load_state_dict(self.q.state_dict())
+        
+        return loss.item(), model_loss
     
     def _collate_history(self, histories: List[Dict]) -> Dict[str, List[torch.Tensor]]:
       """Helper to batch histories for the CVAE."""
@@ -346,12 +348,15 @@ class QLearningAgent:
             history["states"].append(torch.from_numpy(obs[0]).float())
             history["actions"].append(torch.tensor(a, dtype=torch.long))
 
-            ep_ret += reward
+            ep_ret += reward[0]
             obs = next_obs
 
             self.global_step += 1
-            self.update()
-
+            Q_loss, model_loss = self.update()
+            
+            if Q_loss is not None and model_loss is not None and step % 100 == 0:
+                print(f"Step {self.global_step}: Q_loss={Q_loss:.4f}, Model_loss={model_loss:.4f}, Eps={self._eps():.3f}, Gmix_eps={self._gmix_eps():.3f}")
+            
             if done:
                 break
         
