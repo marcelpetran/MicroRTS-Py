@@ -55,7 +55,7 @@ cvae_optimizer = torch.optim.Adam(cvae.parameters(), lr=3e-4)
 op_model = OpponentModel(cvae, vae, selector, optimizer=cvae_optimizer, device=device, args=args)
 agent = QLearningAgent(env, op_model, device=device, args=args)
 
-for ep in range(10000):
+for ep in range(10_000):
     stats = agent.run_episode(max_steps=50)
     if ep % 50 == 0:
         print(f"Episode {ep}: Return={stats['return']:.2f}, Steps={stats['steps']}")

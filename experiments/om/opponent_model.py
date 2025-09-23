@@ -21,6 +21,8 @@ class SubGoalSelector:
             return torch.argmax(logits + gumbel_noise)
         elif self.args.selector_mode == "conservative":
             return torch.argmin(logits + gumbel_noise)
+        else:
+            raise ValueError(f"Unknown selector_mode: {self.args.selector_mode},\nchoose from ['optimistic', 'conservative']")
     
     def select(self, vae, eval_policy, s_t: torch.Tensor, future_states: torch.Tensor):
         """
@@ -31,7 +33,7 @@ class SubGoalSelector:
             vae (VAE): Pre-trained VAE model
             policy (Policy): Policy model with Q-value function
             s_t (Tensor): Current state of shape (1, H, W, F)
-            future_states (Tensor): Future states of shape (K, H, W, F)
+            future_states (Tensor): Future states of shape (K, H, W, F) - K is the horizon
         Returns:
             Tensor: latent subgoal of shape (latent_dim)
         """

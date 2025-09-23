@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from re import T
 from typing import Deque, Dict, List, Tuple, Optional
 import random
 from collections import deque
@@ -25,7 +26,7 @@ def flatten_state(obs: np.ndarray) -> torch.Tensor:
 class OMGArgs:
     gamma: float = 0.99
     lr: float = 2.5e-4
-    batch_size: int = 64
+    batch_size: int = 16
     capacity: int = 50_000
     min_replay: int = 1_000
     train_every: int = 4
@@ -126,7 +127,7 @@ class QLearningAgent:
         self.model = opponent_model
         self.args = args
         self.device = torch.device(device)
-        self.opponent_agent = SimpleAgent()
+        self.opponent_agent = SimpleAgent(1)
 
         # Try to infer dims from env
         if args.state_shape is None:
@@ -183,12 +184,12 @@ class QLearningAgent:
         return mu, logvar
 
     @torch.no_grad()
-    def _select_gbar(self, s_t: np.ndarray, future_states_hwf: np.ndarray) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _select_gbar(self, s_t: np.ndarray, future_states: np.ndarray) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Uses SubGoalSelector over H future states. Returns (mu, logvar) for g_bar
         """
-        x = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)                # (1,H,W,F)
-        futures = torch.from_numpy(future_states_hwf).float().to(self.device)         # (H,H,W,F) or (K,H,W,F)
+        x = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)    # (1,H,W,F)
+        futures = torch.from_numpy(future_states).float().to(self.device) # (K,H,W,F)
         mu, logvar = self.model.subgoal_selector.select(self.model.prior_model, self, x, futures)
         return mu, logvar
 
@@ -199,12 +200,12 @@ class QLearningAgent:
             return random.randrange(self.args.action_dim) # TODO: for more complex action spaces, adapt this
         return int(torch.argmax(qvals, dim=-1).item())
 
-    def select_action(self, state_hwf: np.ndarray, history: Dict[str, List[torch.Tensor]]) -> Tuple[int, torch.Tensor]:
+    def select_action(self, s_t: np.ndarray, history: Dict[str, List[torch.Tensor]]) -> Tuple[int, torch.Tensor]:
         """
         (interaction phase) Infer g_hat and act eps-greedily on Q(s,g_hat,*)
         """
-        ghat_mu, ghat_logvar = self._infer_ghat(state_hwf, history)  # (1, g_dim)
-        s = torch.from_numpy(state_hwf).float().unsqueeze(0).to(self.device)
+        ghat_mu, ghat_logvar = self._infer_ghat(s_t, history)  # (1, latent_dim)
+        s = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
         qvals = self.q(s, ghat_mu)
         a = self._choose_action(qvals, self._eps())
         return a, ghat_mu.squeeze(0), ghat_logvar.squeeze(0)
@@ -221,25 +222,25 @@ class QLearningAgent:
         # Stack current/next states
         s = torch.stack([torch.from_numpy(b["state"]).float() for b in batch], dim=0).to(self.device)         # (B,H,W,F)
         sp = torch.stack([torch.from_numpy(b["next_state"]).float() for b in batch], dim=0).to(self.device)   # (B,H,W,F)
-        a = torch.tensor([b["action"] for b in batch], dtype=torch.long, device=self.device)                   # (B,)
-        r = torch.tensor([b["reward"] for b in batch], dtype=torch.float32, device=self.device)                # (B,)
-        done = torch.tensor([b["done"] for b in batch], dtype=torch.float32, device=self.device)               # (B,)
+        a = torch.tensor([b["action"] for b in batch], dtype=torch.long, device=self.device)                  # (B,)
+        r = torch.tensor([b["reward"] for b in batch], dtype=torch.float32, device=self.device)               # (B,)
+        done = torch.tensor([b["done"] for b in batch], dtype=torch.float32, device=self.device)              # (B,)
 
         # Prepare g_hat (from stored inference) and g_bar (from selector over future window)
-        ghat_mu = torch.stack([b["ghat_mu"] for b in batch], dim=0).to(self.device)                            # (B,g)
+        ghat_mu = torch.stack([b["ghat_mu"] for b in batch], dim=0).to(self.device)                           # (B,g)
         gbar_mu = []
         for b in batch:
             # Shape (K,H,W,F) for next few steps (collected during rollout)
             futures = np.stack(b["future_states"], axis=0) if b["future_states"] else np.zeros((1, H, W, F_dim), dtype=np.float32)
             mu, _ = self._select_gbar(b["state"], futures)
             gbar_mu.append(mu.squeeze(0))
-        gbar_mu = torch.stack(gbar_mu, dim=0)                                                                  # (B,g)
+        gbar_mu = torch.stack(gbar_mu, dim=0)                         # (B,g)
 
         # Eq.(8): gt = g_hay if eta > eps_gmix else g_bar
         eps_gmix = self._gmix_eps()
         eta = torch.rand(B, device=self.device)
         use_ghat = (eta > eps_gmix).float().unsqueeze(-1)
-        g_mix = use_ghat * ghat_mu + (1 - use_ghat) * gbar_mu                                                  # (B,g)
+        g_mix = use_ghat * ghat_mu + (1 - use_ghat) * gbar_mu         # (B,g)
 
         # Q(s,g,a) and target r + gamma * max_{a'} Q(s',g,a')  (same g)
         q_sa = self.q(s, g_mix).gather(1, a.view(-1, 1)).squeeze(1)
