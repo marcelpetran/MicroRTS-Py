@@ -70,13 +70,13 @@ class OpponentModel:
         self.args = args
         self.mse_loss = nn.MSELoss()
     
-    def reconstruct_state(reconstructed_state_logits, feature_split_sizes):
+    def reconstruct_state(reconstructed_state_logits, state_feature_splits):
       """
       Convert the reconstructed logit tensor back to one-hot encoded state.
       """
       reconstructed_state = torch.zeros_like(reconstructed_state_logits, device=reconstructed_state_logits.device)
       start_idx = 0
-      for size in feature_split_sizes:
+      for size in state_feature_splits:
           end_idx = start_idx + size
           # Apply softmax to the logits to get probabilities
           probs = F.softmax(reconstructed_state_logits[:, :, :, start_idx:end_idx], dim=-1)

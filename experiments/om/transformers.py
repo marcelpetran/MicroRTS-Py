@@ -47,18 +47,18 @@ class StateEmbeddings(nn.Module):
     It takes the (B, H, W, F) tensor, flattens it, embeds each feature group,
     sums them, and adds positional encoding.
     """
-    def __init__(self, h, w, feature_split_sizes, d_model, dropout):
+    def __init__(self, h, w, state_feature_splits, d_model, dropout):
         super().__init__()
         self.h = h
         self.w = w
         self.seq_len = h * w
-        self.feature_split_sizes = feature_split_sizes
+        self.state_feature_splits = state_feature_splits
         self.d_model = d_model
         self.dropout = dropout
 
         # Create a separate linear layer for each one-hot feature group
         self.feature_embedders = nn.ModuleList([
-            nn.Linear(size, d_model, bias=False) for size in feature_split_sizes
+            nn.Linear(size, d_model, bias=False) for size in state_feature_splits
         ])
 
         # Positional encoding
@@ -77,7 +77,7 @@ class StateEmbeddings(nn.Module):
         state_flat = state_tensor.view(B, self.seq_len, -1)
         
         # Split the features along the last dimension
-        split_features = torch.split(state_flat, self.feature_split_sizes, dim=-1)
+        split_features = torch.split(state_flat, self.state_feature_splits, dim=-1)
         
         # Embed each feature group and sum them up.
         # We initialize with zeros and add each embedding.
@@ -331,7 +331,7 @@ class TransformerVAE(nn.Module):
         return reconstructed_x, mu, logvar
     
 # Loss function for the VAE
-def vae_loss(reconstructed_x, x, mu, logvar, feature_split_sizes):
+def vae_loss(reconstructed_x, x, mu, logvar, state_feature_splits):
     """
     Loss function for VAE combining reconstruction loss and KL divergence.
     Args:
@@ -339,7 +339,7 @@ def vae_loss(reconstructed_x, x, mu, logvar, feature_split_sizes):
         x (Tensor): Original input state of shape (B, H, W, F)
         mu (Tensor): Mean of the latent distribution (B, latent_dim)
         logvar (Tensor): Log-variance of the latent distribution (B, latent_dim)
-        feature_split_sizes (List[int]): List of sizes for each one-hot feature group.
+        state_feature_splits (List[int]): List of sizes for each one-hot feature group.
     Returns:
         Tensor: Computed VAE loss.
     """
@@ -349,13 +349,13 @@ def vae_loss(reconstructed_x, x, mu, logvar, feature_split_sizes):
     recon_loss = 0
     
     # Flatten inputs for easier loss calculation
-    recon_flat = reconstructed_x.view(-1, sum(feature_split_sizes))
-    x_flat = x.view(-1, sum(feature_split_sizes))
+    recon_flat = reconstructed_x.view(-1, sum(state_feature_splits))
+    x_flat = x.view(-1, sum(state_feature_splits))
     
     # Calculate loss for each feature group separately and sum them up
     # This is more stable than calculating on the concatenated tensor
-    x_split = torch.split(x_flat, feature_split_sizes, dim=-1)
-    recon_split = torch.split(recon_flat, feature_split_sizes, dim=-1)
+    x_split = torch.split(x_flat, state_feature_splits, dim=-1)
+    recon_split = torch.split(recon_flat, state_feature_splits, dim=-1)
     
     for recon_group, x_group in zip(recon_split, x_split):
         recon_loss += F.binary_cross_entropy_with_logits(recon_group, x_group, reduction='sum')
@@ -366,13 +366,13 @@ def vae_loss(reconstructed_x, x, mu, logvar, feature_split_sizes):
     
     return recon_loss + kld_loss
 
-def reconstruct_state(reconstructed_state_logits, feature_split_sizes):
+def reconstruct_state(reconstructed_state_logits, state_feature_splits):
     """
     Convert the reconstructed logit tensor back to one-hot encoded state.
     """
     reconstructed_state = torch.zeros_like(reconstructed_state_logits, device=reconstructed_state_logits.device)
     start_idx = 0
-    for size in feature_split_sizes:
+    for size in state_feature_splits:
         end_idx = start_idx + size
         # Apply softmax to the logits to get probabilities
         probs = F.softmax(reconstructed_state_logits[:, :, :, start_idx:end_idx], dim=-1)
@@ -428,7 +428,7 @@ def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_e
 
         model.train()
         reconstructed_state, mu, logvar = model(state_batch)
-        loss = vae_loss(reconstructed_state, state_batch, mu, logvar, model.embedd.feature_split_sizes)
+        loss = vae_loss(reconstructed_state, state_batch, mu, logvar, model.embedd.state_feature_splits)
 
         optimizer.zero_grad()
         loss.backward()
@@ -497,7 +497,7 @@ if __name__ == '__main__':
     model = TransformerVAE(
         h=H,
         w=W,
-        feature_split_sizes=FEATURE_SPLITS,
+        state_feature_splits=FEATURE_SPLITS,
         latent_dim=args.latent_dim,
         d_model=args.d_model,
         nhead=args.nhead,
