@@ -392,7 +392,7 @@ def reconstruct_state(reconstructed_state_logits, state_feature_splits):
     
     return reconstructed_state
 
-def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_epochs=10000, batch_size=32, max_steps=None, logg=100):
+def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_epochs=10000, save_every_n_epochs=1000, batch_size=32, max_steps=None, logg=100):
     def collect_single_episode():
         agent1 = RandomAgent(agent_id=0)
         agent2 = RandomAgent(agent_id=1)
@@ -442,19 +442,23 @@ def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_e
 
         if (i + 1) % logg == 0:
             print(f"Epoch {i+1}/{num_epochs}, Loss: {loss.item()}")
+        
+        if (i + 1) % save_every_n_epochs == 0:
+            torch.save(model.state_dict(), f"Trained_VAE/transformer_vae_epoch_{i+1}.pth")
+            print(f"Model saved at epoch {i+1}")
     
     return model
 
-def generate_data(batch_size, h, w, feature_split_sizes):
+def generate_data(batch_size, h, w, state_feature_splits):
     """
     Generates dummy data for testing the TransformerVAE model.
-    Data format: (B, H, W, F) where F is sum of feature_split_sizes. Each feature group is one-hot encoded.
+    Data format: (B, H, W, F) where F is sum of state_feature_splits. Each feature group is one-hot encoded.
     """
-    f_sum = sum(feature_split_sizes)
+    f_sum = sum(state_feature_splits)
     x = torch.zeros(batch_size, h, w, f_sum)
     
     current_f_offset = 0
-    for size in feature_split_sizes:
+    for size in state_feature_splits:
         # For each pixel, choose a random index within this feature group
         indices = torch.randint(0, size, (batch_size, h, w, 1))
         # Place 1 at that random index
