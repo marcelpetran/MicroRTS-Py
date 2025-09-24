@@ -176,7 +176,13 @@ class OpponentModel:
 
     self.inference_model.train()
     self.optimizer.zero_grad()
-
+    # transformers.py, line 321, in forward
+    #   mu, logvar = self.encode(x, history)
+    # File transformers.py, line 265, in encode
+    #   combined_seq = torch.cat([x_embedded, condition_seq], dim=1)
+    # Sizes of tensors must match except in dimension 1. Expected size 4 but got size 1 for tensor number 1 in the list.
+    # this happens when history is empty
+    # TODO: fix this properly
     reconstructed_x, cvae_mu, cvae_log_var = self.inference_model(x, history)
 
     with torch.no_grad():
