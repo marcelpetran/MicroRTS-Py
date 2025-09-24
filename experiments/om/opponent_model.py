@@ -115,6 +115,8 @@ class OpponentModel:
     # This part trains the CVAE's decoder
     # This forces the CVAE to represent the current state
     recon_loss = 0
+    batch_size = x.shape[0]
+
     recon_flat = reconstructed_x.view(-1, sum(self.args.state_feature_splits))
     x_flat = x.view(-1, sum(self.args.state_feature_splits))
 
@@ -143,7 +145,7 @@ class OpponentModel:
                                 dim=-1)
 
     # The final loss is a weighted sum of reconstruction and inference loss
-    total_loss = recon_loss.mean() + self.args.alpha * omg_loss.mean()
+    total_loss = (recon_loss / batch_size).mean() + self.args.alpha * omg_loss.mean()
     return total_loss
 
   def train_step(self, batch, eval_policy):

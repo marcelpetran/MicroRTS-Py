@@ -431,6 +431,8 @@ def vae_loss(reconstructed_x, x, mu, logvar, state_feature_splits):
   # as it's suitable for multi-label classification style outputs
   recon_loss = 0
 
+  batch_size = x.shape[0]
+
   # Flatten inputs for easier loss calculation
   recon_flat = reconstructed_x.view(-1, sum(state_feature_splits))
   x_flat = x.view(-1, sum(state_feature_splits))
@@ -448,7 +450,7 @@ def vae_loss(reconstructed_x, x, mu, logvar, state_feature_splits):
   # -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
   kld_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
-  return recon_loss + kld_loss
+  return recon_loss / batch_size + 0.002 * kld_loss
 
 
 def reconstruct_state(reconstructed_state_logits, state_feature_splits):
