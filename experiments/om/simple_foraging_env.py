@@ -91,6 +91,29 @@ class SimpleForagingEnv:
         # obs, rewards, done, info
         return self._get_observations(), rewards, self._check_terminal(), {}
     
+    @staticmethod
+    def render_from_obs(obs):
+        """
+        Render the grid from the observation
+        'F' = food
+        'A' = agent 1
+        'B' = agent 2
+        '.' = empty
+        """
+        grid_size = obs.shape[0]
+        render_grid = np.full((grid_size, grid_size), '.', dtype=str)
+        for i in range(grid_size):
+            for j in range(grid_size):
+                if obs[i, j, 1] == 1:
+                    render_grid[i, j] = 'F'  # Food
+                if obs[i, j, 2] == 1:
+                    render_grid[i, j] = 'A'  # Agent 1
+                if obs[i, j, 3] == 1:
+                    render_grid[i, j] = 'B'  # Agent 2
+        for row in render_grid:
+            print(' '.join(row))
+        print()
+    
 class RandomAgent:
     def __init__(self, agent_id):
         self.agent_id = agent_id
