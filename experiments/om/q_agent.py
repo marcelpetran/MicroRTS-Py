@@ -3,7 +3,7 @@ from re import T
 from typing import Deque, Dict, List, Tuple, Optional
 import random
 from collections import deque
-from simple_foraging_env import SimpleAgent # opponent agent for simple foraging env
+from simple_foraging_env import SimpleAgent, SimpleForagingEnv
 
 import numpy as np
 import torch
@@ -233,7 +233,7 @@ class QLearningAgent:
         done = torch.tensor([b["done"] for b in batch], dtype=torch.float32, device=self.device)              # (B,)
 
         # Prepare g_hat (from stored inference) and g_bar (from selector over future window)
-        ghat_mu = torch.stack([b["ghat_mu"] for b in batch], dim=0).to(self.device)                           # (B,g)
+        ghat_mu = torch.stack([b["infer_mu"] for b in batch], dim=0).to(self.device)                           # (B,g)
         gbar_mu = []
         for b in batch:
             # Shape (K,H,W,F) for next few steps (collected during rollout)
@@ -257,10 +257,10 @@ class QLearningAgent:
 
     def update(self):
         if len(self.replay) < self.args.min_replay:
-            return
+            return (None, None) # not enough data yet
 
         if self.global_step % self.args.train_every != 0:
-            return
+            return (None, None) # only train every few steps
 
         batch_list = self.replay.sample(self.args.batch_size)
 
@@ -275,8 +275,8 @@ class QLearningAgent:
         # --- 2. Update the Opponent Model ---
         # Construct a proper batch dictionary for the OpponentModel
         om_batch = {
-            # States: (B, T, H, W, F), where T=1 because we only need s_t for now
-            "states": torch.stack([torch.from_numpy(b["state"]).float() for b in batch_list], dim=0).unsqueeze(1),
+            # States: (B, H, W, F)
+            "states": torch.stack([torch.from_numpy(b["state"]).float() for b in batch_list], dim=0),
             "history": self._collate_history([b["history"] for b in batch_list]),
             "future_states": torch.stack([torch.from_numpy(np.stack(b["future_states"])) for b in batch_list], dim=0),
             "infer_mu": torch.stack([b["infer_mu"] for b in batch_list], dim=0),
@@ -290,15 +290,41 @@ class QLearningAgent:
         return loss.item(), model_loss
     
     def _collate_history(self, histories: List[Dict]) -> Dict[str, List[torch.Tensor]]:
-      """Helper to batch histories for the CVAE."""
+      """
+      Helper to batch histories of variable lengths by padding shorter ones.
+      """
+      if not histories:
+          return {"states": [], "actions": []}
+
+      # Find the maximum history length in this batch
+      max_len = 0
+      for h in histories:
+          if "states" in h and h["states"]:
+              max_len = max(max_len, len(h["states"]))
+
+      if max_len == 0:
+          return {"states": [], "actions": []}
+
+      # Create null tensors for padding
+      null_state = torch.zeros(*self.args.state_shape, device=self.device)
+      null_action = torch.zeros((), dtype=torch.long, device=self.device)
+
+      # Pad each history to max_len
+      for h in histories:
+          if "states" not in h: # Handle empty dicts
+              h["states"], h["actions"] = [], []
+          
+          num_to_pad = max_len - len(h["states"])
+          if num_to_pad > 0:
+              h["states"].extend([null_state] * num_to_pad)
+              h["actions"].extend([null_action] * num_to_pad)
+
+      # Now that all histories are the same length, we can stack them
       collated = {"states": [], "actions": []}
-      if not histories or not histories[0]["states"]:
-          return collated
-      
-      history_len = len(histories[0]["states"])
-      for i in range(history_len):
+      for i in range(max_len):
           collated["states"].append(torch.stack([h["states"][i] for h in histories]))
           collated["actions"].append(torch.stack([h["actions"][i] for h in histories]))
+          
       return collated
 
     # ------------- rollout -------------

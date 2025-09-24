@@ -33,17 +33,19 @@ class SubGoalSelector:
             vae (VAE): Pre-trained VAE model
             policy (Policy): Policy model with Q-value function
             s_t (Tensor): Current state of shape (1, H, W, F)
-            future_states (Tensor): Future states of shape (K, H, W, F) - K is the horizon
+            future_states (Tensor): Future states of shape (B, K, H, W, F) - K is the horizon
         Returns:
             Tensor: latent subgoal of shape (latent_dim)
         """
         vae.eval()
         with torch.no_grad():
-            if future_states.dim() == 5: # (B, K, H, W, F)
-                future_states = future_states.squeeze(0) # Assume B=1 for selection
+            # find values for each future state batch
+            for future_state in torch.unbind(future_states, dim=1):
+                # (B, K, H, W, F) -> (B, H, W, F)
+            #TODO: REMAKE THIS LOOP TO BATCH PROCESSING
+            
 
-            mu, _ = self.vae.encode(future_states) # (K, g_dim)
-            #  The policy expects a batch dim for state and subgoal
+            mu, _ = vae.encode(future_states) # (K, g_dim)
             # The policy expects a batch dim for state and subgoal
             s_t_batch = s_t if s_t.dim() == 4 else s_t.unsqueeze(0) # (1, H, W, F)
             mu_batch = mu.unsqueeze(0) # (1, K, g_dim)
@@ -133,7 +135,7 @@ class OpponentModel:
         Performs a single training step for the opponent model.
         Args:
             batch (dict): A batch of data from the replay buffer containing:
-                - 'state': Tensor of shape (B, T, H, W, F)
+                - 'states': Tensor of shape (B, H, W, F)
                 - 'history': Dict of lists of Tensors for historical data
                 - 'future_states': Tensor of shape (B, K, H, W, F)
                 - 'infer_mu': Tensor of shape (B, latent_dim)
@@ -143,7 +145,7 @@ class OpponentModel:
             float: The computed loss for the batch.
         """
         # Unpack the batch from the replay buffer
-        states = batch['state'].to(self.device) # (B, T, H, W, F)
+        x = batch['states'].to(self.device) # (B, T, H, W, F)
         history = batch['history']  # A dict of state/action lists up to s_t-1
         future_states = batch['future_states'].to(self.device) # (B, K, H, W, F)
         infer_mu = batch['infer_mu'].to(self.device)
@@ -152,7 +154,13 @@ class OpponentModel:
         self.inference_model.train()
         self.optimizer.zero_grad()
 
-        x = states[:, 0:, ...]
+        if x.dim() == 5 and x.shape[1] == 1:
+          x = x[:, 0]  # -> (B, H, W, F)
+        
+        print(x.shape)
+        print(future_states.shape)
+        print(x.shape)
+        
         reconstructed_x, cvae_mu, cvae_log_var = self.inference_model(x, history)
 
         with torch.no_grad():
