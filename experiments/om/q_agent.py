@@ -1,8 +1,8 @@
 from dataclasses import dataclass
-from re import T
 from typing import Deque, Dict, List, Tuple, Optional
 import random
 from collections import deque
+
 from simple_foraging_env import SimpleAgent, SimpleForagingEnv
 
 import numpy as np
