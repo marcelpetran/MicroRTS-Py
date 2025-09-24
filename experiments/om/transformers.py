@@ -71,10 +71,19 @@ class StateEmbeddings(nn.Module):
         Returns:
             Tensor: Embedded state of shape (B, H*W, d_model)
         """
+        if state_tensor.dim() == 5 and state_tensor.shape[1] == 1:
+          state_tensor = state_tensor[:, 0]  # (B,1,H,W,F) -> (B,H,W,F)
+
+        assert state_tensor.dim() == 4, f"Expected (B,H,W,F), got {tuple(state_tensor.shape)}"
+
         B = state_tensor.shape[0]
         
         # Flatten spatial dimensions: (B, H, W, F) -> (B, H*W, F)
         state_flat = state_tensor.view(B, self.seq_len, -1)
+
+        F_dim = state_flat.shape[-1]
+        assert sum(self.state_feature_splits) == F_dim, \
+          f"state_feature_splits must sum to F={F_dim}, got {self.state_feature_splits}"
         
         # Split the features along the last dimension
         split_features = torch.split(state_flat, self.state_feature_splits, dim=-1)
@@ -83,7 +92,7 @@ class StateEmbeddings(nn.Module):
         # We initialize with zeros and add each embedding.
         embedded = torch.zeros(B, self.seq_len, self.d_model, device=state_tensor.device)
         for i, feature_tensor in enumerate(split_features):
-            embedded += self.feature_embedders[i](feature_tensor)
+            embedded += self.feature_embedders[i](feature_tensor.float())  # Ensure float for linear layer
 
         # Add positional encoding
         return self.position_encoder(embedded)
@@ -124,6 +133,7 @@ class TransformerCVAE(nn.Module):
         self.seq_len = args.H * args.W
         self.droput = args.dropout
         self.args = args
+        self.null_condition = torch.zeros(1, args.H, args.W, sum(args.state_feature_splits))
 
         # --- Feature Embedding ---
         self.state_embedder = StateEmbeddings(args.H, args.W, args.state_feature_splits, args.d_model, args.dropout)
@@ -159,32 +169,44 @@ class TransformerCVAE(nn.Module):
                     nn.init.zeros_(m.bias)
     
     def get_history_embeddings(self, history):
-        """
-        Aggregates and embeds the historical trajectory into a single sequence.
-        Args:
-            history (dict): A dictionary containing historical states and actions.
-                            Expected keys: 'states', 'actions', 'opp_actions' (if applicable)
-        Returns:
-            List[Tensor]: A list of embedded tensors forming the history sequence.
-        """
-        history_embeddings = []
-        if 'actions' not in history or len(history['states']) != len(history['actions']):
-            # If no actions, just use states
-            for s_t in history['states']:
-                history_embeddings.append(self.state_embedder(s_t))
-            return history_embeddings
+      """
+      Aggregates and embeds the historical trajectory into a single sequence.
+      history['states'] is a list of tensors, each either (H, W, F) or (B, H, W, F)
+      history['actions'] is a list of tensors, each either () or (B,)
+      """
+      def to_bhwf(x):
+          # Accept (H,W,F) or (B,H,W,F) and return (B,H,W,F)
+          if x.dim() == 3:
+              return x.unsqueeze(0)
+          if x.dim() == 4:
+              return x
+          raise ValueError(f"state has to be (H,W,F) or (B,H,W,F); got {tuple(x.shape)}")
 
-        for i in range(len(history['states'])):
-            s_t = history['states'][i]
-            a_t = history['actions'][i] # (B,) of long integers
+      def to_b(x):
+          # Accept scalar () or vector (B,) and return (B,)
+          if x.dim() == 0:
+              return x.unsqueeze(0)
+          if x.dim() == 1:
+              return x
+          return x.view(x.shape[0])  # be forgiving if shaped (B,1)
 
-            s_t_embedded = self.state_embedder(s_t) # (B, H*W, d_model)
-            a_t_embedded = self.action_embedder(a_t) # (B, 1, d_model)
-            
-            combined_step = torch.cat([s_t_embedded, a_t_embedded], dim=1)
-            history_embeddings.append(combined_step)
-            
-        return history_embeddings
+      states = history.get("states", [])
+      actions = history.get("actions", None)
+      have_actions = isinstance(actions, list) and len(actions) == len(states)
+
+      history_embeddings = []
+      for t, s_t in enumerate(states):
+          s_t = to_bhwf(s_t)                          # (B,H,W,F)
+          s_t_embedded = self.state_embedder(s_t)     # (B, H*W, d_model)
+
+          if have_actions:
+              a_t = to_b(actions[t])                  # (B,)
+              a_t_embedded = self.action_embedder(a_t)  # (B, 1, d_model)
+              history_embeddings.append(torch.cat([s_t_embedded, a_t_embedded], dim=1))  # (B, H*W+1, d_model)
+          else:
+              history_embeddings.append(s_t_embedded)
+
+      return history_embeddings
 
     def encode(self, x, history):
         """
@@ -201,7 +223,11 @@ class TransformerCVAE(nn.Module):
 
         # Process the historical trajectory to form the condition
         history_embeddings = self.get_history_embeddings(history)
-        
+
+        if history_embeddings is None or len(history_embeddings) == 0:
+            # If no history, use a null condition state, therefore it should behave like a regular VAE
+            history_embeddings = [self.state_embedder(self.null_condition.to(x.device))]
+
         # Concatenate all history elements into a single long sequence
         condition_seq = torch.cat(history_embeddings, dim=1)
         
@@ -252,7 +278,12 @@ class TransformerCVAE(nn.Module):
             Tensor: Mean of the latent distribution (B, latent_dim)
             Tensor: Log-variance of the latent distribution (B, latent_dim)
         """
-        history_seq = torch.cat(self.get_history_embeddings(history), dim=1)
+        history_embeddings = self.get_history_embeddings(history)
+        if history_embeddings is None or len(history_embeddings) == 0:
+            # If no history, use a null condition state, therefore it should behave like a regular VAE
+            history_embeddings = [self.state_embedder(self.null_condition.to(x.device))]
+        
+        history_seq = torch.cat(history_embeddings, dim=1)
         mu, logvar = self.encode(x, history)
         z = self.reparameterize(mu, logvar)
         reconstructed_x = self.decode(z, history_seq)
