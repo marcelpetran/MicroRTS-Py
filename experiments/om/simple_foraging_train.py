@@ -13,12 +13,12 @@ H, W, F = obs_sample[0].shape
 NUM_ACTIONS = 4  # Up, Down, Left, Right
 
 args = OMGArgs(
-    batch_size=4,
+    batch_size=16,
     capacity=1_000,
     horizon_H=3,
     qnet_hidden=128,
     selector_mode="conservative",
-    alpha=0.1,  # Weight for the KL loss
+    alpha=0.002,  # Weight for the KL loss
     train_vae=False,
     state_shape=obs_sample[0].shape,
     H=H, W=W,
@@ -42,11 +42,11 @@ cvae = t.TransformerCVAE(args).to(device)
 # --- Pre-train the VAE ---
 if args.train_vae:
   print("Pre-training VAE...")
-  vae_optimizer = torch.optim.Adam(vae.parameters(), lr=1e-3)
-  vae_replay = ReplayBuffer(1_000)
+  vae_optimizer = torch.optim.Adam(vae.parameters(), lr=1e-4)
+  vae_replay = ReplayBuffer(10_000)
 
-  t.train_vae(env, vae, vae_replay, vae_optimizer, num_epochs=100_000,
-              save_every_n_epochs=100_000, batch_size=args.batch_size, max_steps=50, logg=1_000)
+  t.train_vae(env, vae, vae_replay, vae_optimizer, num_epochs=50_000,
+              save_every_n_epochs=50_000, batch_size=args.batch_size, max_steps=50, logg=1_000)
   print("VAE pre-training complete.")
 else:
   vae.load_state_dict(torch.load(
@@ -60,7 +60,7 @@ op_model = OpponentModel(
   cvae, vae, selector, optimizer=cvae_optimizer, device=device, args=args)
 agent = QLearningAgent(env, op_model, device=device, args=args)
 
-for ep in range(150_000):
+for ep in range(50_000):
   stats = agent.run_episode(max_steps=15)
   if ep % 50 == 0:
     print(
