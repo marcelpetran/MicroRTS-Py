@@ -198,6 +198,12 @@ class QLearningAgent:
     def _choose_action(self, qvals: torch.Tensor, eps: float) -> int:
         if random.random() < eps:
             return random.randrange(self.args.action_dim) # TODO: for more complex action spaces, adapt this
+        # else choose greedy action with ties broken randomly
+        qvals = qvals.squeeze(0)  # (A,)
+        max_q = torch.max(qvals).item()
+        max_actions = (qvals == max_q).nonzero(as_tuple=False).view(-1)
+        if len(max_actions) > 1:
+            return int(max_actions[torch.randint(len(max_actions), (1,))].item())
         return int(torch.argmax(qvals, dim=-1).item())
 
     def select_action(self, s_t: np.ndarray, history: Dict[str, List[torch.Tensor]]) -> Tuple[int, torch.Tensor]:
