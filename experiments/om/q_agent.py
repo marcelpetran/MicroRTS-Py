@@ -411,7 +411,7 @@ class QLearningAgent:
       self.global_step += 1
       Q_loss, model_loss = self.update()
 
-      if Q_loss is not None and model_loss is not None and step % 100 == 0:
+      if Q_loss is not None and model_loss is not None and self.global_step % 100 == 0:
         print(f"Step {self.global_step}: Q_loss={Q_loss:.4f}, Model_loss={model_loss:.4f}, Eps={self._eps():.3f}, Gmix_eps={self._gmix_eps():.3f}")
 
       if done:
