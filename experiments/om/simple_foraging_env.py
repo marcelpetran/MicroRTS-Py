@@ -18,12 +18,12 @@ class SimpleForagingEnv:
         self.steps = 0
 
         # Place agents
-        self.agents[0] = (0, self.grid_size // 2)
-        self.agents[1] = (self.grid_size - 1, self.grid_size // 2)
+        self.agents[0] = (self.grid_size // 2, 0)
+        self.agents[1] = (self.grid_size // 2, self.grid_size - 1)
 
         # Place food
-        pos1 = (self.grid_size // 2, 0)
-        pos2 = (self.grid_size // 2, self.grid_size - 1)
+        pos1 = (0, self.grid_size // 2)
+        pos2 = (self.grid_size - 1, self.grid_size // 2)
         self.food_positions.add(pos1)
         self.food_positions.add(pos2)
 
@@ -73,7 +73,7 @@ class SimpleForagingEnv:
                 new_pos[0] = min(self.grid_size - 1, new_pos[0] + 1)
             elif action == 2:  # Left
                 new_pos[1] = max(0, new_pos[1] - 1)
-            elif action == 3:
+            elif action == 3: # Right
                 new_pos[1] = min(self.grid_size - 1, new_pos[1] + 1)  # Right
             # Check for collisions with other agents
             if tuple(new_pos) not in new_positions.values():
@@ -114,28 +114,41 @@ class SimpleAgent:
         self.going_for_top = True if np.random.rand() > 0.5 else False
 
     def find_food(self, food_positions):
-        if self.going_for_top:
+        if not food_positions:
+            return None
+        if self.going_for_top == True:
             return min(food_positions, key=lambda x: x[0])  # food with smallest row index
         else:
             return max(food_positions, key=lambda x: x[0])  # food with largest row index
 
     def find_path(self, start, goal, obstacles):
         path = []
+        action_seq = []
         current = start
+        action = 0 # 0: up, 1: down, 2: left, 3: right
         # also consider obstacles (other agent)
         while current != goal:
             if current[0] < goal[0] and (current[0] + 1, current[1]) not in obstacles:
+                # move down
+                action = 1
                 current = (current[0] + 1, current[1])
             elif current[0] > goal[0] and (current[0] - 1, current[1]) not in obstacles:
+                # move up
+                action = 0
                 current = (current[0] - 1, current[1])
             elif current[1] < goal[1] and (current[0], current[1] + 1) not in obstacles:
+                # move right
+                action = 3
                 current = (current[0], current[1] + 1)
             elif current[1] > goal[1] and (current[0], current[1] - 1) not in obstacles:
+                # move left
+                action = 2
                 current = (current[0], current[1] - 1)
             else:
                 break  # No valid move, break to avoid infinite loop
             path.append(current)
-        return path
+            action_seq.append(action)
+        return path, action_seq
 
     
     def select_action(self, observation):
@@ -153,8 +166,11 @@ class SimpleAgent:
         if not food_positions:
             return np.random.randint(0, 4)  # No food left, random action
         target_food = self.find_food(food_positions)
-        path = self.find_path(agent_pos, target_food)
-        if path:
-            return path[0]  # Take the first step in the path
+        if target_food is None:
+            return np.random.randint(0, 4)  # No food found, random action
+        
+        path, action_seq = self.find_path(agent_pos, target_food, obstacle)
+        if action_seq:
+            return action_seq[0]  # Take the first step in the path
         else:
-            return np.random.randint(0, 4)  # Already at food position, random action
+            return np.random.randint(0, 4)  # random action, should not happen
