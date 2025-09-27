@@ -36,7 +36,7 @@ class SimpleForagingEnv:
 
   def _get_action_space(self):
     # 4 actions: up, down, left, right
-    return {agent_id: 4 for agent_id in range(self.num_agents)}
+    return [i for i in range(4)]
 
   def _get_observations(self):
     observations = {}
