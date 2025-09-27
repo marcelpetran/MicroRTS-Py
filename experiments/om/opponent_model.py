@@ -85,7 +85,16 @@ class OpponentModel:
     self.args = args
     self.mse_loss = nn.MSELoss()
 
-  def reconstruct_state(reconstructed_state_logits, state_feature_splits):
+  def eval(self):
+    """
+    Set inference model to evaluation mode
+    """
+    self.inference_model.eval()
+    self.prior_model.eval()
+    return
+  
+
+  def reconstruct_state(self, reconstructed_state_logits, state_feature_splits):
     """
     Convert the reconstructed logit tensor back to one-hot encoded state.
     """
@@ -139,13 +148,13 @@ class OpponentModel:
       target_mu, target_log_var = vae_mu.detach(), vae_log_var.detach()
 
     # KL Divergence between CVAE's prediction and the target distribution
-    omg_loss = -0.5 * torch.sum(1 + cvae_log_var - target_log_var -
+    omg_loss = -0.5 * torch.mean(1 + cvae_log_var - target_log_var -
                                 (((target_mu - cvae_mu) ** 2 +
                                  cvae_log_var.exp()) / target_log_var.exp()),
                                 dim=-1)
 
     # The final loss is a weighted sum of reconstruction and inference loss
-    total_loss = (recon_loss / batch_size).mean() + self.args.alpha * omg_loss.mean()
+    total_loss = recon_loss.mean() + self.args.beta * omg_loss.mean()
     return total_loss
 
   def train_step(self, batch, eval_policy):
