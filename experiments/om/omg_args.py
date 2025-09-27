@@ -14,6 +14,7 @@ class OMGArgs:
   eps_end: float = 0.05
   eps_decay_steps: int = 50_000
   qnet_hidden: int = 256
+  maximum_history_length = 10
 
   # OMG-specific
   gmix_eps_start: float = 1.0      # Eq.(8): start using mostly g_bar
