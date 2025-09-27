@@ -414,7 +414,7 @@ class TransformerVAE(nn.Module):
 # Loss function for the VAE
 
 
-def vae_loss(reconstructed_x, x, mu, logvar, state_feature_splits):
+def vae_loss(reconstructed_x, x, mu, logvar, state_feature_splits, beta=1.0):
   """
   Loss function for VAE combining reconstruction loss and KL divergence.
   Args:
@@ -423,6 +423,7 @@ def vae_loss(reconstructed_x, x, mu, logvar, state_feature_splits):
       mu (Tensor): Mean of the latent distribution (B, latent_dim)
       logvar (Tensor): Log-variance of the latent distribution (B, latent_dim)
       state_feature_splits (List[int]): List of sizes for each one-hot feature group.
+      beta (float): Weighting factor for the KL divergence term.
   Returns:
       Tensor: Computed VAE loss.
   """
@@ -444,13 +445,13 @@ def vae_loss(reconstructed_x, x, mu, logvar, state_feature_splits):
 
   for recon_group, x_group in zip(recon_split, x_split):
     recon_loss += F.binary_cross_entropy_with_logits(
-      recon_group, x_group, reduction='sum')
+      recon_group, x_group, reduction='mean')
 
   # KL Divergence Loss
   # -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-  kld_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+  kld_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
 
-  return recon_loss / batch_size + 0.002 * kld_loss
+  return recon_loss + beta * kld_loss
 
 
 def reconstruct_state(reconstructed_state_logits, state_feature_splits):
@@ -520,13 +521,15 @@ def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_e
     model.train()
     reconstructed_state, mu, logvar = model(state_batch)
     loss = vae_loss(reconstructed_state, state_batch, mu,
-                    logvar, model.embedd.state_feature_splits)
+                    logvar, model.embedd.state_feature_splits, model.args.beta)
 
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
 
     if (i + 1) % logg == 0:
+      loss_collector.append(loss.item())
+      epoch_collector.append(i + 1)
       print(f"Epoch {i+1}/{num_epochs}, Loss: {loss.item()}")
 
     if (i + 1) % save_every_n_epochs == 0:
@@ -630,7 +633,7 @@ if __name__ == '__main__':
 
       # --- Forward Pass and Loss Calculation ---
       reconstructed_state, mu, logvar = model(x)
-      loss = vae_loss(reconstructed_state, x, mu, logvar, FEATURE_SPLITS)
+      loss = vae_loss(reconstructed_state, x, mu, logvar, FEATURE_SPLITS, model.args.beta)
 
       # --- Backward Pass ---
       optimizer.zero_grad()
