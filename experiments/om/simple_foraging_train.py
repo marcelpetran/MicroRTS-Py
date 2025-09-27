@@ -1,6 +1,7 @@
 from simple_foraging_env import SimpleForagingEnv
 from opponent_model import OpponentModel, SubGoalSelector
-from q_agent import QLearningAgent, OMGArgs, ReplayBuffer
+from q_agent import QLearningAgent, ReplayBuffer
+from omg_args import OMGArgs
 import experiments.om.transformers as t  # your module name
 import torch
 
