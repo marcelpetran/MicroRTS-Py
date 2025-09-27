@@ -5,7 +5,8 @@ import torch.nn.functional as F
 import math
 import numpy as np
 from q_agent import ReplayBuffer, OMGArgs
-from simple_foraging_env import RandomAgent
+from simple_foraging_env import RandomAgent, SimpleAgent
+from matplotlib import pyplot as plt
 
 
 class PositionalEncoding(nn.Module):
@@ -479,8 +480,13 @@ def reconstruct_state(reconstructed_state_logits, state_feature_splits):
 
 def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_epochs=10000, save_every_n_epochs=1000, batch_size=32, max_steps=None, logg=100):
   def collect_single_episode():
-    agent1 = RandomAgent(agent_id=0)
-    agent2 = RandomAgent(agent_id=1)
+    if 1/3 < np.random.random():
+      agent1 = RandomAgent(agent_id=0)
+      agent2 = RandomAgent(agent_id=1)
+    else:
+      agent1 = SimpleAgent(agent_id=0)
+      agent2 = SimpleAgent(agent_id=1)
+      
     obs = env.reset()
     done = False
     step = 0
@@ -504,7 +510,10 @@ def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_e
       ep_ret += reward[0]
       obs = next_obs
       step += 1
-
+    return
+  
+  loss_collector = []
+  epoch_collector = []
   for i in range(num_epochs):
     # Collect a new episode
     collect_single_episode()
@@ -537,6 +546,14 @@ def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_e
                  f"Trained_VAE/transformer_vae_epoch_{i+1}.pth")
       print(f"Model saved at epoch {i+1}")
 
+  loss_collector = np.array(loss_collector)
+  epoch_collector = np.array(epoch_collector)
+
+  # plt.plot(epoch_collector, loss_collector)
+  # plt.xlabel('Iteration')
+  # plt.ylabel('Loss')
+  # plt.title('Training Loss over Time')
+  # plt.show()
   return model
 
 
