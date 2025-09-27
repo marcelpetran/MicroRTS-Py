@@ -93,7 +93,7 @@ class QLearningAgent:
     self.model = opponent_model
     self.args = args
     self.device = torch.device(device)
-    self.opponent_agent = SimpleAgent(1)
+    self.opponent_agent = RandomAgent(1)
 
     # Try to infer dims from env
     if args.state_shape is None:
@@ -166,8 +166,8 @@ class QLearningAgent:
 
   # ------------- acting -------------
 
-  def _choose_action(self, qvals: torch.Tensor, eps: float) -> int:
-    if random.random() < eps:
+  def _choose_action(self, qvals: torch.Tensor, eps: float, eval) -> int:
+    if random.random() < eps and eval == False:
       # TODO: for more complex action spaces, adapt this
       return random.randrange(self.args.action_dim)
     # else choose greedy action with ties broken randomly
@@ -178,14 +178,14 @@ class QLearningAgent:
       return int(max_actions[torch.randint(len(max_actions), (1,))].item())
     return int(torch.argmax(qvals, dim=-1).item())
 
-  def select_action(self, s_t: np.ndarray, history: Dict[str, List[torch.Tensor]]) -> Tuple[int, torch.Tensor]:
+  def select_action(self, s_t: np.ndarray, history: Dict[str, List[torch.Tensor]], eval=False) -> Tuple[int, torch.Tensor]:
     """
     (interaction phase) Infer g_hat and act eps-greedily on Q(s,g_hat,*)
     """
     ghat_mu, ghat_logvar = self._infer_ghat(s_t, history)  # (1, latent_dim)
     s = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
     qvals = self.q(s, ghat_mu)
-    a = self._choose_action(qvals, self._eps())
+    a = self._choose_action(qvals, self._eps(), eval)
     return a, ghat_mu.squeeze(0), ghat_logvar.squeeze(0)
 
   # ------------- training -------------
@@ -315,13 +315,17 @@ class QLearningAgent:
     Gathers a trajectory, stores future slices for subgoal selection,
     and trains the Q-network and OpponentModel.
     """
-    self.opponent_agent.reset()
+    if random.random() < self._eps():
+      self.opponent_agent = RandomAgent(1)
+    else:
+      self.opponent_agent = SimpleAgent(1)
+    
     obs = self.env.reset()
     done = False
     ep_ret = 0.0
 
-    # Minimal "history" container; extend to what your CVAE expects.
-    history_len = 5  # Example history length
+    # Minimal "history" container
+    history_len = 1  # Example history length
     history = {
         "states": deque(maxlen=history_len),
         "actions": deque(maxlen=history_len)
@@ -373,5 +377,46 @@ class QLearningAgent:
 
       if done:
         break
+
+    return {"return": ep_ret, "steps": step + 1}
+  
+  def run_test_episode(self, max_steps: Optional[int] = None):
+    self.opponent_agent.reset()
+    obs = self.env.reset()
+    done = False
+    ep_ret = 0.0
+
+    SimpleForagingEnv.render_from_obs(obs[0])
+
+    # Minimal "history" container
+    history_len = 1  # Example history length
+    history = {
+        "states": deque(maxlen=history_len),
+        "actions": deque(maxlen=history_len)
+    }
+
+    step_buffer = deque(maxlen=self.args.horizon_H + 1)
+    self.model.eval()
+    for step in range(max_steps or 500):
+      # Convert deque to list for the model
+      current_history = {k: list(v) for k, v in history.items()}
+
+      a, ghat_mu, ghat_logvar = self.select_action(obs[0], current_history, True)
+      a_opponent = self.opponent_agent.select_action(obs[1])
+      actions = {0: a, 1: a_opponent}
+      next_obs, reward, done, info = self.env.step(actions)
+      
+
+      # Update history for the next step
+      history["states"].append(torch.from_numpy(obs[0]).float())
+      history["actions"].append(torch.tensor(a, dtype=torch.long))
+
+      ep_ret += reward[0]
+      obs = next_obs
+      SimpleForagingEnv.render_from_obs(obs[0])
+      
+      if done:
+        break
+
 
     return {"return": ep_ret, "steps": step + 1}
