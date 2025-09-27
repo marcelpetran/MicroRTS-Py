@@ -324,8 +324,8 @@ class QLearningAgent:
     done = False
     ep_ret = 0.0
 
-    # Minimal "history" container
-    history_len = 1  # Example history length
+    # History container
+    history_len = self.args.maximum_history_length
     history = {
         "states": deque(maxlen=history_len),
         "actions": deque(maxlen=history_len)
@@ -381,24 +381,21 @@ class QLearningAgent:
     return {"return": ep_ret, "steps": step + 1}
   
   def run_test_episode(self, max_steps: Optional[int] = None):
-    self.opponent_agent.reset()
+    self.opponent_agent = SimpleAgent(1)
     obs = self.env.reset()
     done = False
     ep_ret = 0.0
 
     SimpleForagingEnv.render_from_obs(obs[0])
 
-    # Minimal "history" container
-    history_len = 1  # Example history length
+    history_len = self.args.maximum_history_length
     history = {
         "states": deque(maxlen=history_len),
         "actions": deque(maxlen=history_len)
     }
 
-    step_buffer = deque(maxlen=self.args.horizon_H + 1)
     self.model.eval()
     for step in range(max_steps or 500):
-      # Convert deque to list for the model
       current_history = {k: list(v) for k, v in history.items()}
 
       a, ghat_mu, ghat_logvar = self.select_action(obs[0], current_history, True)
@@ -406,8 +403,6 @@ class QLearningAgent:
       actions = {0: a, 1: a_opponent}
       next_obs, reward, done, info = self.env.step(actions)
       
-
-      # Update history for the next step
       history["states"].append(torch.from_numpy(obs[0]).float())
       history["actions"].append(torch.tensor(a, dtype=torch.long))
 
