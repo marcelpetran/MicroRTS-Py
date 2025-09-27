@@ -585,25 +585,25 @@ if __name__ == '__main__':
                       help='Batch size for training')
   parser.add_argument('--h', type=int, default=4, help='Height of the map')
   parser.add_argument('--w', type=int, default=4, help='Width of the map')
-  parser.add_argument('--dataset-size', type=int, default=32,
+  parser.add_argument('--dataset-size', type=int, default=1024,
                       help='Size of the dataset to generate')
   parser.add_argument('--latent-dim', type=int, default=8,
                       help='Dimensionality of the latent space')
-  parser.add_argument('--d-model', type=int, default=32,
+  parser.add_argument('--d-model', type=int, default=128,
                       help='Dimensionality of the transformer model')
   parser.add_argument('--nhead', type=int, default=2,
                       help='Number of attention heads')
   parser.add_argument('--num-encoder-layers', type=int,
-                      default=1, help='Number of encoder layers')
+                      default=2, help='Number of encoder layers')
   parser.add_argument('--num-decoder-layers', type=int,
-                      default=1, help='Number of decoder layers')
-  parser.add_argument('--dim-feedforward', type=int, default=64,
+                      default=2, help='Number of decoder layers')
+  parser.add_argument('--dim-feedforward', type=int, default=512,
                       help='Dimensionality of the feedforward network')
   parser.add_argument('--dropout', type=float,
                       default=0.01, help='Dropout rate')
-  parser.add_argument('--epochs', type=int, default=30000,
+  parser.add_argument('--epochs', type=int, default=3_000,
                       help='Number of training epochs')
-  parser.add_argument('--logg', type=int, default=100, help='Logging interval')
+  parser.add_argument('--logg', type=int, default=10, help='Logging interval')
   args = parser.parse_args()
 
   # --- Example Usage of VAE transformer ---
@@ -617,9 +617,12 @@ if __name__ == '__main__':
   # --- Create Dataset ---
   from torch.utils.data import TensorDataset, DataLoader
   full_dataset_x = generate_data(args.dataset_size, H, W, FEATURE_SPLITS)
+  test_data_x = generate_data(args.dataset_size//2, H, W, FEATURE_SPLITS)
   print("Generated dataset with shape:", full_dataset_x[0])
   train_dataset = TensorDataset(full_dataset_x)
+  test_dataset = TensorDataset(test_data_x)
   train_loader = DataLoader(train_dataset, batch_size=B, shuffle=True)
+  test_loader = DataLoader(test_dataset, batch_size=B, shuffle=True)
 
   print("Dataset created. Starting training...")
   om_args = OMGArgs(
@@ -671,21 +674,15 @@ if __name__ == '__main__':
   # --- Test the model ---
   model.eval()
   with torch.no_grad():
-    test_x = generate_data(B, H, W, FEATURE_SPLITS)
-    reconstructed_x_logits, mu, logvar = model(test_x)
-    reconstructed_state = reconstruct_state(
-      reconstructed_x_logits, FEATURE_SPLITS)
-    print("Test Input State:\n", test_x[0])
-    print("Reconstructed State:\n", reconstructed_state[0])
-    print("Reconstructed logits:\n", reconstructed_x_logits[0])
-    print("Mu:", mu)
-    print("Logvar:", logvar)
-    print("Reconstruction Loss:", vae_loss(
-      reconstructed_x_logits, test_x, mu, logvar, FEATURE_SPLITS).item())
+    for batch in test_loader:
+      x = batch[0]
+      reconstructed_state, mu, logvar = model(x)
+      test_loss = vae_loss(reconstructed_state, x, mu, logvar, FEATURE_SPLITS, model.args.beta)
+      print("Test Loss:", test_loss.item())
+      break  # Just test on one batch for brevity
   print("Training complete.")
 
   # --- Plotting the loss curve ---
-  from matplotlib import pyplot as plt
 
   loss_collector = np.array(loss_collector)
   x_collector = np.array(x_collector)
