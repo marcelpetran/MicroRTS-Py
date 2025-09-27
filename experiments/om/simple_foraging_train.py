@@ -46,13 +46,25 @@ if args.train_vae:
   vae_optimizer = torch.optim.Adam(vae.parameters(), lr=1e-4)
   vae_replay = ReplayBuffer(10_000)
 
-  t.train_vae(env, vae, vae_replay, vae_optimizer, num_epochs=50_000,
-              save_every_n_epochs=50_000, batch_size=args.batch_size, max_steps=50, logg=1_000)
+  t.train_vae(env, vae, vae_replay, vae_optimizer, num_epochs=100_000,
+              save_every_n_epochs=150_000, batch_size=args.batch_size, max_steps=50, logg=1_000)
   print("VAE pre-training complete.")
+  print("Simple test of VAE reconstruction:")
+  vae.eval()
+  with torch.no_grad():
+    sample_state = torch.tensor(obs_sample[0], dtype=torch.float32).unsqueeze(0).to(device)  # (1, H, W, F)
+    reconstructed_state, mu, logvar = vae(sample_state)
+    print("Original State:\n", obs_sample[0])
+    SimpleForagingEnv.render_from_obs(obs_sample[0])
+    print("Reconstructed State:\n", reconstructed_state[0])
+    SimpleForagingEnv.render_from_obs(t.reconstruct_state(reconstructed_state, args.state_feature_splits)[0])
+    print("Latent Mu:\n", mu)
+    print("Latent LogVar:\n", logvar)
 else:
   vae.load_state_dict(torch.load(
     "./trained_VAE/vae_simple_foraging.pth", map_location=device))
   print("Loaded pre-trained VAE.")
+  
 
 selector = SubGoalSelector(args)
 cvae_optimizer = torch.optim.Adam(cvae.parameters(), lr=3e-4)
