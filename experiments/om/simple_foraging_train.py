@@ -19,8 +19,8 @@ args = OMGArgs(
     horizon_H=3,
     qnet_hidden=128,
     selector_mode="conservative",
-    alpha=0.002,  # Weight for the KL loss
-    train_vae=False,
+    beta=2.0,  # Weight for the KL loss
+    train_vae=True,
     state_shape=obs_sample[0].shape,
     H=H, W=W,
     state_feature_splits=(F,),
