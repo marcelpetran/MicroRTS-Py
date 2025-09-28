@@ -462,15 +462,16 @@ def reconstruct_state(reconstructed_state_logits, state_feature_splits):
   reconstructed_state = torch.zeros_like(
     reconstructed_state_logits, device=reconstructed_state_logits.device)
   start_idx = 0
+  B, H, W, _ = reconstructed_state.shape
   for size in state_feature_splits:
     end_idx = start_idx + size
     # Apply softmax to the logits to get probabilities
     probs = F.softmax(
       reconstructed_state_logits[:, :, :, start_idx:end_idx], dim=-1)
     # Sample indices from the probabilities
-    # indices = torch.multinomial(probs.view(-1, size), num_samples=1).view(B, h, w) + start_idx
+    indices = torch.multinomial(probs.view(-1, size), num_samples=1).view(B, H, W) + start_idx
     # or alternatively, take the argmax
-    indices = torch.argmax(probs, dim=-1) + start_idx
+    # indices = torch.argmax(probs, dim=-1) + start_idx
     # Set the corresponding one-hot feature to 1
     reconstructed_state.scatter_(3, indices.unsqueeze(-1), 1.0)
     start_idx = end_idx
@@ -486,7 +487,7 @@ def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_e
     else:
       agent1 = SimpleAgent(agent_id=0)
       agent2 = SimpleAgent(agent_id=1)
-      
+
     obs = env.reset()
     done = False
     step = 0

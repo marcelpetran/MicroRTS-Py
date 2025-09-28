@@ -7,7 +7,7 @@ import torch
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-env = SimpleForagingEnv(grid_size=5, max_steps=50)
+env = SimpleForagingEnv(grid_size=11, max_steps=50)
 
 obs_sample = env.reset()
 H, W, F = obs_sample[0].shape
@@ -47,7 +47,7 @@ if args.train_vae:
   vae_replay = ReplayBuffer(10_000)
 
   t.train_vae(env, vae, vae_replay, vae_optimizer, num_epochs=100_000,
-              save_every_n_epochs=150_000, batch_size=args.batch_size, max_steps=50, logg=1_000)
+              save_every_n_epochs=150_000, batch_size=args.batch_size, max_steps=args.max_steps, logg=1_000)
   print("VAE pre-training complete.")
   print("Simple test of VAE reconstruction:")
   vae.eval()
@@ -74,7 +74,7 @@ op_model = OpponentModel(
 agent = QLearningAgent(env, op_model, device=device, args=args)
 
 for ep in range(50_000):
-  stats = agent.run_episode(max_steps=30)
+  stats = agent.run_episode(max_steps=args.max_steps)
   if (ep+1) % 50 == 0:
     print(
       f"Episode {ep+1}: Return={stats['return']:.2f} ({True if stats['return'] > 0 else False}), Steps={stats['steps']}")

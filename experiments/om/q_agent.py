@@ -325,7 +325,7 @@ class QLearningAgent:
     ep_ret = 0.0
 
     # History container
-    history_len = self.args.maximum_history_length
+    history_len = self.args.max_history_length
     history = {
         "states": deque(maxlen=history_len),
         "actions": deque(maxlen=history_len)
@@ -388,7 +388,7 @@ class QLearningAgent:
 
     SimpleForagingEnv.render_from_obs(obs[0])
 
-    history_len = self.args.maximum_history_length
+    history_len = self.args.max_history_length
     history = {
         "states": deque(maxlen=history_len),
         "actions": deque(maxlen=history_len)

@@ -101,20 +101,43 @@ class OpponentModel:
     reconstructed_state = torch.zeros_like(
       reconstructed_state_logits, device=reconstructed_state_logits.device)
     start_idx = 0
+    B, H, W, _ = reconstructed_state.shape
     for size in state_feature_splits:
       end_idx = start_idx + size
       # Apply softmax to the logits to get probabilities
       probs = F.softmax(
         reconstructed_state_logits[:, :, :, start_idx:end_idx], dim=-1)
       # Sample indices from the probabilities
-      # indices = torch.multinomial(probs.view(-1, size), num_samples=1).view(B, h, w) + start_idx
+      indices = torch.multinomial(probs.view(-1, size), num_samples=1).view(B, H, W) + start_idx
       # or alternatively, take the argmax
-      indices = torch.argmax(probs, dim=-1) + start_idx
+      # indices = torch.argmax(probs, dim=-1) + start_idx
       # Set the corresponding one-hot feature to 1
       reconstructed_state.scatter_(3, indices.unsqueeze(-1), 1.0)
       start_idx = end_idx
 
     return reconstructed_state
+  
+  def visualize_subgoal(self, ghat_mu: torch.Tensor, filename: str = "./subgoal_visualization.png"):
+    """
+    Reconstructs visualization of a subgoal state from a latent vector.
+
+    Args:
+        ghat_mu (torch.Tensor): The mean of the inferred latent distribution (ĝt), shape (B, latent_dim).
+    """
+    print(f"Visualizing subgoal and saving to {filename}...")
+    self.prior_model.eval() # Use the frozen, pre-trained VAE for reconstruction
+
+    with torch.no_grad():
+        reconstructed_logits = self.prior_model.decode(ghat_mu)
+        reconstructed_state_one_hot = self.reconstruct_state(
+            reconstructed_logits, self.args.state_feature_splits
+        )
+    state_to_plot = reconstructed_state_one_hot[0].cpu().numpy() # Shape: (H, W, F)
+
+    _plot_foraging_grid(state_to_plot, filename)
+
+    return
+
 
   def loss_function(self, reconstructed_x, x, cvae_mu, cvae_log_var, vae_mu, vae_log_var, infer_mu, infer_log_var, eta):
     """
@@ -205,3 +228,29 @@ class OpponentModel:
     self.optimizer.step()
 
     return loss.item()
+
+def _plot_foraging_grid(grid: np.ndarray, filename: str):
+    """
+    Creates a plot of a single (H, W, F) foraging state.
+    """
+    import matplotlib.pyplot as plt
+
+    # Convert the one-hot grid to a grid of integer labels for coloring
+    # e.g., empty=0, food=1, agent1=2, agent2=3
+    grid_labels = np.argmax(grid, axis=-1)
+
+    # Define colors and labels for the plot
+    # Make sure this matches the feature order in your environment!
+    cmap = plt.get_cmap('viridis', 4)
+    labels = {0: 'Empty', 1: 'Food', 2: 'Agent 1 (Self)', 3: 'Agent 2 (Opponent)'}
+    
+    fig, ax = plt.subplots()
+    mat = ax.matshow(grid_labels, cmap=cmap)
+    
+    # Create a color bar with labels
+    cbar = plt.colorbar(mat, ticks=np.arange(len(labels)))
+    cbar.ax.set_yticklabels([labels[i] for i in range(len(labels))])
+    
+    plt.title("Reconstructed Subgoal State")
+    plt.savefig(filename)
+    plt.close()
