@@ -163,6 +163,79 @@ class QLearningAgent:
     mu, logvar = self.model.subgoal_selector.select(
       self.model.prior_model, self, x, futures)
     return mu, logvar
+  
+  # ------------- visualization utility -------------
+  @torch.no_grad()
+  def heatmap_q_values(self, state_hwf: np.ndarray, g: torch.Tensor, filename: str = "q_heatmap.png"):
+      """
+      Utility to visualize Q-values as a heatmap over the grid for a given state and subgoal.
+
+      Args:
+          state_hwf (np.ndarray): The current state grid, shape (H, W, F).
+          g (torch.Tensor): The inferred subgoal, shape (1, latent_dim).
+          filename (str): Path to save the heatmap image.
+      """
+      self.q.eval()
+      H, W, _ = self.args.state_shape
+      
+      # This will store the max Q-value for each grid cell
+      q_value_map = np.zeros((H, W))
+      # This will store the best action (0:Up, 1:Down, 2:Left, 3:Right) for each cell
+      policy_map = np.zeros((H, W))
+
+      # Find the original position of our agent (agent 1, feature index 2)
+      agent_pos_indices = np.where(state_hwf[:, :, 2] == 1)
+      if len(agent_pos_indices[0]) == 0:
+        print("Warning: Agent not found in state for heatmap visualization.")
+        return
+      original_pos = (agent_pos_indices[0][0], agent_pos_indices[1][0])
+
+      # Iterate over every possible cell in the grid
+      for r in range(H):
+          for c in range(W):
+              # Create a copy of the state
+              temp_state = state_hwf.copy()
+              
+              # Move the agent to the new (r, c) position
+              # 1. Erase the agent's original position
+              temp_state[original_pos[0], original_pos[1], 2] = 0
+              temp_state[original_pos[0], original_pos[1], 0] = 1 # Set to empty
+              
+              # 2. Place the agent at the new position
+              # Make sure no other object is there before placing the agent
+              if np.sum(temp_state[r, c, 1:]) == 0: # Check if food or other agent is there
+                  temp_state[r, c, 2] = 1
+                  temp_state[r, c, 0] = 0 # Not empty anymore
+
+                  # Convert to tensor and get Q-values
+                  s_tensor = torch.from_numpy(temp_state).float().unsqueeze(0).to(self.device)
+                  q_values = self.q(s_tensor, g) # (1, num_actions)
+                  
+                  max_q_val, best_action = torch.max(q_values, dim=1)
+                  q_value_map[r, c] = max_q_val.item()
+                  policy_map[r, c] = best_action.item()
+
+      # --- Plotting the Heatmap ---
+      import matplotlib.pyplot as plt
+      fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+
+      # Plot Q-value heatmap
+      im1 = ax1.imshow(q_value_map, cmap='viridis')
+      ax1.set_title("Max Q(s, g, a) Heatmap")
+      fig.colorbar(im1, ax=ax1)
+
+      # Plot Policy map with arrows
+      ax2.imshow(q_value_map, cmap='gray') # Show background values
+      ax2.set_title("Learned Policy (Arrows)")
+      action_arrows = ['^', 'v', '<', '>']
+      for r in range(H):
+          for c in range(W):
+              action = int(policy_map[r, c])
+              ax2.text(c, r, action_arrows[action], ha='center', va='center', color='red', fontsize=12)
+
+      plt.suptitle("Agent's Learned Policy for a Given Subgoal")
+      plt.savefig(filename)
+      plt.close()
 
   # ------------- acting -------------
 
