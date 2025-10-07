@@ -484,12 +484,27 @@ class QLearningAgent:
       ep_ret += reward[0]
       obs = next_obs
       if render:
-        if (step+1) % 2 == 0:
-          print(f"Opponent model prediction:")
-          recon_state = self.model.inference_model.decode(ghat_mu.unsqueeze(0), current_history)
-          recon_obs = self.model.reconstruct_state(recon_state).squeeze(0) # remove batch dim
-          SimpleForagingEnv.render_from_obs(recon_obs.detach().cpu().numpy())
-          print(f"Actual state:")
+        if render and (step + 1) % 4 == 0: # Visualize every 4 steps
+          print(f"\n--- Visualization at Step {step+1} ---")
+          
+          print("Generating Q-value heatmap...")
+          self.heatmap_q_values(obs[0], ghat_mu.unsqueeze(0), f"./train_visualization/q_heatmap_step{self.global_step}.png")
+
+          print("Generating subgoal visualizations...")
+          with torch.no_grad():
+              self.model.inference_model.eval()
+              # You need to pass the *current state* s_t to the CVAE to get the ghat_mu used for reconstruction
+              recon_logits, _, _ = self.model.inference_model(
+                  torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device),
+                  current_history
+              )
+              # Use your existing method for the one-hot visualization
+              self.model.visualize_subgoal(ghat_mu.unsqueeze(0), f"./train_visualization/subgoal_onehot_step{self.global_step}.png")
+              # Use the new method for the logits visualization
+              self.model.visualize_subgoal_logits(recon_logits, self.args.state_feature_splits, f"./train_visualization/subgoal_logits_step{self.global_step}.png")
+              
+          print(f"Actual current state:")
+          SimpleForagingEnv.render_from_obs(obs[0])
         SimpleForagingEnv.render_from_obs(obs[0])
       
       if done:
