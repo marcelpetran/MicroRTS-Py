@@ -75,8 +75,9 @@ class SubGoalSelector:
     return subgoal, vae_log_var
 
 
-class OpponentModel:
+class OpponentModel(nn.Module):
   def __init__(self, cvae: t.TransformerCVAE, vae: t.TransformerVAE, selector: SubGoalSelector, optimizer, device, args):
+    super(OpponentModel, self).__init__()
     self.inference_model = cvae
     self.prior_model = vae  # pre-trained VAE
     self.subgoal_selector = selector
@@ -84,6 +85,15 @@ class OpponentModel:
     self.device = device
     self.args = args
     self.mse_loss = nn.MSELoss()
+
+    # Precompute feature weights for reconstruction loss
+    splits = self.args.state_feature_splits
+    weights = []
+    for s in splits:
+        weights.append(torch.full((s,), 1.0 / s))
+    w = torch.cat(weights)
+    w = w / len(splits)
+    self.register_buffer('feature_weights', w)
 
   def eval(self):
     """
@@ -94,13 +104,21 @@ class OpponentModel:
     return
   
 
-  def reconstruct_state(self, reconstructed_state_logits, state_feature_splits):
+  def reconstruct_state(self, reconstructed_state_logits, state_feature_splits=None):
     """
     Convert the reconstructed logit tensor back to one-hot encoded state.
     """
+    if state_feature_splits is None:
+      state_feature_splits = self.args.state_feature_splits
+
+    if reconstructed_state_logits.dim() == 3:
+      # probably got (H, W, F), add batch dim
+      reconstructed_state_logits = reconstructed_state_logits.unsqueeze(0)
+
     reconstructed_state = torch.zeros_like(
       reconstructed_state_logits, device=reconstructed_state_logits.device)
     start_idx = 0
+      
     B, H, W, _ = reconstructed_state.shape
     for size in state_feature_splits:
       end_idx = start_idx + size
@@ -139,29 +157,36 @@ class OpponentModel:
     return
 
 
-  def loss_function(self, reconstructed_x, x, cvae_mu, cvae_log_var, vae_mu, vae_log_var, infer_mu, infer_log_var, eta):
+  def loss_function(
+      self, reconstructed_x, x, cvae_mu, cvae_log_var, 
+      vae_mu, vae_log_var, infer_mu, infer_log_var, dones, eta):
     """
     Calculates the full OMG loss for the CVAE.
     """
+    mask = (1.0 - dones.float())
+    denom = mask.sum().clamp_min(1.0)
     # --- 1. Reconstruction Loss ---
-    # This part trains the CVAE's decoder
     # This forces the CVAE to represent the current state
     recon_loss = 0
-    batch_size = x.shape[0]
 
-    recon_flat = reconstructed_x.view(-1, sum(self.args.state_feature_splits))
-    x_flat = x.view(-1, sum(self.args.state_feature_splits))
+    # recon_flat = reconstructed_x.view(-1, sum(self.args.state_feature_splits))
+    # x_flat = x.view(-1, sum(self.args.state_feature_splits))
 
-    x_split = torch.split(x_flat, self.args.state_feature_splits, dim=-1)
-    recon_split = torch.split(
-      recon_flat, self.args.state_feature_splits, dim=-1)
+    # x_split = torch.split(x_flat, self.args.state_feature_splits, dim=-1)
+    # recon_split = torch.split(
+    #   recon_flat, self.args.state_feature_splits, dim=-1)
+    
+    # for recon_group, x_group in zip(recon_split, x_split):
+    #   bce_loss = F.binary_cross_entropy_with_logits(recon_group, x_group, reduction='none').mean(dim=1)
+    #   print(bce_loss.shape, mask.shape)  # (B*H*W,), (B,1)
+    #   recon_loss += (bce_loss * mask).sum() / mask.sum()
 
-    for recon_group, x_group in zip(recon_split, x_split):
-      recon_loss += F.binary_cross_entropy_with_logits(
-        recon_group, x_group, reduction='mean')
+    bce = F.binary_cross_entropy_with_logits(reconstructed_x, x, reduction='none') # (B, H, W, F)
+    per_cell = (bce * self.feature_weights).sum(dim=-1)
+    per_ex = per_cell.mean(dim=(1, 2))
+    recon_loss = (per_ex * mask).sum() / denom
 
     # --- 2. Inference Loss ---
-    # This part trains the CVAE's encoder
     # This forces the CVAE latent vector g_hat to point towards high-probability future
     if eta < np.random.random():  # eta goes to 0 over time (eq. (8) in the paper)
         # Use the model's own inference (g_hat) as the target
@@ -171,13 +196,15 @@ class OpponentModel:
       target_mu, target_log_var = vae_mu.detach(), vae_log_var.detach()
 
     # KL Divergence between CVAE's prediction and the target distribution
-    omg_loss = -0.5 * torch.mean(1 + cvae_log_var - target_log_var -
+    kl_div_per_example = -0.5 * torch.sum(1 + cvae_log_var - target_log_var -
                                 (((target_mu - cvae_mu) ** 2 +
                                  cvae_log_var.exp()) / target_log_var.exp()),
                                 dim=-1)
 
-    # The final loss is a weighted sum of reconstruction and inference loss
-    total_loss = recon_loss.mean() + self.args.beta * omg_loss.mean()
+    omg_loss = (kl_div_per_example * mask).sum() / denom
+    
+    # --- 3. Total Loss ---
+    total_loss = recon_loss + self.args.beta * omg_loss
     return total_loss
 
   def train_step(self, batch, eval_policy):
@@ -200,6 +227,7 @@ class OpponentModel:
     future_states = batch['future_states'].to(self.device)  # (B, K, H, W, F)
     infer_mu = batch['infer_mu'].to(self.device)
     infer_log_var = batch['infer_log_var'].to(self.device)
+    dones = batch['dones'].to(self.device)
 
     assert x.dim(
     ) == 4, f"Expected states to be 4D (B, H, W, F), got {x.shape}"
@@ -222,7 +250,7 @@ class OpponentModel:
                                                          x, future_states)
 
     loss = self.loss_function(reconstructed_x, x, cvae_mu, cvae_log_var,
-                              vae_mu, vae_log_var, infer_mu, infer_log_var, eval_policy._gmix_eps())
+                              vae_mu, vae_log_var, infer_mu, infer_log_var, dones, eval_policy._gmix_eps())
 
     loss.backward()
     self.optimizer.step()

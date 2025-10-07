@@ -260,6 +260,7 @@ class QLearningAgent:
         "future_states": torch.stack([torch.from_numpy(np.stack(b["future_states"])) for b in batch_list], dim=0),
         "infer_mu": torch.stack([b["infer_mu"] for b in batch_list], dim=0),
         "infer_log_var": torch.stack([b["infer_log_var"] for b in batch_list], dim=0),
+        "dones": torch.tensor([b["done"] for b in batch_list], dtype=torch.float32, device=self.device)
     }
     model_loss = self.model.train_step(om_batch, self)
 
