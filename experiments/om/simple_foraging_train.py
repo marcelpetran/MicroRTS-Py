@@ -72,22 +72,56 @@ if args.train_vae:
     print("Latent LogVar:\n", logvar)
 else:
   vae.load_state_dict(torch.load(
-    "./trained_VAE/vae_simple_foraging.pth", map_location=device))
+    args_parsed.vae_path, map_location=device))
   print("Loaded pre-trained VAE.")
-  
 
 selector = SubGoalSelector(args)
-cvae_optimizer = torch.optim.Adam(cvae.parameters(), lr=3e-4)
+cvae_optimizer = torch.optim.Adam(cvae.parameters(), lr=args.cvae_lr)
 
 op_model = OpponentModel(
   cvae, vae, selector, optimizer=cvae_optimizer, device=device, args=args)
-agent = QLearningAgent(env, op_model, device=device, args=args)
+if not args_parsed.classic:
+  agent = QLearningAgent(env, op_model, device=device, args=args)
+else:
+  agent = QLearningAgentClassic(env, device=device, args=args)
 
-for ep in range(50_000):
+return_list = []
+steps_list = []
+episode_list = []
+
+for ep in range(args_parsed.episodes):
   stats = agent.run_episode(max_steps=args.max_steps)
   if (ep+1) % 50 == 0:
-    print(
-      f"Episode {ep+1}: Return={stats['return']:.2f} ({True if stats['return'] > 0 else False}), Steps={stats['steps']}")
+    print(f"Episode {ep+1}: Return={stats['return']:.2f}, Steps={stats['steps']}")
+    
+      
   # run a test episode
-  if (ep+1) % 100 == 0:
-    agent.run_test_episode(max_steps=30)
+  if (ep+1) % 500 == 0:
+    stats = agent.run_test_episode(max_steps=args.max_steps, render=True)
+    return_list.append(stats['return'])
+    steps_list.append(stats['steps'])
+    episode_list.append(ep+1)
+
+# Save the trained models
+# torch.save(cvae.state_dict(), "./trained_cvae/cvae.pth")
+# Save the Q-network
+# torch.save(agent.q.state_dict(), "./trained_qnet/qnet.pth")
+# torch.save(agent.q.state_dict(), "./trained_qnet/qnetclassic.pth")
+# print("Training complete and models saved.")
+
+# Two graphs: return over episodes on the left and steps over episodes on the right
+plt.figure(figsize=(12, 5))
+plt.subplot(1, 2, 1)
+plt.plot(episode_list, return_list, label='Return per Episode')
+plt.xlabel('Episode')
+plt.ylabel('Return')
+plt.title('Return over Episodes')
+plt.legend()
+plt.subplot(1, 2, 2)
+plt.plot(episode_list, steps_list, label='Steps per Episode', color='orange')
+plt.xlabel('Episode')
+plt.ylabel('Steps')
+plt.title('Steps over Episodes')
+plt.legend()
+plt.tight_layout()
+plt.show()
