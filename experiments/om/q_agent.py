@@ -316,10 +316,11 @@ class QLearningAgent:
     Gathers a trajectory, stores future slices for subgoal selection,
     and trains the Q-network and OpponentModel.
     """
-    if random.random() < self._eps():
-      self.opponent_agent = RandomAgent(1)
-    else:
-      self.opponent_agent = SimpleAgent(1)
+    self.opponent_agent = SimpleAgent(1)
+    # if random.random() < self._eps():
+    #   self.opponent_agent = RandomAgent(1)
+    # else:
+    #   self.opponent_agent = SimpleAgent(1)
     
     obs = self.env.reset()
     done = False
@@ -381,13 +382,13 @@ class QLearningAgent:
 
     return {"return": ep_ret, "steps": step + 1}
   
-  def run_test_episode(self, max_steps: Optional[int] = None):
+  def run_test_episode(self, max_steps: Optional[int] = None, render: bool = False) -> Dict[str, float]:
     self.opponent_agent = SimpleAgent(1)
     obs = self.env.reset()
     done = False
     ep_ret = 0.0
-
-    SimpleForagingEnv.render_from_obs(obs[0])
+    if render:
+      SimpleForagingEnv.render_from_obs(obs[0])
 
     history_len = self.args.max_history_length
     history = {
@@ -409,7 +410,14 @@ class QLearningAgent:
 
       ep_ret += reward[0]
       obs = next_obs
-      SimpleForagingEnv.render_from_obs(obs[0])
+      if render:
+        if (step+1) % 2 == 0:
+          print(f"Opponent model prediction:")
+          recon_state = self.model.inference_model.decode(ghat_mu.unsqueeze(0), current_history)
+          recon_obs = self.model.reconstruct_state(recon_state).squeeze(0) # remove batch dim
+          SimpleForagingEnv.render_from_obs(recon_obs.detach().cpu().numpy())
+          print(f"Actual state:")
+        SimpleForagingEnv.render_from_obs(obs[0])
       
       if done:
         break
