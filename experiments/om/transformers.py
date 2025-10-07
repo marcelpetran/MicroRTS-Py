@@ -555,7 +555,7 @@ def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_e
 
     if (i + 1) % save_every_n_epochs == 0:
       torch.save(model.state_dict(),
-                 f"Trained_VAE/transformer_vae_epoch_{i+1}.pth")
+                 f"Trained_VAE/vae_epoch_{i+1}.pth")
       print(f"Model saved at epoch {i+1}")
 
   loss_collector = np.array(loss_collector)

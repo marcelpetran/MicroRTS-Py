@@ -25,10 +25,11 @@ class OMGArgs:
   # "conservative" => Eq.(7), "optimistic" => Eq.(6)
   selector_mode: str = "conservative"
   train_vae: bool = True
+  vae_lr: float = 1e-4
+  cvae_lr: float = 3e-4
 
   # Transformer architecture params
-  alpha: float = 1.0
-  beta: float = 1.002
+  beta: float = 1.002 # Weight for the KL loss
   state_shape: Tuple[int, int, int] = None  # (H, W, F)
   H: int = 5  # grid height
   W: int = 5  # grid width
