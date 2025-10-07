@@ -200,6 +200,7 @@ class TransformerCVAE(nn.Module):
   def get_history_embeddings(self, history):
     """
     Aggregates and embeds the historical trajectory into a single sequence.
+    Expected keys: 'states', 'actions'
     history['states'] is a list of tensors, each either (H, W, F) or (B, H, W, F)
     history['actions'] is a list of tensors, each either () or (B,)
     """
@@ -238,30 +239,41 @@ class TransformerCVAE(nn.Module):
         history_embeddings.append(s_t_embedded)
 
     return history_embeddings
+  
+  def get_history_seq(self, history):
+    """
+    Concatenates the embedded history into a single sequence tensor.
+    Args:
+        history (dict): Dictionary containing 'states' and optionally 'actions'.
+    Returns:
+        Tensor: Concatenated history sequence of shape (B, total_seq_len, d_model)
+    """
+    history_embeddings = self.get_history_embeddings(history)
+    if history_embeddings is None or len(history_embeddings) == 0:
+      # If no history, use a null condition state, therefore it should behave like a regular VAE
+      history_embeddings = [self.state_embedder(
+        self.null_condition.to(next(self.parameters()).device))]
+      
+      # Concatenate all history elements into a single long sequence
+    return torch.cat(history_embeddings, dim=1)  # (B, total_seq_len, d_model)
 
-  def encode(self, x, history):
+  def encode(self, x, history, is_history_seq=False):
     """
     Encodes the input state x conditioned on the historical trajectory.
     Args:
         x (Tensor): Input state of shape (B, H, W, F)
-        history (dict): A dictionary containing historical states and actions.
-                        Expected keys: 'states', 'actions', 'opp_actions' (if applicable)
+        history (tensor or dict): The embedded history sequence or raw history dict.
+        is_history_seq (bool): If True, 'history' is already an embedded sequence.
     Returns:
         Tensor: Mean of the latent distribution (B, latent_dim)
         Tensor: Log-variance of the latent distribution (B, latent_dim)
     """
     x_embedded = self.state_embedder(x)
 
-    # Process the historical trajectory to form the condition
-    history_embeddings = self.get_history_embeddings(history)
-
-    if history_embeddings is None or len(history_embeddings) == 0:
-      # If no history, use a null condition state, therefore it should behave like a regular VAE
-      history_embeddings = [self.state_embedder(
-        self.null_condition.to(x.device))]
-
-    # Concatenate all history elements into a single long sequence
-    condition_seq = torch.cat(history_embeddings, dim=1)
+    if not is_history_seq:
+      condition_seq = self.get_history_seq(history)
+    else:
+      condition_seq = history
 
     combined_seq = torch.cat([x_embedded, condition_seq], dim=1)
     encoder_output = self.transformer_encoder(combined_seq)
@@ -276,17 +288,22 @@ class TransformerCVAE(nn.Module):
     eps = torch.randn_like(std)
     return mu + eps * std
 
-  def decode(self, z, history_seq):
+  def decode(self, z, history, is_history_seq=False):
     """
     Decodes a latent vector z conditioned on an embedded history sequence.
 
     Args:
         z (Tensor): The latent vector. Shape: (B, latent_dim)
-        history_seq (Tensor): The pre-embedded and concatenated history sequence
-                              that acts as memory for the decoder.
+        history (Tensor or dict): The embedded history sequence or raw history dict.
+        is_history_seq (bool): If True, 'history' is already an embedded sequence.
     Returns:
         Tensor: Reconstructed state of shape (B, H, W, F)
     """
+    if not is_history_seq:
+      history_seq = self.get_history_seq(history)
+    else:
+      history_seq = history
+
     B = z.shape[0]
     memory = history_seq
 
@@ -312,16 +329,10 @@ class TransformerCVAE(nn.Module):
         Tensor: Mean of the latent distribution (B, latent_dim)
         Tensor: Log-variance of the latent distribution (B, latent_dim)
     """
-    history_embeddings = self.get_history_embeddings(history)
-    if history_embeddings is None or len(history_embeddings) == 0:
-      # If no history, use a null condition state, therefore it should behave like a regular VAE
-      history_embeddings = [self.state_embedder(
-        self.null_condition.to(x.device))]
-
-    history_seq = torch.cat(history_embeddings, dim=1)
-    mu, logvar = self.encode(x, history)
+    history_seq = self.get_history_seq(history)
+    mu, logvar = self.encode(x, history_seq, is_history_seq=True)
     z = self.reparameterize(mu, logvar)
-    reconstructed_x = self.decode(z, history_seq)
+    reconstructed_x = self.decode(z, history_seq, is_history_seq=True)
     return reconstructed_x, mu, logvar
 
 
