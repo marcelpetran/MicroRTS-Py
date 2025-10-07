@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-
+import matplotlib.pyplot as plt
 
 class SubGoalSelector:
   def __init__(self, args):
@@ -257,12 +257,12 @@ class OpponentModel(nn.Module):
 
     return loss.item()
 
+# Helper function to plot the foraging grid
 def _plot_foraging_grid(grid: np.ndarray, filename: str):
     """
     Creates a plot of a single (H, W, F) foraging state.
     """
-    import matplotlib.pyplot as plt
-
+    
     # Convert the one-hot grid to a grid of integer labels for coloring
     # e.g., empty=0, food=1, agent1=2, agent2=3
     grid_labels = np.argmax(grid, axis=-1)
