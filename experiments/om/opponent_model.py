@@ -155,7 +155,40 @@ class OpponentModel(nn.Module):
     _plot_foraging_grid(state_to_plot, filename)
 
     return
-
+  
+  def visualize_subgoal_logits(reconstructed_logits: torch.Tensor, state_feature_splits: tuple, filename: str="subgoal_logits.png"):
+    """
+    Visualizes the softmax probabilities of the reconstructed subgoal logits.
+    """
+    # Take the first item in the batch and move to CPU
+    logits = reconstructed_logits[0].detach().cpu()
+    
+    # Apply softmax to get probabilities
+    probs = torch.zeros_like(logits)
+    start_idx = 0
+    for size in state_feature_splits:
+        end_idx = start_idx + size
+        probs[:, :, start_idx:end_idx] = F.softmax(logits[:, :, start_idx:end_idx], dim=-1)
+        start_idx = end_idx
+        
+    probs = probs.numpy() # (H, W, F)
+    
+    H, W, F_dim = probs.shape
+    
+    # Create a subplot for each feature's probability map
+    fig, axes = plt.subplots(1, F_dim, figsize=(F_dim * 4, 4))
+    fig.suptitle("Subgoal Feature Probabilities (Softmax over Logits)")
+    
+    feature_names = ["Empty", "Food", "Agent1", "Agent2"] # Make sure this is correct
+    
+    for i in range(F_dim):
+        ax = axes[i]
+        im = ax.imshow(probs[:, :, i], cmap='hot', vmin=0, vmax=1)
+        ax.set_title(f"P({feature_names[i]})")
+        fig.colorbar(im, ax=ax)
+        
+    plt.savefig(filename)
+    plt.close()
 
   def loss_function(
       self, reconstructed_x, x, cvae_mu, cvae_log_var, 
