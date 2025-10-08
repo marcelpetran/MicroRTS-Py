@@ -29,8 +29,10 @@ args = OMGArgs(
     batch_size=16,
     capacity=1_000,
     horizon_H=4,
-    qnet_hidden=128,
+    qnet_hidden=512,
     eps_decay_steps=150_000,
+    visualise_every_n_step=3,
+    max_steps=args_parsed.max_steps,
     selector_mode="conservative",
     beta=1.002,
     train_vae=args_parsed.train_vae,
@@ -38,12 +40,12 @@ args = OMGArgs(
     H=H, W=W,
     state_feature_splits=(F_dim,),
     action_dim=NUM_ACTIONS,
-    latent_dim=4,
-    d_model=128,
-    nhead=2,
-    num_encoder_layers=2,
-    num_decoder_layers=2,
-    dim_feedforward=512,
+    latent_dim=8,
+    d_model=256,
+    nhead=4,
+    num_encoder_layers=1,
+    num_decoder_layers=1,
+    dim_feedforward=1024,
     dropout=0.12
 )
 
@@ -59,8 +61,8 @@ if args.train_vae:
   vae_optimizer = torch.optim.Adam(vae.parameters(), lr=args.vae_lr)
   vae_replay = ReplayBuffer(10_000)
 
-  t.train_vae(env, vae, vae_replay, vae_optimizer, num_epochs=100_000,
-              save_every_n_epochs=100_000, batch_size=args.batch_size, max_steps=args.max_steps, logg=10_000)
+  t.train_vae(env, vae, vae_replay, vae_optimizer, num_epochs=30_000,
+              save_every_n_epochs=30_000, batch_size=args.batch_size, max_steps=args.max_steps, logg=1_000)
   print("VAE pre-training complete.")
   print("Simple test of VAE reconstruction:")
   vae.eval()
