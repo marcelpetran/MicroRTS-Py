@@ -1,8 +1,11 @@
 from dataclasses import dataclass
 from typing import Tuple
 
+from torch import device
+
 @dataclass
 class OMGArgs:
+  device: str = "cpu"  # "cpu" or "cuda"
   gamma: float = 0.99
   lr: float = 2.5e-4
   batch_size: int = 16

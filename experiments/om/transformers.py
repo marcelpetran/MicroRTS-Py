@@ -539,7 +539,7 @@ def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_e
     batch = replay.sample(batch_size)
     state_batch = torch.from_numpy(
       np.array([b['state'] for b in batch])).float()  # (B, H, W, F)
-
+    state_batch = state_batch.to(model.args.device)
     model.train()
     reconstructed_state, mu, logvar = model(state_batch)
     loss = vae_loss(reconstructed_state, state_batch, mu,

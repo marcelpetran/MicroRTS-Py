@@ -35,6 +35,7 @@ H, W, F_dim = obs_sample[0].shape
 NUM_ACTIONS = 4  # Up, Down, Left, Right
 
 args = OMGArgs(
+    device=device,
     batch_size=16,
     capacity=1_000,
     horizon_H=4,
