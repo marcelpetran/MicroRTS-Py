@@ -206,6 +206,7 @@ class TransformerCVAE(nn.Module):
     """
     def to_bhwf(x):
       # Accept (H,W,F) or (B,H,W,F) and return (B,H,W,F)
+      x = x.to(self.args.device)
       if x.dim() == 3:
         return x.unsqueeze(0)
       if x.dim() == 4:
@@ -215,11 +216,12 @@ class TransformerCVAE(nn.Module):
 
     def to_b(x):
       # Accept scalar () or vector (B,) and return (B,)
+      x = x.to(self.args.device)
       if x.dim() == 0:
         return x.unsqueeze(0)
       if x.dim() == 1:
         return x
-      return x.view(x.shape[0])  # be forgiving if shaped (B,1)
+      return x.view(x.shape[0])
 
     states = history.get("states", [])
     actions = history.get("actions", None)
@@ -252,10 +254,10 @@ class TransformerCVAE(nn.Module):
     if history_embeddings is None or len(history_embeddings) == 0:
       # If no history, use a null condition state, therefore it should behave like a regular VAE
       history_embeddings = [self.state_embedder(
-        self.null_condition.to(next(self.parameters()).device))]
+        self.null_condition.to(self.args.device))]
       
       # Concatenate all history elements into a single long sequence
-    return torch.cat(history_embeddings, dim=1)  # (B, total_seq_len, d_model)
+    return torch.cat(history_embeddings, dim=1).to(self.args.device)  # (B, total_seq_len, d_model)
 
   def encode(self, x, history, is_history_seq=False):
     """
@@ -268,12 +270,13 @@ class TransformerCVAE(nn.Module):
         Tensor: Mean of the latent distribution (B, latent_dim)
         Tensor: Log-variance of the latent distribution (B, latent_dim)
     """
+    x = x.to(self.args.device)
     x_embedded = self.state_embedder(x)
 
     if not is_history_seq:
       condition_seq = self.get_history_seq(history)
     else:
-      condition_seq = history
+      condition_seq = history.to(self.args.device)
 
     combined_seq = torch.cat([x_embedded, condition_seq], dim=1)
     encoder_output = self.transformer_encoder(combined_seq)
@@ -299,10 +302,11 @@ class TransformerCVAE(nn.Module):
     Returns:
         Tensor: Reconstructed state of shape (B, H, W, F)
     """
+    z = z.to(self.args.device)
     if not is_history_seq:
       history_seq = self.get_history_seq(history)
     else:
-      history_seq = history
+      history_seq = history.to(self.args.device)
 
     B = z.shape[0]
     memory = history_seq
@@ -329,6 +333,7 @@ class TransformerCVAE(nn.Module):
         Tensor: Mean of the latent distribution (B, latent_dim)
         Tensor: Log-variance of the latent distribution (B, latent_dim)
     """
+    x = x.to(self.args.device)
     history_seq = self.get_history_seq(history)
     mu, logvar = self.encode(x, history_seq, is_history_seq=True)
     z = self.reparameterize(mu, logvar)
@@ -382,6 +387,7 @@ class TransformerVAE(nn.Module):
           nn.init.zeros_(m.bias)
 
   def encode(self, x):
+    x = x.to(self.args.device)
     x_embedded = self.embedd(x)
     encoder_output = self.transformer_encoder(x_embedded)
     aggregated_output = encoder_output[:, 0, :]
