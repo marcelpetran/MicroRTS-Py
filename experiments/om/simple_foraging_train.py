@@ -3,7 +3,7 @@ from opponent_model import OpponentModel, SubGoalSelector
 from q_agent import QLearningAgent, ReplayBuffer
 from q_agent_classic import QLearningAgentClassic
 from omg_args import OMGArgs
-import experiments.om.transformers as t  # your module name
+import transformers as t
 import torch
 import matplotlib.pyplot as plt
 import argparse
