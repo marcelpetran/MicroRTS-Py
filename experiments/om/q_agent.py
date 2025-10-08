@@ -376,9 +376,9 @@ class QLearningAgent:
     collated = {"states": [], "actions": []}
     for i in range(max_len):
       collated["states"].append(torch.stack(
-        [h["states"][i] for h in histories]))
+        [h["states"][i].to(self.args.device) for h in histories]))
       collated["actions"].append(torch.stack(
-        [h["actions"][i] for h in histories]))
+        [h["actions"][i].to(self.args.device) for h in histories]))
 
     return collated
 
