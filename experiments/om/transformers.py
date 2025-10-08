@@ -526,6 +526,7 @@ def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_e
   
   loss_collector = []
   epoch_collector = []
+  avg_loss = 0.0
   for i in range(num_epochs):
     # Collect a new episode
     collect_single_episode()
@@ -548,10 +549,13 @@ def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_e
     loss.backward()
     optimizer.step()
 
+    avg_loss += loss.item()
+
     if (i + 1) % logg == 0:
       loss_collector.append(loss.item())
       epoch_collector.append(i + 1)
-      print(f"Epoch {i+1}/{num_epochs}, Loss: {loss.item()}")
+      print(f"Epoch {i+1}/{num_epochs}, Loss: {loss.item()}, Avg Loss: {avg_loss/logg}")
+      avg_loss = 0.0
 
     if (i + 1) % save_every_n_epochs == 0:
       torch.save(model.state_dict(),
