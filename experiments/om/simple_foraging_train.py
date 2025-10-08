@@ -16,6 +16,7 @@ parser.add_argument('--classic', action='store_true', default=False, help='Use c
 parser.add_argument('--episodes', type=int, default=50_000, help='Number of training episodes')
 parser.add_argument('--env_size', type=int, default=11, help='Grid size for SimpleForagingEnv')
 parser.add_argument('--max_steps', type=int, default=50, help='Max steps per episode')
+parser.add_argument('--qnet_dim', type=int, default=128, help='Hidden dimension for Q-network')
 args_parsed = parser.parse_args()
 
 # Necessary directories
