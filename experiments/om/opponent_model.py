@@ -1,4 +1,4 @@
-import experiments.om.transformers as t
+import transformers as t
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
