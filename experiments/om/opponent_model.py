@@ -93,7 +93,7 @@ class OpponentModel(nn.Module):
         weights.append(torch.full((s,), 1.0 / s))
     w = torch.cat(weights)
     w = w / len(splits)
-    self.register_buffer('feature_weights', w)
+    self.register_buffer('feature_weights', w.to(self.device))  # (F,)
 
   def eval(self):
     """
