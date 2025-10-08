@@ -7,6 +7,7 @@ import experiments.om.transformers as t  # your module name
 import torch
 import matplotlib.pyplot as plt
 import argparse
+import os
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--train_vae', action='store_true', default=False, help='Whether to pre-train the VAE')
@@ -16,6 +17,12 @@ parser.add_argument('--episodes', type=int, default=50_000, help='Number of trai
 parser.add_argument('--env_size', type=int, default=11, help='Grid size for SimpleForagingEnv')
 parser.add_argument('--max_steps', type=int, default=50, help='Max steps per episode')
 args_parsed = parser.parse_args()
+
+# Necessary directories
+os.makedirs('./trained_vae', exist_ok=True)
+os.makedirs('./trained_cvae', exist_ok=True)
+os.makedirs('./trained_qnet', exist_ok=True)
+os.makedirs('./diagrams', exist_ok=True)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -76,6 +83,7 @@ if args.train_vae:
     print("Latent Mu:\n", mu)
     print("Latent LogVar:\n", logvar)
 else:
+  assert os.path.exists(args_parsed.vae_path), "VAE path does not exist!"
   vae.load_state_dict(torch.load(
     args_parsed.vae_path, map_location=device))
   print("Loaded pre-trained VAE.")
