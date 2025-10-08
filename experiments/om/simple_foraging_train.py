@@ -13,11 +13,13 @@ parser.add_argument('--train_vae', action='store_true', default=False, help='Whe
 parser.add_argument('--vae_path', type=str, default='./trained_vae/vae.pth', help='Path to pre-trained VAE weights')
 parser.add_argument('--classic', action='store_true', default=False, help='Use classic Q-learning agent without opponent modeling')
 parser.add_argument('--episodes', type=int, default=50_000, help='Number of training episodes')
+parser.add_argument('--env_size', type=int, default=11, help='Grid size for SimpleForagingEnv')
+parser.add_argument('--max_steps', type=int, default=50, help='Max steps per episode')
 args_parsed = parser.parse_args()
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-env = SimpleForagingEnv(grid_size=5, max_steps=30)
+env = SimpleForagingEnv(grid_size=args_parsed.env_size, max_steps=args_parsed.max_steps)
 
 obs_sample = env.reset()
 H, W, F_dim = obs_sample[0].shape
