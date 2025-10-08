@@ -156,11 +156,11 @@ class OpponentModel(nn.Module):
 
     return
   
-  def visualize_subgoal_logits(reconstructed_logits: torch.Tensor, state_feature_splits: tuple, filename: str="subgoal_logits.png"):
+  def visualize_subgoal_logits(self, reconstructed_logits: torch.Tensor, state_feature_splits: tuple, filename: str="subgoal_logits.png"):
     """
     Visualizes the softmax probabilities of the reconstructed subgoal logits.
     """
-    # Take the first item in the batch and move to CPU
+    assert reconstructed_logits.dim() == 4, "Expected logits to be 4D (B, H, W, F)"
     logits = reconstructed_logits[0].detach().cpu()
     
     # Apply softmax to get probabilities
