@@ -10,6 +10,7 @@ class OMGArgs:
   min_replay: int = 1_000
   train_every: int = 4
   target_update_every: int = 1_000
+  visualise_every_n_step: int = 3
   eps_start: float = 1.0
   eps_end: float = 0.05
   eps_decay_steps: int = 50_000
