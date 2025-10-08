@@ -4,26 +4,26 @@ channels:
   - defaults
 dependencies:
   - openjdk=23
-  - ca-certificates=2025.6.15=hbd8a1cb_0
-  - libcxx=20.1.7=ha82da77_0
-  - libffi=3.3=h9f76cd9_2
-  - liblzma=5.8.1=h39f12f2_2
-  - liblzma-devel=5.8.1=h39f12f2_2
-  - libsqlite=3.46.0=hfb93653_0
-  - libzlib=1.2.13=hfb2fe0b_6
-  - ncurses=6.5=h5e97a16_3
-  - openssl=1.1.1w=h53f4e23_0
-  - pip=25.1.1=pyh8b19718_0
-  - python=3.9.0=h4b4120c_5_cpython
-  - readline=8.2=h1d1bf99_2
-  - setuptools=80.9.0=pyhff2d567_0
-  - sqlite=3.46.0=h5838104_0
-  - tk=8.6.13=h5083fa2_1
-  - wheel=0.45.1=pyhd8ed1ab_1
-  - xz=5.8.1=h9a6d368_2
-  - xz-gpl-tools=5.8.1=h9a6d368_2
-  - xz-tools=5.8.1=h39f12f2_2
-  - zlib=1.2.13=hfb2fe0b_6
+  - ca-certificates=2025.6.15
+  - libcxx=20.1.7
+  - libffi=3.3
+  - liblzma=5.8.1
+  - liblzma-devel=5.8.1
+  - libsqlite=3.46.0
+  - libzlib=1.2.13
+  - ncurses=6.5
+  - openssl=1.1.1w
+  - pip=25.1.1
+  - python=3.9.0
+  - readline=8.2
+  - setuptools=80.9.0
+  - sqlite=3.46.0
+  - tk=8.6.13
+  - wheel=0.45.1
+  - xz=5.8.1
+  - xz-gpl-tools=5.8.1
+  - xz-tools=5.8.1
+  - zlib=1.2.13
   - pip:
       - absl-py==2.3.1
       - annotated-types==0.7.0
