@@ -26,6 +26,7 @@ os.makedirs('./trained_qnet', exist_ok=True)
 os.makedirs('./diagrams', exist_ok=True)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"Using device: {device}")
 
 env = SimpleForagingEnv(grid_size=args_parsed.env_size, max_steps=args_parsed.max_steps)
 
