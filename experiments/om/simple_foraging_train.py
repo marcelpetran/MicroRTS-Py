@@ -9,14 +9,25 @@ import matplotlib.pyplot as plt
 import argparse
 import os
 
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
 parser.add_argument('--train_vae', action='store_true', default=False, help='Whether to pre-train the VAE')
 parser.add_argument('--vae_path', type=str, default='./trained_vae/vae.pth', help='Path to pre-trained VAE weights')
 parser.add_argument('--classic', action='store_true', default=False, help='Use classic Q-learning agent without opponent modeling')
 parser.add_argument('--episodes', type=int, default=50_000, help='Number of training episodes')
 parser.add_argument('--env_size', type=int, default=11, help='Grid size for SimpleForagingEnv')
 parser.add_argument('--max_steps', type=int, default=50, help='Max steps per episode')
+parser.add_argument('--batch_size', type=int, default=16, help='Batch size for training')
 parser.add_argument('--qnet_dim', type=int, default=128, help='Hidden dimension for Q-network')
+parser.add_argument('--latent_dim', type=int, default=8, help='Latent dimension for VAE/CVAE')
+parser.add_argument('--d_model', type=int, default=256, help='Transformer model dimension')
+parser.add_argument('--nhead', type=int, default=4, help='Number of attention heads')
+parser.add_argument('--num_encoder_layers', type=int, default=1, help='Number of encoder layers')
+parser.add_argument('--num_decoder_layers', type=int, default=1, help='Number of decoder layers')
+parser.add_argument('--dim_feedforward', type=int, default=1024, help='Dimension of feedforward network')
+parser.add_argument('--dropout', type=float, default=0.12, help='Dropout rate')
+parser.add_argument('--beta', type=float, default=1.002, help='Beta for KL loss in VAE/CVAE')
+parser.add_argument('--horizon', type=int, default=3, help='Future window H for opponent modeling (Selector module)')
+parser.add_argument('--eps_decay_steps', type=int, default=150_000, help='Epsilon decay steps for epsilon-greedy policy')
 args_parsed = parser.parse_args()
 
 # Necessary directories
@@ -36,27 +47,27 @@ NUM_ACTIONS = 4  # Up, Down, Left, Right
 
 args = OMGArgs(
     device=device,
-    batch_size=16,
+    batch_size=args_parsed.batch_size,
     capacity=1_000,
-    horizon_H=4,
-    qnet_hidden=512,
-    eps_decay_steps=150_000,
+    horizon_H=args_parsed.horizon,
+    qnet_hidden=args_parsed.qnet_dim,
+    eps_decay_steps=args_parsed.eps_decay_steps,
     visualise_every_n_step=3,
     max_steps=args_parsed.max_steps,
     selector_mode="conservative",
-    beta=1.002,
+    beta=args_parsed.beta,
     train_vae=args_parsed.train_vae,
     state_shape=obs_sample[0].shape,
     H=H, W=W,
     state_feature_splits=(F_dim,),
     action_dim=NUM_ACTIONS,
-    latent_dim=8,
-    d_model=256,
-    nhead=4,
-    num_encoder_layers=1,
-    num_decoder_layers=1,
-    dim_feedforward=1024,
-    dropout=0.12
+    latent_dim=args_parsed.latent_dim,
+    d_model=args_parsed.d_model,
+    nhead=args_parsed.nhead,
+    num_encoder_layers=args_parsed.num_encoder_layers,
+    num_decoder_layers=args_parsed.num_decoder_layers,
+    dim_feedforward=args_parsed.dim_feedforward,
+    dropout=args_parsed.dropout,
 )
 
 # VAE (Teacher)
