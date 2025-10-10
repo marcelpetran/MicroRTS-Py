@@ -389,11 +389,11 @@ class QLearningAgent:
     Gathers a trajectory, stores future slices for subgoal selection,
     and trains the Q-network and OpponentModel.
     """
-    # self.opponent_agent = SimpleAgent(1)
-    if random.random() < self._eps():
-      self.opponent_agent = RandomAgent(1)
-    else:
-      self.opponent_agent = SimpleAgent(1)
+    self.opponent_agent = SimpleAgent(1)
+    # if random.random() < self._eps():
+    #   self.opponent_agent = RandomAgent(1)
+    # else:
+    #   self.opponent_agent = SimpleAgent(1)
     
     obs = self.env.reset()
     done = False
@@ -488,7 +488,7 @@ class QLearningAgent:
           print(f"\n--- Visualization at Step {step+1} ---")
           
           print("Generating Q-value heatmap...")
-          self.heatmap_q_values(obs[0], ghat_mu.unsqueeze(0), f"./diagrams/q_heatmap_step{self.global_step}.png")
+          self.heatmap_q_values(obs[0], ghat_mu.unsqueeze(0), f"./diagrams/q_heatmap_step{self.global_step + step}.png")
 
           print("Generating subgoal visualizations...")
           with torch.no_grad():
@@ -497,8 +497,8 @@ class QLearningAgent:
                   torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device),
                   current_history
               )
-              self.model.visualize_subgoal(ghat_mu.unsqueeze(0), f"./diagrams/subgoal_onehot_step{self.global_step}.png")
-              self.model.visualize_subgoal_logits(obs[0], recon_logits, self.args.state_feature_splits, f"./diagrams/subgoal_logits_step{self.global_step}.png")
+              self.model.visualize_subgoal(ghat_mu.unsqueeze(0), f"./diagrams/subgoal_onehot_step{self.global_step + step}.png")
+              self.model.visualize_subgoal_logits(obs[0], recon_logits, self.args.state_feature_splits, f"./diagrams/subgoal_logits_step{self.global_step + step}.png")
               
           print(f"Actual current state:")
           SimpleForagingEnv.render_from_obs(obs[0])

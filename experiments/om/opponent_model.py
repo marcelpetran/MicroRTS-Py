@@ -172,6 +172,7 @@ class OpponentModel(nn.Module):
         start_idx = end_idx
         
     probs = probs.numpy() # (H, W, F)
+    labels = {0: 'Empty', 1: 'Food', 2: 'Agent 1 (Self)', 3: 'Agent 2 (Opponent)'}
     
     H, W, F_dim = probs.shape
     
@@ -179,20 +180,24 @@ class OpponentModel(nn.Module):
     gs = fig.add_gridspec(2, F_dim)
 
     # Plot the actual current state
-    ax_obs = fig.add_subplot(gs[0, :])
+    ax_obs = fig.add_subplot(gs[0, 1])
+
     obs_labels = np.argmax(obs, axis=-1)
-    cmap_obs = plt.get_cmap('gray_r', F_dim)
-    ax_obs.imshow(obs_labels, cmap=cmap_obs, vmin=0, vmax=F_dim - 1)
+
+    cmap_obs = plt.get_cmap('viridis', F_dim)
+    im = ax_obs.imshow(obs_labels, cmap=cmap_obs, vmin=0, vmax=F_dim - 1)
+    fig.colorbar(im, ax=ax_obs, ticks=np.arange(len(labels)))
+    cbar = im.colorbar
+    cbar.ax.set_yticklabels([labels[i] for i in range(len(labels))])
+
     ax_obs.set_title("Current obs (s_t)")
     ax_obs.set_xticks(np.arange(W))
     ax_obs.set_yticks(np.arange(H))
     
-    feature_names = ["Empty", "Food", "Agent1", "Agent2"] # Make sure this is correct
-    
     for i in range(F_dim):
         ax = fig.add_subplot(gs[1, i])
         im = ax.imshow(probs[:, :, i], cmap='hot', vmin=0, vmax=1)
-        ax.set_title(f"P({feature_names[i]})")
+        ax.set_title(f"P({labels[i]})")
         fig.colorbar(im, ax=ax)
         ax.set_xticks(np.arange(W))
         ax.set_yticks(np.arange(H))

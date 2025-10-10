@@ -1,6 +1,7 @@
---train_vae
 --env_size
 7
+--max_steps
+30
 --batch_size
 16
 --qnet_dim
