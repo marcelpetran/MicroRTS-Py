@@ -191,11 +191,11 @@ class QLearningAgentClassic:
     Gathers a trajectory, stores future slices for subgoal selection,
     and trains the Q-network and OpponentModel.
     """
-    self.opponent_agent = SimpleAgent(1)
-    # if random.random() < self._eps():
-    #   self.opponent_agent = RandomAgent(1)
-    # else:
-    #   self.opponent_agent = SimpleAgent(1)
+    # self.opponent_agent = SimpleAgent(1)
+    if random.random() < self._eps():
+      self.opponent_agent = RandomAgent(1)
+    else:
+      self.opponent_agent = SimpleAgent(1)
     
     obs = self.env.reset()
     done = False
