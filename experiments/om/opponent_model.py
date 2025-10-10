@@ -156,7 +156,7 @@ class OpponentModel(nn.Module):
 
     return
   
-  def visualize_subgoal_logits(self, reconstructed_logits: torch.Tensor, state_feature_splits: tuple, filename: str="subgoal_logits.png"):
+  def visualize_subgoal_logits(self, obs: np.ndarray, reconstructed_logits: torch.Tensor, state_feature_splits: tuple, filename: str="subgoal_logits.png"):
     """
     Visualizes the softmax probabilities of the reconstructed subgoal logits.
     """
@@ -175,18 +175,30 @@ class OpponentModel(nn.Module):
     
     H, W, F_dim = probs.shape
     
-    # Create a subplot for each feature's probability map
-    fig, axes = plt.subplots(1, F_dim, figsize=(F_dim * 4, 4))
-    fig.suptitle("Subgoal Feature Probabilities (Softmax over Logits)")
+    fig = plt.figure(figsize=(F_dim * 4 + 4, 8))
+    gs = fig.add_gridspec(2, F_dim)
+
+    # Plot the actual current state
+    ax_obs = fig.add_subplot(gs[0, :])
+    obs_labels = np.argmax(obs, axis=-1)
+    cmap_obs = plt.get_cmap('gray_r', F_dim)
+    ax_obs.imshow(obs_labels, cmap=cmap_obs, vmin=0, vmax=F_dim - 1)
+    ax_obs.set_title("Current obs (s_t)")
+    ax_obs.set_xticks(np.arange(W))
+    ax_obs.set_yticks(np.arange(H))
     
     feature_names = ["Empty", "Food", "Agent1", "Agent2"] # Make sure this is correct
     
     for i in range(F_dim):
-        ax = axes[i]
+        ax = fig.add_subplot(gs[1, i])
         im = ax.imshow(probs[:, :, i], cmap='hot', vmin=0, vmax=1)
         ax.set_title(f"P({feature_names[i]})")
         fig.colorbar(im, ax=ax)
-        
+        ax.set_xticks(np.arange(W))
+        ax.set_yticks(np.arange(H))
+
+    fig.suptitle("Current obs and Inferred Subgoal Probabilities", fontsize=16)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.savefig(filename)
     plt.close()
 

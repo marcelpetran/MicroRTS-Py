@@ -498,7 +498,7 @@ class QLearningAgent:
                   current_history
               )
               self.model.visualize_subgoal(ghat_mu.unsqueeze(0), f"./diagrams/subgoal_onehot_step{self.global_step}.png")
-              self.model.visualize_subgoal_logits(recon_logits, self.args.state_feature_splits, f"./diagrams/subgoal_logits_step{self.global_step}.png")
+              self.model.visualize_subgoal_logits(obs[0], recon_logits, self.args.state_feature_splits, f"./diagrams/subgoal_logits_step{self.global_step}.png")
               
           print(f"Actual current state:")
           SimpleForagingEnv.render_from_obs(obs[0])
