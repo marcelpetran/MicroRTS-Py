@@ -89,8 +89,10 @@ class SimpleForagingEnv:
     # Check for food collection
     for agent_id, pos in self.agents.items():
       if pos in self.food_positions:
-        rewards[agent_id] += 1
+        rewards[agent_id] += 10
         self.food_positions.remove(pos)
+      else:
+        rewards[agent_id] -= 0.1  # Penalty for step
     # obs, rewards, done, info
     return self._get_observations(), rewards, self._check_terminal(), {}
 
