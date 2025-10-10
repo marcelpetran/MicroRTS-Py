@@ -1,10 +1,14 @@
 --train_vae
 --env_size
-11
+7
 --batch_size
 16
 --qnet_dim
 256
+--train_every
+4
+--target_update_every
+1000
 --latent_dim
 8
 --d_model

@@ -28,6 +28,8 @@ parser.add_argument('--dropout', type=float, default=0.12, help='Dropout rate')
 parser.add_argument('--beta', type=float, default=1.002, help='Beta for KL loss in VAE/CVAE')
 parser.add_argument('--horizon', type=int, default=3, help='Future window H for opponent modeling (Selector module)')
 parser.add_argument('--eps_decay_steps', type=int, default=150_000, help='Epsilon decay steps for epsilon-greedy policy')
+parser.add_argument('--train_every', type=int, default=4, help='Train every N steps')
+parser.add_argument('--target_update_every', type=int, default=1_000, help='Target network update frequency')
 args_parsed = parser.parse_args()
 
 # Necessary directories
@@ -51,6 +53,8 @@ args = OMGArgs(
     capacity=1_000,
     horizon_H=args_parsed.horizon,
     qnet_hidden=args_parsed.qnet_dim,
+    train_every=args_parsed.train_every,
+    target_update_every=args_parsed.target_update_every,
     eps_decay_steps=args_parsed.eps_decay_steps,
     visualise_every_n_step=3,
     max_steps=args_parsed.max_steps,
