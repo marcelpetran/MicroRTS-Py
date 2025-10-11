@@ -436,6 +436,16 @@ class QLearningAgent:
         future_states = [s["state"] for s in list(step_buffer)[1:]]
         transition_to_store["future_states"] = future_states
         self.replay.push(transition_to_store)
+      elif done and len(step_buffer) > 1:
+        # If episode ends, flush remaining steps with whatever future we have
+        while len(step_buffer) > 1:
+          transition_to_store = step_buffer.popleft()
+          future_states = [s["state"] for s in list(step_buffer)]
+          # Add zero-padding
+          for _ in range(self.args.horizon_H - len(future_states)):
+            future_states.append(np.zeros_like(obs[0], dtype=np.float32))
+          transition_to_store["future_states"] = future_states
+          self.replay.push(transition_to_store)
 
       # Update history for the next step
       history["states"].append(torch.from_numpy(obs[0]).float())
