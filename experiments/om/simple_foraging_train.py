@@ -114,7 +114,7 @@ if not args_parsed.classic:
     cvae, vae, selector, optimizer=cvae_optimizer, device=device, args=args)
 
   agent = QLearningAgent(env, op_model, device=device, args=args)
-  if args.visualize_vae:
+  if args_parsed.visualize_vae:
     agent.visualize_prior()
 else:
   agent = QLearningAgentClassic(env, device=device, args=args)
