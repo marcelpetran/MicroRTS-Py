@@ -11,6 +11,7 @@ import os
 
 parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
 parser.add_argument('--train_vae', action='store_true', default=False, help='Whether to pre-train the VAE')
+parser.add_argument('--visualize_vae', action='store_true', default=False, help='Visualize VAE reconstructions logits')
 parser.add_argument('--vae_path', type=str, default='./trained_vae/vae.pth', help='Path to pre-trained VAE weights')
 parser.add_argument('--classic', action='store_true', default=False, help='Use classic Q-learning agent without opponent modeling')
 parser.add_argument('--episodes', type=int, default=50_000, help='Number of training episodes')
@@ -113,6 +114,8 @@ if not args_parsed.classic:
     cvae, vae, selector, optimizer=cvae_optimizer, device=device, args=args)
 
   agent = QLearningAgent(env, op_model, device=device, args=args)
+  if args.visualize_vae:
+    agent.visualize_prior()
 else:
   agent = QLearningAgentClassic(env, device=device, args=args)
 

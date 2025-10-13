@@ -125,6 +125,7 @@ class DiscreteActionEmbedder(nn.Module):
         Tensor: Embedded actions, shape (B, 1, d_model) ready for sequence concatenation.
     """
     # (B,) -> (B, d_model) -> (B, 1, d_model)
+    # TODO: maybe we want to add positional encoding here too?
     return self.embedding(actions).unsqueeze(1)
 
 
@@ -390,6 +391,7 @@ class TransformerVAE(nn.Module):
     x = x.to(self.args.device)
     x_embedded = self.embedd(x)
     encoder_output = self.transformer_encoder(x_embedded)
+    # we need single summary vector for mu and logvar
     aggregated_output = encoder_output[:, 0, :]
 
     mu = self.fc_mu(aggregated_output)

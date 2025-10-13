@@ -519,3 +519,27 @@ class QLearningAgent:
 
 
     return {"return": ep_ret, "steps": step + 1}
+  
+  def visualize_prior(self, reset_global_counter: bool = True):
+    """
+    Run 1 episode and visualize subgoals sampled from the prior model.
+    """
+    self.agent1 = SimpleAgent(1)
+    self.agent2 = SimpleAgent(1)
+    obs = self.env.reset()
+    done = False
+    while not done:
+      a1 = self.agent1.select_action(obs[0])
+      a2 = self.agent2.select_action(obs[1])
+      actions = {0: a1, 1: a2}
+      next_obs, reward, done, info = self.env.step(actions)
+
+      with torch.no_grad():
+        self.model.prior_model.eval()
+        self.model.visualize_subgoal_logits(obs[0], f"./diagrams/subgoal_logits_prior_step{self.global_step}.png")
+
+      obs = next_obs
+      self.global_step += 1
+
+    if reset_global_counter:
+     self.global_step = 0
