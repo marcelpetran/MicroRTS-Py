@@ -507,7 +507,7 @@ class QLearningAgent:
                   torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device),
                   current_history
               )
-              self.model.visualize_subgoal(ghat_mu.unsqueeze(0), f"./diagrams/subgoal_onehot_step{self.global_step + step}.png")
+              # self.model.visualize_subgoal(ghat_mu.unsqueeze(0), f"./diagrams/subgoal_onehot_step{self.global_step + step}.png")
               self.model.visualize_subgoal_logits(obs[0], recon_logits, self.args.state_feature_splits, f"./diagrams/subgoal_logits_step{self.global_step + step}.png")
               
           print(f"Actual current state:")
