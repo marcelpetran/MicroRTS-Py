@@ -536,7 +536,10 @@ class QLearningAgent:
 
       with torch.no_grad():
         self.model.prior_model.eval()
-        self.model.visualize_subgoal_logits(obs[0], f"./diagrams/subgoal_logits_prior_step{self.global_step}.png")
+        recon_logits, _, _ = self.model.prior_model(
+            torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device)
+        )
+        self.model.visualize_subgoal_logits(obs[0], recon_logits, self.args.state_feature_splits, f"./diagrams/subgoal_logits_prior_step{self.global_step}.png")
 
       obs = next_obs
       self.global_step += 1
