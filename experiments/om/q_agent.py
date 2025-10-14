@@ -23,6 +23,7 @@ def flatten_state(obs: np.ndarray) -> torch.Tensor:
   # return torch.from_numpy(obs).float().permute(2, 0, 1)  # (F, H, W) for Conv
   return torch.from_numpy(obs).float()
 
+
 class QNet(nn.Module):
   """
   Simple MLP Q-network for Q(s, g, a)
@@ -37,7 +38,8 @@ class QNet(nn.Module):
     H, W, F_dim = args.state_shape
     self.state_dim = H * W * F_dim
     self.latent_dim = args.latent_dim
-    self.action_dim = args.action_dim # WARNING: might not work with complex action spaces
+    # WARNING: might not work with complex action spaces
+    self.action_dim = args.action_dim
 
     hidden = args.qnet_hidden
     self.net = nn.Sequential(
@@ -163,79 +165,81 @@ class QLearningAgent:
     mu, logvar = self.model.subgoal_selector.select(
       self.model.prior_model, self, x, futures)
     return mu, logvar
-  
+
   # ------------- visualization utility -------------
   @torch.no_grad()
   def heatmap_q_values(self, state_hwf: np.ndarray, g: torch.Tensor, filename: str = "q_heatmap.png"):
-      """
-      Utility to visualize Q-values as a heatmap over the grid for a given state and subgoal.
+    """
+    Utility to visualize Q-values as a heatmap over the grid for a given state and subgoal.
 
-      Args:
-          state_hwf (np.ndarray): The current state grid, shape (H, W, F).
-          g (torch.Tensor): The inferred subgoal, shape (1, latent_dim).
-          filename (str): Path to save the heatmap image.
-      """
-      self.q.eval()
-      H, W, _ = self.args.state_shape
-      
-      # This will store the max Q-value for each grid cell
-      q_value_map = np.zeros((H, W))
-      # This will store the best action (0:Up, 1:Down, 2:Left, 3:Right) for each cell
-      policy_map = np.zeros((H, W))
+    Args:
+        state_hwf (np.ndarray): The current state grid, shape (H, W, F).
+        g (torch.Tensor): The inferred subgoal, shape (1, latent_dim).
+        filename (str): Path to save the heatmap image.
+    """
+    self.q.eval()
+    H, W, _ = self.args.state_shape
 
-      # Find the original position of our agent (agent 1, feature index 2)
-      agent_pos_indices = np.where(state_hwf[:, :, 2] == 1)
-      if len(agent_pos_indices[0]) == 0:
-        print("Warning: Agent not found in state for heatmap visualization.")
-        return
-      original_pos = (agent_pos_indices[0][0], agent_pos_indices[1][0])
+    # This will store the max Q-value for each grid cell
+    q_value_map = np.zeros((H, W))
+    # This will store the best action (0:Up, 1:Down, 2:Left, 3:Right) for each cell
+    policy_map = np.zeros((H, W))
 
-      # Iterate over every possible cell in the grid
-      for r in range(H):
-          for c in range(W):
-              # Create a copy of the state
-              temp_state = state_hwf.copy()
-              
-              # Move the agent to the new (r, c) position
-              # 1. Erase the agent's original position
-              temp_state[original_pos[0], original_pos[1], 2] = 0
-              temp_state[original_pos[0], original_pos[1], 0] = 1 # Set to empty
-              
-              # 2. Place the agent at the new position
-              # Make sure no other object is there before placing the agent
-              if np.sum(temp_state[r, c, 1:]) == 0: # Check if food or other agent is there
-                  temp_state[r, c, 2] = 1
-                  temp_state[r, c, 0] = 0 # Not empty anymore
+    # Find the original position of our agent (agent 1, feature index 2)
+    agent_pos_indices = np.where(state_hwf[:, :, 2] == 1)
+    if len(agent_pos_indices[0]) == 0:
+      print("Warning: Agent not found in state for heatmap visualization.")
+      return
+    original_pos = (agent_pos_indices[0][0], agent_pos_indices[1][0])
 
-                  # Convert to tensor and get Q-values
-                  s_tensor = torch.from_numpy(temp_state).float().unsqueeze(0).to(self.device)
-                  q_values = self.q(s_tensor, g) # (1, num_actions)
-                  
-                  max_q_val, best_action = torch.max(q_values, dim=1)
-                  q_value_map[r, c] = max_q_val.item()
-                  policy_map[r, c] = best_action.item()
+    # Iterate over every possible cell in the grid
+    for r in range(H):
+      for c in range(W):
+        # Create a copy of the state
+        temp_state = state_hwf.copy()
 
-      # --- Plotting the Heatmap ---
-      import matplotlib.pyplot as plt
-      fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+        # Move the agent to the new (r, c) position
+        # 1. Erase the agent's original position
+        temp_state[original_pos[0], original_pos[1], 2] = 0
+        temp_state[original_pos[0], original_pos[1], 0] = 1  # Set to empty
 
-      # Plot Q-value heatmap
-      im1 = ax1.imshow(q_value_map, cmap='viridis')
-      ax1.set_title("Max Q(s, g, a) Heatmap")
-      fig.colorbar(im1, ax=ax1)
+        # 2. Place the agent at the new position
+        # Make sure no other object is there before placing the agent
+        if np.sum(temp_state[r, c, 1:]) == 0:  # Check if food or other agent is there
+          temp_state[r, c, 2] = 1
+          temp_state[r, c, 0] = 0  # Not empty anymore
 
-      # Plot Policy map with arrows
-      ax2.imshow(q_value_map, cmap='gray') # Show background values
-      ax2.set_title("Learned Policy (Arrows)")
-      action_arrows = ['^', 'v', '<', '>']
-      for r in range(H):
-          for c in range(W):
-              action = int(policy_map[r, c])
-              ax2.text(c, r, action_arrows[action], ha='center', va='center', color='red', fontsize=12)
+          # Convert to tensor and get Q-values
+          s_tensor = torch.from_numpy(
+            temp_state).float().unsqueeze(0).to(self.device)
+          q_values = self.q(s_tensor, g)  # (1, num_actions)
 
-      plt.suptitle("Agent's Learned Policy for a Given Subgoal")
-      plt.savefig(filename)
-      plt.close()
+          max_q_val, best_action = torch.max(q_values, dim=1)
+          q_value_map[r, c] = max_q_val.item()
+          policy_map[r, c] = best_action.item()
+
+    # --- Plotting the Heatmap ---
+    import matplotlib.pyplot as plt
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+
+    # Plot Q-value heatmap
+    im1 = ax1.imshow(q_value_map, cmap='viridis')
+    ax1.set_title("Max Q(s, g, a) Heatmap")
+    fig.colorbar(im1, ax=ax1)
+
+    # Plot Policy map with arrows
+    ax2.imshow(q_value_map, cmap='gray')  # Show background values
+    ax2.set_title("Learned Policy (Arrows)")
+    action_arrows = ['^', 'v', '<', '>']
+    for r in range(H):
+      for c in range(W):
+        action = int(policy_map[r, c])
+        ax2.text(c, r, action_arrows[action], ha='center',
+                 va='center', color='red', fontsize=12)
+
+    plt.suptitle("Agent's Learned Policy for a Given Subgoal")
+    plt.savefig(filename)
+    plt.close()
 
   # ------------- acting -------------
 
@@ -394,7 +398,7 @@ class QLearningAgent:
       self.opponent_agent = RandomAgent(1)
     else:
       self.opponent_agent = SimpleAgent(1)
-    
+
     obs = self.env.reset()
     done = False
     ep_ret = 0.0
@@ -464,7 +468,7 @@ class QLearningAgent:
         break
 
     return {"return": ep_ret, "steps": step + 1}
-  
+
   def run_test_episode(self, max_steps: Optional[int] = None, render: bool = False) -> Dict[str, float]:
     self.opponent_agent = SimpleAgent(1)
     obs = self.env.reset()
@@ -483,11 +487,12 @@ class QLearningAgent:
     for step in range(max_steps or 500):
       current_history = {k: list(v) for k, v in history.items()}
 
-      a, ghat_mu, ghat_logvar = self.select_action(obs[0], current_history, True)
+      a, ghat_mu, ghat_logvar = self.select_action(
+        obs[0], current_history, True)
       a_opponent = self.opponent_agent.select_action(obs[1])
       actions = {0: a, 1: a_opponent}
       next_obs, reward, done, info = self.env.step(actions)
-      
+
       history["states"].append(torch.from_numpy(obs[0]).float())
       history["actions"].append(torch.tensor(a, dtype=torch.long))
 
@@ -496,30 +501,29 @@ class QLearningAgent:
       if render:
         if render and (step + 1) % self.args.visualise_every_n_step == 0:
           print(f"\n--- Visualization at Step {step+1} ---")
-          
+
           print("Generating Q-value heatmap...")
-          self.heatmap_q_values(obs[0], ghat_mu.unsqueeze(0), f"./diagrams/q_heatmap_step{self.global_step + step}.png")
+          self.heatmap_q_values(obs[0], ghat_mu.unsqueeze(
+            0), f"./diagrams/q_heatmap_step{self.global_step + step}.png")
 
           print("Generating subgoal visualizations...")
           with torch.no_grad():
-              self.model.inference_model.eval()
-              recon_logits, _, _ = self.model.inference_model(
-                  torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device),
-                  current_history
-              )
-              # self.model.visualize_subgoal(ghat_mu.unsqueeze(0), f"./diagrams/subgoal_onehot_step{self.global_step + step}.png")
-              self.model.visualize_subgoal_logits(obs[0], recon_logits, self.args.state_feature_splits, f"./diagrams/subgoal_logits_step{self.global_step + step}.png")
-              
-          print(f"Actual current state:")
-          SimpleForagingEnv.render_from_obs(obs[0])
+            self.model.inference_model.eval()
+            recon_logits, _, _ = self.model.inference_model(
+                torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device),
+                current_history
+            )
+            # self.model.visualize_subgoal(ghat_mu.unsqueeze(0), f"./diagrams/subgoal_onehot_step{self.global_step + step}.png")
+            self.model.visualize_subgoal_logits(
+              obs[0], recon_logits, self.args.state_feature_splits, f"./diagrams/subgoal_logits_step{self.global_step + step}.png")
+
         SimpleForagingEnv.render_from_obs(obs[0])
-      
+
       if done:
         break
 
-
     return {"return": ep_ret, "steps": step + 1}
-  
+
   def visualize_prior(self, reset_global_counter: bool = True):
     """
     Run 1 episode and visualize subgoals sampled from the prior model.
@@ -539,10 +543,11 @@ class QLearningAgent:
         recon_logits, _, _ = self.model.prior_model(
             torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device)
         )
-        self.model.visualize_subgoal_logits(obs[0], recon_logits, self.args.state_feature_splits, f"./diagrams/subgoal_logits_prior_step{self.global_step}.png")
+        self.model.visualize_subgoal_logits(
+          obs[0], recon_logits, self.args.state_feature_splits, f"./diagrams/subgoal_logits_prior_step{self.global_step}.png")
 
       obs = next_obs
       self.global_step += 1
 
     if reset_global_counter:
-     self.global_step = 0
+      self.global_step = 0

@@ -11,28 +11,49 @@ import argparse
 import os
 
 parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
-parser.add_argument('--train_vae', action='store_true', default=False, help='Whether to pre-train the VAE')
-parser.add_argument('--visualize_vae', action='store_true', default=False, help='Visualize VAE reconstructions logits')
-parser.add_argument('--vae_path', type=str, default='./trained_vae/vae.pth', help='Path to pre-trained VAE weights')
-parser.add_argument('--classic', action='store_true', default=False, help='Use classic Q-learning agent without opponent modeling')
-parser.add_argument('--episodes', type=int, default=50_000, help='Number of training episodes')
-parser.add_argument('--vae_episodes', type=int, default=30_000, help='Number of episodes for VAE pre-training')
-parser.add_argument('--env_size', type=int, default=11, help='Grid size for SimpleForagingEnv')
-parser.add_argument('--max_steps', type=int, default=50, help='Max steps per episode')
-parser.add_argument('--batch_size', type=int, default=16, help='Batch size for training')
-parser.add_argument('--qnet_dim', type=int, default=128, help='Hidden dimension for Q-network')
-parser.add_argument('--latent_dim', type=int, default=8, help='Latent dimension for VAE/CVAE')
-parser.add_argument('--d_model', type=int, default=256, help='Transformer model dimension')
-parser.add_argument('--nhead', type=int, default=4, help='Number of attention heads')
-parser.add_argument('--num_encoder_layers', type=int, default=1, help='Number of encoder layers')
-parser.add_argument('--num_decoder_layers', type=int, default=1, help='Number of decoder layers')
-parser.add_argument('--dim_feedforward', type=int, default=1024, help='Dimension of feedforward network')
+parser.add_argument('--train_vae', action='store_true',
+                    default=False, help='Whether to pre-train the VAE')
+parser.add_argument('--visualize_vae', action='store_true',
+                    default=False, help='Visualize VAE reconstructions logits')
+parser.add_argument('--vae_path', type=str, default='./trained_vae/vae.pth',
+                    help='Path to pre-trained VAE weights')
+parser.add_argument('--classic', action='store_true', default=False,
+                    help='Use classic Q-learning agent without opponent modeling')
+parser.add_argument('--episodes', type=int, default=50_000,
+                    help='Number of training episodes')
+parser.add_argument('--vae_episodes', type=int, default=30_000,
+                    help='Number of episodes for VAE pre-training')
+parser.add_argument('--env_size', type=int, default=11,
+                    help='Grid size for SimpleForagingEnv')
+parser.add_argument('--max_steps', type=int, default=50,
+                    help='Max steps per episode')
+parser.add_argument('--batch_size', type=int, default=16,
+                    help='Batch size for training')
+parser.add_argument('--qnet_dim', type=int, default=128,
+                    help='Hidden dimension for Q-network')
+parser.add_argument('--latent_dim', type=int, default=8,
+                    help='Latent dimension for VAE/CVAE')
+parser.add_argument('--d_model', type=int, default=256,
+                    help='Transformer model dimension')
+parser.add_argument('--nhead', type=int, default=4,
+                    help='Number of attention heads')
+parser.add_argument('--num_encoder_layers', type=int,
+                    default=1, help='Number of encoder layers')
+parser.add_argument('--num_decoder_layers', type=int,
+                    default=1, help='Number of decoder layers')
+parser.add_argument('--dim_feedforward', type=int,
+                    default=1024, help='Dimension of feedforward network')
 parser.add_argument('--dropout', type=float, default=0.12, help='Dropout rate')
-parser.add_argument('--beta', type=float, default=1.002, help='Beta for KL loss in VAE/CVAE')
-parser.add_argument('--horizon', type=int, default=3, help='Future window H for opponent modeling (Selector module)')
-parser.add_argument('--eps_decay_steps', type=int, default=150_000, help='Epsilon decay steps for epsilon-greedy policy')
-parser.add_argument('--train_every', type=int, default=4, help='Train every N steps')
-parser.add_argument('--target_update_every', type=int, default=1_000, help='Target network update frequency')
+parser.add_argument('--beta', type=float, default=1.002,
+                    help='Beta for KL loss in VAE/CVAE')
+parser.add_argument('--horizon', type=int, default=3,
+                    help='Future window H for opponent modeling (Selector module)')
+parser.add_argument('--eps_decay_steps', type=int, default=150_000,
+                    help='Epsilon decay steps for epsilon-greedy policy')
+parser.add_argument('--train_every', type=int, default=4,
+                    help='Train every N steps')
+parser.add_argument('--target_update_every', type=int,
+                    default=1_000, help='Target network update frequency')
 args_parsed = parser.parse_args()
 
 # Necessary directories
@@ -44,7 +65,8 @@ os.makedirs('./diagrams', exist_ok=True)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 
-env = SimpleForagingEnv(grid_size=args_parsed.env_size, max_steps=args_parsed.max_steps)
+env = SimpleForagingEnv(grid_size=args_parsed.env_size,
+                        max_steps=args_parsed.max_steps)
 
 obs_sample = env.reset()
 H, W, F_dim = obs_sample[0].shape
@@ -95,12 +117,14 @@ if not args_parsed.classic:
     print("Simple test of VAE reconstruction:")
     vae.eval()
     with torch.no_grad():
-      sample_state = torch.tensor(obs_sample[0], dtype=torch.float32).unsqueeze(0).to(device)  # (1, H, W, F)
+      sample_state = torch.tensor(obs_sample[0], dtype=torch.float32).unsqueeze(
+        0).to(device)  # (1, H, W, F)
       reconstructed_state, mu, logvar = vae(sample_state)
       print("Original State:\n", obs_sample[0])
       SimpleForagingEnv.render_from_obs(obs_sample[0])
       print("Reconstructed State:\n", reconstructed_state[0])
-      SimpleForagingEnv.render_from_obs(t.reconstruct_state(reconstructed_state, args.state_feature_splits)[0])
+      SimpleForagingEnv.render_from_obs(t.reconstruct_state(
+        reconstructed_state, args.state_feature_splits)[0])
       print("Latent Mu:\n", mu)
       print("Latent LogVar:\n", logvar)
   else:
@@ -127,16 +151,16 @@ episode_list = []
 
 for ep in range(args_parsed.episodes):
   stats = agent.run_episode(max_steps=args.max_steps)
-  if (ep+1) % 50 == 0:
-    print(f"Episode {ep+1}: Return={stats['return']:.2f}, Steps={stats['steps']}")
-    
-      
+  if (ep + 1) % 50 == 0:
+    print(
+      f"Episode {ep+1}: Return={stats['return']:.2f}, Steps={stats['steps']}")
+
   # run a test episode
-  if (ep+1) % 500 == 0:
+  if (ep + 1) % 500 == 0:
     stats = agent.run_test_episode(max_steps=args.max_steps, render=True)
     return_list.append(stats['return'])
     steps_list.append(stats['steps'])
-    episode_list.append(ep+1)
+    episode_list.append(ep + 1)
 
 # Save the trained models
 # torch.save(cvae.state_dict(), "./trained_cvae/cvae.pth")

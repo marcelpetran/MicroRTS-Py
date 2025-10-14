@@ -242,7 +242,7 @@ class TransformerCVAE(nn.Module):
         history_embeddings.append(s_t_embedded)
 
     return history_embeddings
-  
+
   def get_history_seq(self, history):
     """
     Concatenates the embedded history into a single sequence tensor.
@@ -256,9 +256,10 @@ class TransformerCVAE(nn.Module):
       # If no history, use a null condition state, therefore it should behave like a regular VAE
       history_embeddings = [self.state_embedder(
         self.null_condition.to(self.args.device))]
-      
+
       # Concatenate all history elements into a single long sequence
-    return torch.cat(history_embeddings, dim=1).to(self.args.device)  # (B, total_seq_len, d_model)
+    # (B, total_seq_len, d_model)
+    return torch.cat(history_embeddings, dim=1).to(self.args.device)
 
   def encode(self, x, history, is_history_seq=False):
     """
@@ -488,7 +489,8 @@ def reconstruct_state(reconstructed_state_logits, state_feature_splits):
     probs = F.softmax(
       reconstructed_state_logits[:, :, :, start_idx:end_idx], dim=-1)
     # Sample indices from the probabilities
-    indices = torch.multinomial(probs.view(-1, size), num_samples=1).view(B, H, W) + start_idx
+    indices = torch.multinomial(
+      probs.view(-1, size), num_samples=1).view(B, H, W) + start_idx
     # or alternatively, take the argmax
     # indices = torch.argmax(probs, dim=-1) + start_idx
     # Set the corresponding one-hot feature to 1
@@ -500,7 +502,7 @@ def reconstruct_state(reconstructed_state_logits, state_feature_splits):
 
 def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_epochs=10000, save_every_n_epochs=1000, batch_size=32, max_steps=None, logg=100):
   def collect_single_episode():
-    if 1/3 < np.random.random():
+    if 1 / 3 < np.random.random():
       agent1 = RandomAgent(agent_id=0)
       agent2 = RandomAgent(agent_id=1)
     else:
@@ -531,7 +533,7 @@ def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_e
       obs = next_obs
       step += 1
     return
-  
+
   loss_collector = []
   epoch_collector = []
   avg_loss = 0.0
@@ -562,7 +564,8 @@ def train_vae(env, model: TransformerVAE, replay: ReplayBuffer, optimizer, num_e
     if (i + 1) % logg == 0:
       loss_collector.append(loss.item())
       epoch_collector.append(i + 1)
-      print(f"Epoch {i+1}/{num_epochs}, Loss: {loss.item()}, Avg Loss: {avg_loss/logg}")
+      print(
+        f"Epoch {i+1}/{num_epochs}, Loss: {loss.item()}, Avg Loss: {avg_loss/logg}")
       avg_loss = 0.0
 
     if (i + 1) % save_every_n_epochs == 0:
@@ -641,7 +644,7 @@ if __name__ == '__main__':
   # --- Create Dataset ---
   from torch.utils.data import TensorDataset, DataLoader
   full_dataset_x = generate_data(args.dataset_size, H, W, FEATURE_SPLITS)
-  test_data_x = generate_data(args.dataset_size//2, H, W, FEATURE_SPLITS)
+  test_data_x = generate_data(args.dataset_size // 2, H, W, FEATURE_SPLITS)
   print("Generated dataset with shape:", full_dataset_x[0])
   train_dataset = TensorDataset(full_dataset_x)
   test_dataset = TensorDataset(test_data_x)
@@ -677,7 +680,8 @@ if __name__ == '__main__':
 
       # --- Forward Pass and Loss Calculation ---
       reconstructed_state, mu, logvar = model(x)
-      loss = vae_loss(reconstructed_state, x, mu, logvar, FEATURE_SPLITS, model.args.beta)
+      loss = vae_loss(reconstructed_state, x, mu, logvar,
+                      FEATURE_SPLITS, model.args.beta)
 
       # --- Backward Pass ---
       optimizer.zero_grad()
@@ -701,7 +705,8 @@ if __name__ == '__main__':
     for batch in test_loader:
       x = batch[0]
       reconstructed_state, mu, logvar = model(x)
-      test_loss = vae_loss(reconstructed_state, x, mu, logvar, FEATURE_SPLITS, model.args.beta)
+      test_loss = vae_loss(reconstructed_state, x, mu,
+                           logvar, FEATURE_SPLITS, model.args.beta)
       print("Test Loss:", test_loss.item())
       break  # Just test on one batch for brevity
   print("Training complete.")

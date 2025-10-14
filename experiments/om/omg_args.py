@@ -3,6 +3,7 @@ from typing import Tuple
 
 from torch import device
 
+
 @dataclass
 class OMGArgs:
   device: str = "cpu"  # "cpu" or "cuda"
@@ -33,7 +34,7 @@ class OMGArgs:
   cvae_lr: float = 3e-4
 
   # Transformer architecture params
-  beta: float = 1.002 # Weight for the KL loss
+  beta: float = 0.1  # Weight for the KL loss TODO: check if good
   state_shape: Tuple[int, int, int] = None  # (H, W, F)
   H: int = 5  # grid height
   W: int = 5  # grid width
