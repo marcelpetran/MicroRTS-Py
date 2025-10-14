@@ -210,6 +210,16 @@ class OpponentModel(nn.Module):
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.savefig(filename)
     plt.close()
+  
+  def visualize_selected_subgoal(self, gbar_mu: torch.Tensor, original_obs: np.ndarray, filename: str = "selected_subgoal.png"):
+    """
+    Reconstructs and visualizes the state corresponding to the selected subgoal (g_bar).
+    """
+    self.prior_model.eval()
+    with torch.no_grad():
+        reconstructed_logits = self.prior_model.decode(gbar_mu)
+
+    self.visualize_subgoal_logits(original_obs, reconstructed_logits, self.args.state_feature_splits, filename)
 
   def loss_function(
           self, reconstructed_x, x, cvae_mu, cvae_log_var,

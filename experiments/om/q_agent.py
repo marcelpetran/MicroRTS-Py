@@ -509,11 +509,13 @@ class QLearningAgent:
           print("Generating subgoal visualizations...")
           with torch.no_grad():
             self.model.inference_model.eval()
-            recon_logits, _, _ = self.model.inference_model(
+            recon_logits, g_bar, _ = self.model.inference_model(
                 torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device),
                 current_history
             )
             # self.model.visualize_subgoal(ghat_mu.unsqueeze(0), f"./diagrams/subgoal_onehot_step{self.global_step + step}.png")
+            self.model.visualize_selected_subgoal(
+              g_bar, obs[0], f"./diagrams/selected_subgoal_step{self.global_step + step}.png")
             self.model.visualize_subgoal_logits(
               obs[0], recon_logits, self.args.state_feature_splits, f"./diagrams/subgoal_logits_step{self.global_step + step}.png")
 
