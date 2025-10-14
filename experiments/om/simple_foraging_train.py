@@ -1,3 +1,4 @@
+from ast import arg
 from simple_foraging_env import SimpleForagingEnv
 from opponent_model import OpponentModel, SubGoalSelector
 from q_agent import QLearningAgent, ReplayBuffer
@@ -15,6 +16,7 @@ parser.add_argument('--visualize_vae', action='store_true', default=False, help=
 parser.add_argument('--vae_path', type=str, default='./trained_vae/vae.pth', help='Path to pre-trained VAE weights')
 parser.add_argument('--classic', action='store_true', default=False, help='Use classic Q-learning agent without opponent modeling')
 parser.add_argument('--episodes', type=int, default=50_000, help='Number of training episodes')
+parser.add_argument('--vae_episodes', type=int, default=30_000, help='Number of episodes for VAE pre-training')
 parser.add_argument('--env_size', type=int, default=11, help='Grid size for SimpleForagingEnv')
 parser.add_argument('--max_steps', type=int, default=50, help='Max steps per episode')
 parser.add_argument('--batch_size', type=int, default=16, help='Batch size for training')
@@ -87,8 +89,8 @@ if not args_parsed.classic:
     vae_optimizer = torch.optim.Adam(vae.parameters(), lr=args.vae_lr)
     vae_replay = ReplayBuffer(10_000)
 
-    t.train_vae(env, vae, vae_replay, vae_optimizer, num_epochs=30_000,
-                save_every_n_epochs=30_000, batch_size=args.batch_size, max_steps=args.max_steps, logg=1_000)
+    t.train_vae(env, vae, vae_replay, vae_optimizer, num_epochs=args_parsed.vae_episodes,
+                save_every_n_epochs=args_parsed.vae_episodes, batch_size=args.batch_size, max_steps=args.max_steps, logg=1_000)
     print("VAE pre-training complete.")
     print("Simple test of VAE reconstruction:")
     vae.eval()
