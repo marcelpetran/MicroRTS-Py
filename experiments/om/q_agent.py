@@ -524,7 +524,7 @@ class QLearningAgent:
     """
     Run 1 episode and visualize subgoals sampled from the prior model.
     """
-    self.agent1 = SimpleAgent(1)
+    self.agent1 = SimpleAgent(0)
     self.agent2 = SimpleAgent(1)
     obs = self.env.reset()
     done = False
