@@ -137,3 +137,6 @@ dmypy.json
 
 # PyCharm
 .idea/
+
+# Images inside diagrams folder
+experiments/om/diagrams/*
