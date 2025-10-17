@@ -54,6 +54,8 @@ parser.add_argument('--train_every', type=int, default=4,
                     help='Train every N steps')
 parser.add_argument('--target_update_every', type=int,
                     default=1_000, help='Target network update frequency')
+parser.add_argument('--replay_capacity', type=int, default=1_000,
+                    help='Replay buffer capacity')
 args_parsed = parser.parse_args()
 
 # Necessary directories
@@ -75,7 +77,7 @@ NUM_ACTIONS = 4  # Up, Down, Left, Right
 args = OMGArgs(
     device=device,
     batch_size=args_parsed.batch_size,
-    capacity=1_000,
+    capacity=args_parsed.replay_capacity,
     horizon_H=args_parsed.horizon,
     qnet_hidden=args_parsed.qnet_dim,
     train_every=args_parsed.train_every,
