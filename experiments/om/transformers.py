@@ -623,7 +623,7 @@ def train_vae(
             avg_loss = 0.0
 
         if (i + 1) % save_every_n_epochs == 0:
-            torch.save(model.state_dict(), f"./trained_vae/vae_epoch_{i + 1}.pth")
+            torch.save(model.state_dict(), f"./trained_vae_{model.args.folder_id}/vae_epoch_{i + 1}.pth")
             print(f"Model saved at epoch {i + 1}")
 
     loss_collector = np.array(loss_collector)

@@ -504,7 +504,7 @@ class QLearningAgent:
 
           print("Generating Q-value heatmap...")
           self.heatmap_q_values(obs[0], ghat_mu.unsqueeze(
-            0), f"./diagrams/q_heatmap_step{self.global_step + step}.png")
+            0), f"./diagrams_{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
 
           print("Generating subgoal visualizations...")
           with torch.no_grad():
@@ -515,9 +515,9 @@ class QLearningAgent:
             )
             # self.model.visualize_subgoal(ghat_mu.unsqueeze(0), f"./diagrams/subgoal_onehot_step{self.global_step + step}.png")
             self.model.visualize_selected_subgoal(
-              g_bar, obs[0], f"./diagrams/selected_subgoal_step{self.global_step + step}.png")
+              g_bar, obs[0], f"./diagrams_{self.args.folder_id}/selected_subgoal_step{self.global_step + step}.png")
             self.model.visualize_subgoal_logits(
-              obs[0], recon_logits, self.args.state_feature_splits, f"./diagrams/subgoal_logits_step{self.global_step + step}.png")
+              obs[0], recon_logits, self.args.state_feature_splits, f"./diagrams_{self.args.folder_id}/subgoal_logits_step{self.global_step + step}.png")
 
         SimpleForagingEnv.render_from_obs(obs[0])
 
@@ -546,7 +546,7 @@ class QLearningAgent:
             torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device)
         )
         self.model.visualize_subgoal_logits(
-          obs[0], recon_logits, self.args.state_feature_splits, f"./diagrams/subgoal_logits_prior_step{self.global_step}.png")
+          obs[0], recon_logits, self.args.state_feature_splits, f"./diagrams_{self.args.folder_id}/subgoal_logits_prior_step{self.global_step}.png")
 
       obs = next_obs
       self.global_step += 1
