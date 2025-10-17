@@ -1,4 +1,3 @@
-from ast import arg
 from simple_foraging_env import SimpleForagingEnv
 from opponent_model import OpponentModel, SubGoalSelector
 from q_agent import QLearningAgent, ReplayBuffer
