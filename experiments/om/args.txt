@@ -1,3 +1,4 @@
+--classic
 --env_size
 7
 --max_steps

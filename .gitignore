@@ -140,3 +140,4 @@ dmypy.json
 
 # Images inside diagrams folder
 experiments/om/diagrams/*
+experiments/om/diagrams_*/*
