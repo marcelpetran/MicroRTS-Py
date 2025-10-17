@@ -55,13 +55,17 @@ parser.add_argument('--target_update_every', type=int,
                     default=1_000, help='Target network update frequency')
 parser.add_argument('--replay_capacity', type=int, default=1_000,
                     help='Replay buffer capacity')
+parser.add_argument('--seed', type=int, default=0,
+                    help='Random seed for reproducibility')
+parser.add_argument('--folder_id', type=int, default=0,
+                    help='Folder ID for saving models and diagrams')
 args_parsed = parser.parse_args()
 
 # Necessary directories
-os.makedirs('./trained_vae', exist_ok=True)
-os.makedirs('./trained_cvae', exist_ok=True)
-os.makedirs('./trained_qnet', exist_ok=True)
-os.makedirs('./diagrams', exist_ok=True)
+os.makedirs(f"./trained_vae_{args_parsed.folder_id}", exist_ok=True)
+os.makedirs(f"./trained_cvae", exist_ok=True)
+os.makedirs(f"./trained_qnet", exist_ok=True)
+os.makedirs(f"./diagrams_{args_parsed.folder_id}", exist_ok=True)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
@@ -75,6 +79,7 @@ NUM_ACTIONS = 4  # Up, Down, Left, Right
 
 args = OMGArgs(
     device=device,
+    folder_id=args_parsed.folder_id,
     batch_size=args_parsed.batch_size,
     capacity=args_parsed.replay_capacity,
     horizon_H=args_parsed.horizon,
