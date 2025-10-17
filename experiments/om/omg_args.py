@@ -19,6 +19,8 @@ class OMGArgs:
   qnet_hidden: int = 256
   max_history_length: int = 100
   max_steps: int = 50
+  seed: int = 0
+  folder_id: int = 0
 
   # OMG-specific
   gmix_eps_start: float = 1.0      # Eq.(8): start using mostly g_bar
