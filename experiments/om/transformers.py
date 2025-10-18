@@ -541,7 +541,8 @@ def vae_loss(reconstructed_x, x, mu, logvar, state_feature_splits, beta=1.0):
 
     bce = F.binary_cross_entropy_with_logits(
       reconstructed_x, x, weight=weight_mask, reduction='none')  # (B, H, W, F)
-    recon_loss = bce.mean(dim=(1, 2, 3))
+    per_cell = bce.mean(dim=(1, 2, 3))
+    recon_loss = per_cell.mean()
 
     # KL Divergence Loss
     # -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
