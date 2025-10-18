@@ -43,7 +43,8 @@ class PositionalEncoding(nn.Module):
             Tensor: Output tensor of the same shape as input with positional encoding added
         """
         # x is expected to be (Batch, Seq_len, d_model)
-        # We don't want to train the positional encodings
+        # We don't want to train the positional encodings -> gradient=False
+        # Positional encodings are added to the input embeddings
         x = x + (self.pe[:, : x.size(1), :]).requires_grad_(False)
         return self.dropout(x)
 
@@ -55,16 +56,16 @@ class StateEmbeddings(nn.Module):
     sums them, and adds positional encoding.
     """
 
-    def __init__(self, h, w, state_feature_splits, d_model, dropout):
+    def __init__(self, H, W, state_feature_splits, d_model, dropout):
         super().__init__()
-        self.h = h
-        self.w = w
-        self.seq_len = h * w
+        self.h = H
+        self.w = W
+        self.seq_len = H * W
         self.state_feature_splits = state_feature_splits
         self.d_model = d_model
         self.dropout = dropout
 
-        # Create a separate linear layer for each one-hot feature group
+        # Separate linear layer for each one-hot feature group
         self.feature_embedders = nn.ModuleList(
             [nn.Linear(size, d_model, bias=False) for size in state_feature_splits]
         )
