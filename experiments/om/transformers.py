@@ -206,9 +206,10 @@ class TransformerCVAE(nn.Module):
         self.seq_len = args.H * args.W
         self.droput = args.dropout
         self.args = args
-        self.null_condition = torch.zeros(
-            1, args.H, args.W, sum(args.state_feature_splits)
-        )
+
+        # --- Positional Encoding for History ---
+        max_history_len = args.max_history_length * (self.seq_len + (1 if args.action_dim else 0))
+        self.history_pos_encoder = PositionalEncoding(args.d_model, seq_len=max_history_len, dropout=args.dropout)
 
         # --- Feature Embedding ---
         self.state_embedder = StateEmbeddings(
@@ -296,16 +297,24 @@ class TransformerCVAE(nn.Module):
         history_embeddings = []
         for t, s_t in enumerate(states):
             s_t = to_bhwf(s_t)  # (B,H,W,F)
-            s_t_embedded = self.state_embedder(s_t)  # (B, H*W, d_model)
+            B = s_t.shape[0]
+            state_flat = s_t.view(B, self.seq_len, -1)
+            split_features = torch.split(state_flat, self.args.state_feature_splits, dim=-1)
 
+            embedded_state = torch.zeros(
+                B, self.seq_len, self.args.d_model, device=s_t.device
+            )
+            for i, feature_tensor in enumerate(split_features):
+                embedded_state += self.state_embedder.feature_embedders[i](feature_tensor.float())
+            
             if have_actions:
-                a_t = to_b(actions[t])  # (B,)
-                a_t_embedded = self.action_embedder(a_t)  # (B, 1, d_model)
+                a_t = to_b(actions[t])
+                a_t_embedded = self.action_embedder(a_t)
                 history_embeddings.append(
-                    torch.cat([s_t_embedded, a_t_embedded], dim=1)
-                )  # (B, H*W+1, d_model)
+                    torch.cat([embedded_state, a_t_embedded], dim=1)
+                )
             else:
-                history_embeddings.append(s_t_embedded)
+                history_embeddings.append(embedded_state)
 
         return history_embeddings
 
@@ -320,13 +329,13 @@ class TransformerCVAE(nn.Module):
         history_embeddings = self.get_history_embeddings(history)
         if history_embeddings is None or len(history_embeddings) == 0:
             # If no history, use a null condition state, therefore it should behave like a regular VAE
-            history_embeddings = [
-                self.state_embedder(self.null_condition.to(self.args.device))
-            ]
+            return torch.empty(1, 0, self.args.d_model, device=self.args.device)
 
-            # Concatenate all history elements into a single long sequence
+        # Concatenate all history elements into a single long sequence
         # (B, total_seq_len, d_model)
-        return torch.cat(history_embeddings, dim=1).to(self.args.device)
+        concatenated_seq = torch.cat(history_embeddings, dim=1).to(self.args.device)
+
+        return self.history_pos_encoder(concatenated_seq)
 
     def encode(self, x, history, is_history_seq=False):
         """
