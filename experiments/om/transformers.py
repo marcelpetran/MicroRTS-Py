@@ -101,19 +101,66 @@ class StateEmbeddings(nn.Module):
 
         # Split the features along the last dimension
         split_features = torch.split(state_flat, self.state_feature_splits, dim=-1)
+        # Now I have a list of tensors, each (B, H*W, feature_size)
 
         # Embed each feature group and sum them up.
         # We initialize with zeros and add each embedding.
         embedded = torch.zeros(
             B, self.seq_len, self.d_model, device=state_tensor.device
         )
+        # For each cell in the grid, sum the embeddings of each feature group
         for i, feature_tensor in enumerate(split_features):
-            # Ensure float for linear layer
             embedded += self.feature_embedders[i](feature_tensor.float())
-
-        # Add positional encoding
+        # embedded: (B, H*W, d_model)
+        # Add positional encoding to each cell
         return self.position_encoder(embedded)
 
+class TrajectoryEmbedder(nn.Module):
+    def __init__(self, T, H, W, state_feature_splits, d_model, dropout):
+        super().__init__()
+        self.total_seq_len = T * H * W
+        self.d_model = d_model
+        
+        # Feature Embedders
+        self.feature_embedders = nn.ModuleList(
+            [nn.Linear(size, d_model, bias=False) for size in state_feature_splits]
+        )
+        
+        # Possitional encoding for the entire trajectory
+        self.position_encoder = PositionalEncoding(
+            d_model, seq_len=self.total_seq_len, dropout=dropout
+        )
+
+    def forward(self, trajectory_tensor):
+        """
+        Args:
+            trajectory_tensor (Tensor): Input tensor of shape (B, T, H, W, F)
+        Returns:
+            Tensor: Embedded trajectory of shape (B, T*H*W, d_model)
+        """
+        assert trajectory_tensor.dim() == 5, (
+            f"Expected (B,T,H,W,F), got {tuple(trajectory_tensor.shape)}"
+        )
+        B, T, H, W, F = trajectory_tensor.shape
+
+        assert T * H * W == self.total_seq_len, (
+            f"Expected total sequence length {self.total_seq_len}, got {T*H*W}"
+        )
+        # (B, T, H, W, F) -> (B, T*H*W, F)
+        flat_sequence = trajectory_tensor.view(B, self.total_seq_len, F)
+        
+        # List of (B, T*H*W, feature_size)
+        split_features = torch.split(flat_sequence, self.state_feature_splits, dim=-1)
+        
+        # Embed the features by summing the embeddings of each feature group
+        embedded_features = torch.zeros(
+            B, self.total_seq_len, self.d_model, device=trajectory_tensor.device
+        )
+        for i, feature_tensor in enumerate(split_features):
+            embedded_features += self.feature_embedders[i](feature_tensor.float())
+        
+        # Add positional encoding
+        return self.position_encoder(embedded_features)
 
 class DiscreteActionEmbedder(nn.Module):
     """Embeds simple discrete actions into a d_model vector."""
