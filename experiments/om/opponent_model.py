@@ -244,9 +244,12 @@ class OpponentModel(nn.Module):
     #   bce_loss = F.binary_cross_entropy_with_logits(recon_group, x_group, reduction='none').mean(dim=1)
     #   print(bce_loss.shape, mask.shape)  # (B*H*W,), (B,1)
     #   recon_loss += (bce_loss * mask).sum() / mask.sum()
-
+    weights = torch.tensor([1.0, 10.0, 20.0, 30.0], device=self.device)
+    weight_mask = x * weights
+    # base for all cells so empty cells aren't ignored completely
+    weight_mask = weight_mask + 1.0
     bce = F.binary_cross_entropy_with_logits(
-      reconstructed_x, x, reduction='none')  # (B, H, W, F)
+      reconstructed_x, x, weight=weight_mask, reduction='none')  # (B, H, W, F)
     per_cell = (bce * self.feature_weights).sum(dim=-1)
     per_ex = per_cell.mean(dim=(1, 2))
     recon_loss = (per_ex * mask).sum() / denom
