@@ -534,26 +534,14 @@ def vae_loss(reconstructed_x, x, mu, logvar, state_feature_splits, beta=1.0):
     Returns:
         Tensor: Computed VAE loss.
     """
-    # Reconstruction Loss
-    # We use Binary Cross Entropy with Logits for each one-hot feature group
-    # as it's suitable for multi-label classification style outputs
     recon_loss = 0
+    weights = torch.tensor([1.0, 10.0, 20.0, 30.0], device=x.device)
+    weight_mask = x * weights
+    weight_mask = weight_mask + 1.0
 
-    batch_size = x.shape[0]
-
-    # Flatten inputs for easier loss calculation
-    recon_flat = reconstructed_x.view(-1, sum(state_feature_splits))
-    x_flat = x.view(-1, sum(state_feature_splits))
-
-    # Calculate loss for each feature group separately and sum them up
-    # This is more stable than calculating on the concatenated tensor
-    x_split = torch.split(x_flat, state_feature_splits, dim=-1)
-    recon_split = torch.split(recon_flat, state_feature_splits, dim=-1)
-
-    for recon_group, x_group in zip(recon_split, x_split):
-        recon_loss += F.binary_cross_entropy_with_logits(
-            recon_group, x_group, reduction="mean"
-        )
+    bce = F.binary_cross_entropy_with_logits(
+      reconstructed_x, x, weight=weight_mask, reduction='none')  # (B, H, W, F)
+    recon_loss = bce.mean(dim=(1, 2, 3))
 
     # KL Divergence Loss
     # -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
