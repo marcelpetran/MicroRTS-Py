@@ -1,10 +1,12 @@
---classic
+--train_vae
+--vae_episodes
+10_000
 --env_size
 7
 --max_steps
 30
 --batch_size
-16
+8
 --qnet_dim
 256
 --train_every
@@ -12,7 +14,7 @@
 --target_update_every
 1000
 --latent_dim
-8
+16
 --d_model
 256
 --nhead
@@ -26,7 +28,7 @@
 --dropout
 0.1
 --beta
-1.002
+1.0025
 --horizon
 3
 --eps_decay_steps
