@@ -363,32 +363,22 @@ class OpponentModel(nn.Module):
     """
     Calculates the full OMG loss for the CVAE.
     """
-    mask = (1.0 - dones.float())
-    denom = mask.sum().clamp_min(1.0)
+    # mask = (1.0 - dones.float())
+    # denom = mask.sum().clamp_min(1.0)
     # --- 1. Reconstruction Loss ---
     # This forces the CVAE to represent the current state
     recon_loss = 0
 
-    # recon_flat = reconstructed_x.view(-1, sum(self.args.state_feature_splits))
-    # x_flat = x.view(-1, sum(self.args.state_feature_splits))
-
-    # x_split = torch.split(x_flat, self.args.state_feature_splits, dim=-1)
-    # recon_split = torch.split(
-    #   recon_flat, self.args.state_feature_splits, dim=-1)
-
-    # for recon_group, x_group in zip(recon_split, x_split):
-    #   bce_loss = F.binary_cross_entropy_with_logits(recon_group, x_group, reduction='none').mean(dim=1)
-    #   print(bce_loss.shape, mask.shape)  # (B*H*W,), (B,1)
-    #   recon_loss += (bce_loss * mask).sum() / mask.sum()
-    weights = torch.tensor([1.0, 10.0, 20.0, 30.0], device=self.device)
-    weight_mask = x * weights
+    # added weight mask for critical features, to reduce problem majority problem
+    weight_mask = x * self.feature_weights
     # base for all cells so empty cells aren't ignored completely
     weight_mask = weight_mask + 1.0
+
     bce = F.binary_cross_entropy_with_logits(
       reconstructed_x, x, weight=weight_mask, reduction='none')  # (B, H, W, F)
-    per_cell = (bce * self.feature_weights).sum(dim=-1)
-    per_ex = per_cell.mean(dim=(1, 2))
-    recon_loss = (per_ex * mask).sum() / denom
+    per_cell = (bce * self.feature_split_weights).sum(dim=-1)
+    recon_loss = per_cell.mean(dim=(1, 2))
+    # recon_loss = (per_ex * mask).sum() / denom
 
     # --- 2. Inference Loss ---
     # This forces the CVAE latent vector g_hat to point towards high-probability future
@@ -405,10 +395,11 @@ class OpponentModel(nn.Module):
                                             cvae_log_var.exp()) / target_log_var.exp()),
                                           dim=-1)
 
-    omg_loss = (kl_div_per_example * mask).sum() / denom
+    # omg_loss = (kl_div_per_example * mask).sum() / denom
+    omg_loss = kl_div_per_example.mean()
 
     # --- 3. Total Loss ---
-    total_loss = recon_loss + self.args.beta * omg_loss
+    total_loss = recon_loss.mean() + self.args.beta * omg_loss
     return total_loss
 
   def train_step(self, batch, eval_policy):
