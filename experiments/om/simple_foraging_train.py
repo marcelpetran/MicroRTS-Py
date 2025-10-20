@@ -111,39 +111,26 @@ if not args_parsed.classic:
   # CVAE (Student)
   cvae = t.TransformerCVAE(args).to(device)
 
+  selector = SubGoalSelector(args)
+  cvae_optimizer = torch.optim.Adam(cvae.parameters(), lr=args.cvae_lr)
+
+  op_model = OpponentModel(
+    cvae, vae, selector, optimizer=cvae_optimizer, device=device, args=args)
+
   # --- Pre-train the VAE ---
   if args.train_vae:
     print("Pre-training VAE...")
     vae_optimizer = torch.optim.Adam(vae.parameters(), lr=args.vae_lr)
     vae_replay = ReplayBuffer(10_000)
 
-    t.train_vae(env, vae, vae_replay, vae_optimizer, num_epochs=args_parsed.vae_episodes,
-                save_every_n_epochs=args_parsed.vae_episodes, batch_size=args.batch_size, max_steps=args.max_steps, logg=1_000)
+    op_model.train_vae(env, vae_replay, vae_optimizer, num_epochs=args_parsed.vae_episodes,
+                       save_every_n_epochs=args_parsed.vae_episodes, max_steps=args.max_steps, logg=1_000)
     print("VAE pre-training complete.")
-    print("Simple test of VAE reconstruction:")
-    vae.eval()
-    with torch.no_grad():
-      sample_state = torch.tensor(obs_sample[0], dtype=torch.float32).unsqueeze(
-        0).to(device)  # (1, H, W, F)
-      reconstructed_state, mu, logvar = vae(sample_state)
-      print("Original State:\n", obs_sample[0])
-      SimpleForagingEnv.render_from_obs(obs_sample[0])
-      print("Reconstructed State:\n", reconstructed_state[0])
-      SimpleForagingEnv.render_from_obs(t.reconstruct_state(
-        reconstructed_state, args.state_feature_splits)[0])
-      print("Latent Mu:\n", mu)
-      print("Latent LogVar:\n", logvar)
   else:
     assert os.path.exists(args_parsed.vae_path), "VAE path does not exist!"
-    vae.load_state_dict(torch.load(
+    op_model.prior_model.load_state_dict(torch.load(
       args_parsed.vae_path, map_location=device))
     print("Loaded pre-trained VAE.")
-
-  selector = SubGoalSelector(args)
-  cvae_optimizer = torch.optim.Adam(cvae.parameters(), lr=args.cvae_lr)
-
-  op_model = OpponentModel(
-    cvae, vae, selector, optimizer=cvae_optimizer, device=device, args=args)
 
   agent = QLearningAgent(env, op_model, device=device, args=args)
   if args_parsed.visualize_vae:
