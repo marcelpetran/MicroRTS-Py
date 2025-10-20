@@ -1,3 +1,4 @@
+from git import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -53,7 +54,7 @@ class StateEmbeddings(nn.Module):
     sums them, and adds positional encoding.
     """
 
-    def __init__(self, H, W, state_feature_splits, d_model, dropout):
+    def __init__(self, H, W, state_feature_splits, d_model, dropout, state_token:Optional[torch.Tensor]=None):
         super().__init__()
         self.h = H
         self.w = W
@@ -61,6 +62,7 @@ class StateEmbeddings(nn.Module):
         self.state_feature_splits = state_feature_splits
         self.d_model = d_model
         self.dropout = dropout
+        self.state_token = state_token
 
         # Separate linear layer for each one-hot feature group
         self.feature_embedders = nn.ModuleList(
@@ -109,6 +111,10 @@ class StateEmbeddings(nn.Module):
         for i, feature_tensor in enumerate(split_features):
             embedded += self.feature_embedders[i](feature_tensor.float())
         # embedded: (B, H*W, d_model)
+
+        # Add token type embedding
+        if self.state_token is not None:
+          embedded += self.state_token
         # Add positional encoding to each cell
         return self.position_encoder(embedded)
 
