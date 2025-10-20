@@ -209,6 +209,8 @@ class TransformerCVAE(nn.Module):
         self.seq_len = args.H * args.W
         self.droput = args.dropout
         self.args = args
+        self.state_token_type = nn.Parameter(torch.randn(1, 1, args.d_model))
+        self.action_token_type = nn.Parameter(torch.randn(1, 1, args.d_model))
 
         # --- Positional Encoding for History ---
         max_history_len = args.max_history_length * (self.seq_len + (1 if args.action_dim else 0))
@@ -216,7 +218,7 @@ class TransformerCVAE(nn.Module):
 
         # --- Feature Embedding ---
         self.state_embedder = StateEmbeddings(
-            args.H, args.W, args.state_feature_splits, args.d_model, args.dropout
+            args.H, args.W, args.state_feature_splits, args.d_model, args.dropout, self.state_token_type
         )
         if args.action_dim is None:
             if args.action_feature_splits is None:
@@ -310,9 +312,13 @@ class TransformerCVAE(nn.Module):
             for i, feature_tensor in enumerate(split_features):
                 embedded_state += self.state_embedder.feature_embedders[i](feature_tensor.float())
             
+            # Add state token type embedding
+            embedded_state += self.state_token_type
             if have_actions:
                 a_t = to_b(actions[t])
                 a_t_embedded = self.action_embedder(a_t)
+                # Add action token type embedding
+                a_t_embedded += self.action_token_type
                 history_embeddings.append(
                     torch.cat([embedded_state, a_t_embedded], dim=1)
                 )
