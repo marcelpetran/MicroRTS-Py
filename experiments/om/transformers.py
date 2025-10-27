@@ -1,3 +1,4 @@
+from typing import final
 from git import Optional
 import torch
 import torch.nn as nn
@@ -109,6 +110,7 @@ class StateEmbeddings(nn.Module):
         )
         # For each cell in the grid, sum the embeddings of each feature group
         for i, feature_tensor in enumerate(split_features):
+            # TODO: WARNING, it may not be good ideat to sum embeddings like this
             embedded += self.feature_embedders[i](feature_tensor.float())
         # embedded: (B, H*W, d_model)
 
@@ -119,19 +121,17 @@ class StateEmbeddings(nn.Module):
         return self.position_encoder(embedded)
 
 class TrajectoryEmbedder(nn.Module):
-    def __init__(self, T, H, W, state_feature_splits, d_model, dropout):
+    def __init__(self, H, W, state_feature_splits, d_model, dropout, state_token:Optional[torch.Tensor]=None):
         super().__init__()
-        self.total_seq_len = T * H * W
+        self.seq_len_per_state = H * W
+        self.F_dim = sum(state_feature_splits)
         self.d_model = d_model
+        self.state_feature_splits = state_feature_splits
+        self.state_token = state_token
         
         # Feature Embedders
         self.feature_embedders = nn.ModuleList(
             [nn.Linear(size, d_model, bias=False) for size in state_feature_splits]
-        )
-        
-        # Possitional encoding for the entire trajectory
-        self.position_encoder = PositionalEncoding(
-            d_model, seq_len=self.total_seq_len, dropout=dropout
         )
 
     def forward(self, trajectory_tensor):
@@ -144,26 +144,23 @@ class TrajectoryEmbedder(nn.Module):
         assert trajectory_tensor.dim() == 5, (
             f"Expected (B,T,H,W,F), got {tuple(trajectory_tensor.shape)}"
         )
-        B, T, H, W, F = trajectory_tensor.shape
-
-        assert T * H * W == self.total_seq_len, (
-            f"Expected total sequence length {self.total_seq_len}, got {T*H*W}"
-        )
-        # (B, T, H, W, F) -> (B, T*H*W, F)
-        flat_sequence = trajectory_tensor.view(B, self.total_seq_len, F)
-        
-        # List of (B, T*H*W, feature_size)
-        split_features = torch.split(flat_sequence, self.state_feature_splits, dim=-1)
-        
-        # Embed the features by summing the embeddings of each feature group
+        B, T, _, _, _ = trajectory_tensor.shape
+        flat_for_embedding = trajectory_tensor.view(-1, self.F_dim)
+        split_features = torch.split(flat_for_embedding, self.state_feature_splits, dim=-1)
         embedded_features = torch.zeros(
-            B, self.total_seq_len, self.d_model, device=trajectory_tensor.device
+            B * T * self.seq_len_per_state, self.d_model, device=trajectory_tensor.device
         )
         for i, feature_tensor in enumerate(split_features):
             embedded_features += self.feature_embedders[i](feature_tensor.float())
         
-        # Add positional encoding
-        return self.position_encoder(embedded_features)
+        # (B, T*H*W, d_model)
+        embedded_features = embedded_features.view(B, T * self.seq_len_per_state, self.d_model)
+
+        # Add token type embedding
+        if self.state_token is not None:
+          embedded_features += self.state_token
+          
+        return embedded_features
 
 class DiscreteActionEmbedder(nn.Module):
     """Embeds simple discrete actions into a d_model vector."""
@@ -178,11 +175,10 @@ class DiscreteActionEmbedder(nn.Module):
         Args:
             actions (Tensor): A tensor of action indices, shape (B,).
         Returns:
-            Tensor: Embedded actions, shape (B, 1, d_model) ready for sequence concatenation.
+            Tensor: Embedded actions, shape (B, d_model).
         """
-        # (B,) -> (B, d_model) -> (B, 1, d_model)
-        # TODO: maybe we want to add positional encoding here too?
-        return self.embedding(actions).unsqueeze(1)
+        # (B,) -> (B, d_model)
+        return self.embedding(actions)
 
 
 class ActionEmbeddings(StateEmbeddings):
@@ -220,6 +216,9 @@ class TransformerCVAE(nn.Module):
         self.state_embedder = StateEmbeddings(
             args.H, args.W, args.state_feature_splits, args.d_model, args.dropout, self.state_token_type
         )
+        self.trajectory_embedder = TrajectoryEmbedder(
+            args.H, args.W, args.state_feature_splits, args.d_model, args.dropout
+        )
         if args.action_dim is None:
             if args.action_feature_splits is None:
                 raise ValueError(
@@ -254,6 +253,12 @@ class TransformerCVAE(nn.Module):
         self.transformer_decoder = nn.TransformerDecoder(
             decoder_layer, args.num_decoder_layers
         )
+        unconditioned_decoder_layer = nn.TransformerEncoderLayer(
+            args.d_model, args.nhead, args.dim_feedforward, batch_first=True
+        )
+        self.unconditioned_decoder = nn.TransformerEncoder(
+            unconditioned_decoder_layer, args.num_decoder_layers
+        )
 
         # --- Output Projection ---
         self.output_projectors = nn.ModuleList(
@@ -267,84 +272,47 @@ class TransformerCVAE(nn.Module):
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
-    def get_history_embeddings(self, history):
-        """
-        Aggregates and embeds the historical trajectory into a single sequence.
-        Expected keys: 'states', 'actions'
-        history['states'] is a list of tensors, each either (H, W, F) or (B, H, W, F)
-        history['actions'] is a list of tensors, each either () or (B,)
-        """
-
-        def to_bhwf(x):
-            # Accept (H,W,F) or (B,H,W,F) and return (B,H,W,F)
-            x = x.to(self.args.device)
-            if x.dim() == 3:
-                return x.unsqueeze(0)
-            if x.dim() == 4:
-                return x
-            raise ValueError(
-                f"state has to be (H,W,F) or (B,H,W,F); got {tuple(x.shape)}"
-            )
-
-        def to_b(x):
-            # Accept scalar () or vector (B,) and return (B,)
-            x = x.to(self.args.device)
-            if x.dim() == 0:
-                return x.unsqueeze(0)
-            if x.dim() == 1:
-                return x
-            return x.view(x.shape[0])
-
-        states = history.get("states", [])
-        actions = history.get("actions", None)
-        have_actions = isinstance(actions, list) and len(actions) == len(states)
-
-        history_embeddings = []
-        for t, s_t in enumerate(states):
-            s_t = to_bhwf(s_t)  # (B,H,W,F)
-            B = s_t.shape[0]
-            state_flat = s_t.view(B, self.seq_len, -1)
-            split_features = torch.split(state_flat, self.args.state_feature_splits, dim=-1)
-
-            embedded_state = torch.zeros(
-                B, self.seq_len, self.args.d_model, device=s_t.device
-            )
-            for i, feature_tensor in enumerate(split_features):
-                embedded_state += self.state_embedder.feature_embedders[i](feature_tensor.float())
-            
-            # Add state token type embedding
-            embedded_state += self.state_token_type
-            if have_actions:
-                a_t = to_b(actions[t])
-                a_t_embedded = self.action_embedder(a_t)
-                # Add action token type embedding
-                a_t_embedded += self.action_token_type
-                history_embeddings.append(
-                    torch.cat([embedded_state, a_t_embedded], dim=1)
-                )
-            else:
-                history_embeddings.append(embedded_state)
-
-        return history_embeddings
-
     def get_history_seq(self, history):
         """
         Concatenates the embedded history into a single sequence tensor.
         Args:
-            history (dict): Dictionary containing 'states' and optionally 'actions'.
+            history (dict): Dictionary containing 'states', 'actions' and 'mask'.
         Returns:
             Tensor: Concatenated history sequence of shape (B, total_seq_len, d_model)
         """
-        history_embeddings = self.get_history_embeddings(history)
-        if history_embeddings is None or len(history_embeddings) == 0:
-            # If no history, use a null condition state, therefore it should behave like a regular VAE
-            return torch.empty(1, 0, self.args.d_model, device=self.args.device)
+        states = history["states"] # (B, T, H, W, F), where T is longest history
+        actions = history["actions"] # (B, T) discrete actions
+        mask = history.get("mask", None) # (B, T) boolean mask for real vs padded tokens
 
-        # Concatenate all history elements into a single long sequence
-        # (B, total_seq_len, d_model)
-        concatenated_seq = torch.cat(history_embeddings, dim=1).to(self.args.device)
+        if isinstance(states, list):
+            if not states:
+              return torch.empty(1, 0, self.args.d_model, device=self.args.device), \
+                    torch.empty(1, 0, dtype=torch.bool, device=self.args.device)
+            
+            # evaluation mode - states are in format list of (H, W, F) of length T
+            states = torch.stack(states, dim=0).unsqueeze(0)  # (1, T, H, W, F)
+            actions = torch.stack(actions, dim=0).unsqueeze(0)  # (1, T)
+            
+            
+        B, T, _, _, _ = states.shape
+        if mask is None:
+            # during collection or evaluation -> all tokens are valid
+            mask = torch.ones(B, T, dtype=torch.bool, device=self.args.device)
+        
+        state_mask = mask.unsqueeze(-1).repeat(1, 1, self.seq_len) # (B, T, H*W)
+        action_mask = mask.unsqueeze(-1)  # (B, T, 1)
+        final_mask = torch.cat([state_mask, action_mask], dim=2).view(B, -1)  # (B, T*(H*W + 1))
+        
+        state_embeddings = self.trajectory_embedder(states)  # (B, T*H*W, d_model)
+        action_embeddings = self.action_embedder(actions)  # (B, T, d_model)
+        state_embeddings = state_embeddings.view(B, T, self.seq_len, self.args.d_model)  # (B, T, H*W, d_model)
+        action_embeddings = action_embeddings.view(B, T, 1, self.args.d_model)  # (B, T, 1, d_model)
 
-        return self.history_pos_encoder(concatenated_seq)
+        # Interleave state and action embeddings
+        interleaved_seq = torch.cat([state_embeddings, action_embeddings], dim=2)  # (B, T, H*W + 1, d_model)
+        concatenated_seq = interleaved_seq.view(B, -1, self.args.d_model)  # (B, T * (H*W + 1), d_model)
+
+        return self.history_pos_encoder(concatenated_seq), final_mask
 
     def encode(self, x, history, is_history_seq=False):
         """
@@ -361,12 +329,17 @@ class TransformerCVAE(nn.Module):
         x_embedded = self.state_embedder(x)
 
         if not is_history_seq:
-            condition_seq = self.get_history_seq(history)
+            condition_seq, condition_mask = self.get_history_seq(history)
         else:
-            condition_seq = history.to(self.args.device)
-
+            condition_seq, condition_mask = history
+        x_mask = torch.ones(x_embedded.shape[0], x_embedded.shape[1], dtype=torch.bool, device=self.args.device)
+        combined_mask = torch.cat([x_mask, condition_mask], dim=1)
         combined_seq = torch.cat([x_embedded, condition_seq], dim=1)
-        encoder_output = self.transformer_encoder(combined_seq)
+        # PyTorch's mask expects True for padded tokens, so we invert our boolean mask
+        encoder_output = self.transformer_encoder(
+            combined_seq,
+            src_key_padding_mask=~combined_mask
+            )
         aggregated_output = encoder_output[:, 0, :]
 
         mu = self.fc_mu(aggregated_output)
@@ -391,9 +364,9 @@ class TransformerCVAE(nn.Module):
         """
         z = z.to(self.args.device)
         if not is_history_seq:
-            history_seq = self.get_history_seq(history)
+            history_seq, mask = self.get_history_seq(history)
         else:
-            history_seq = history.to(self.args.device)
+            history_seq, mask = history
 
         B = z.shape[0]
         memory = history_seq
@@ -401,7 +374,17 @@ class TransformerCVAE(nn.Module):
         decoder_input = self.latent_to_decoder_input(z).view(B, self.seq_len, -1)
         tgt = self.decoder_pos_encoder(decoder_input)
 
-        decoder_output = self.transformer_decoder(tgt=tgt, memory=memory)
+        if history_seq.shape[1] > 0:
+          # If history exists, use the standard TransformerDecoder with memory
+          memory = history_seq
+          decoder_output = self.transformer_decoder(
+              tgt=tgt,
+              memory=memory,
+              memory_key_padding_mask=~mask
+          )
+        else:
+            # If history is empty, use the unconditioned VAE-style decoder
+            decoder_output = self.unconditioned_decoder(tgt)
 
         reconstructed_features = [
             proj(decoder_output) for proj in self.output_projectors
@@ -423,10 +406,11 @@ class TransformerCVAE(nn.Module):
             Tensor: Log-variance of the latent distribution (B, latent_dim)
         """
         x = x.to(self.args.device)
-        history_seq = self.get_history_seq(history)
-        mu, logvar = self.encode(x, history_seq, is_history_seq=True)
+        history_seq, mask = self.get_history_seq(history)
+        history_seq = history_seq.to(self.args.device)
+        mu, logvar = self.encode(x, (history_seq, mask), is_history_seq=True)
         z = self.reparameterize(mu, logvar)
-        reconstructed_x = self.decode(z, history_seq, is_history_seq=True)
+        reconstructed_x = self.decode(z, (history_seq, mask), is_history_seq=True)
         return reconstructed_x, mu, logvar
 
 
