@@ -12,11 +12,11 @@ class SubGoalSelector:
   def __init__(self, args):
     self.args = args
 
-  def gumbel_max_sample(self, logits):
+  def gumbel_sample(self, logits):
     """
-    Samples from a categorical distribution using the Gumbel-max trick.
+    Samples from a categorical distribution using the Gumbel-max/min trick.
     Args:
-        logits (Tensor): Logits of shape (N,) representing the unnormalized log probabilities.
+        logits (Tensor): Logits of shape (K,) representing the unnormalized log probabilities.
     Returns:
         int: Index of the sampled category.
     """
@@ -29,7 +29,7 @@ class SubGoalSelector:
       raise ValueError(
         f"Unknown selector_mode: {self.args.selector_mode},\nchoose from ['optimistic', 'conservative']")
 
-  def select(self, vae, eval_policy, s_t: torch.Tensor, future_states: torch.Tensor):
+  def select(self, vae, eval_policy, s_t_batch: torch.Tensor, future_states: torch.Tensor, tau: float):
     """
     Selects a subgoal by encoding future states to latent space s_g = encode(s_t+K), 
     selecting suitable future state by policy argmin Q-value(s_t, s_g), 
@@ -37,7 +37,7 @@ class SubGoalSelector:
     Args:
         vae (VAE): Pre-trained VAE model
         policy (Policy): Policy model with Q-value function
-        s_t (Tensor): Current state of shape (1, H, W, F)
+        s_t_batch (Tensor): Current state of shape (B, H, W, F)
         future_states (Tensor): Future states of shape (B, K, H, W, F) - K is the horizon
     Returns:
         Tensor: latent subgoal of shape (latent_dim)
@@ -46,25 +46,34 @@ class SubGoalSelector:
     with torch.no_grad():
       subgoal_batch = []
       vae_log_var_batch = []
+      assert s_t_batch.dim(
+      ) == 4, f"s_t_ba should be 4D (B, H, W, F), got {s_t_batch.shape}"
+      assert future_states.dim(
+      ) == 5, f"future_states should be 5D (B, K, H, W, F), got {future_states.shape}"
+
       # iterate over batch
       for i, horizon in enumerate(future_states):
         # (B, K, H, W, F) -> (K, H, W, F)
         mu, _ = vae.encode(horizon)  # (K, latent_dim)
         # policy expects a batch dim for state and subgoal
-        s_t_batch = s_t if s_t.dim() == 4 else s_t.unsqueeze(0)  # (1, H, W, F)
-        mu_batch = mu.unsqueeze(0)  # (1, K, latent_dim)
+        s_t = s_t_batch[i]
+        K = horizon.shape[0]
 
-        # s_t: (1, D_s), mu: (K, D_g) -> Q(K, A)
-        # print(s_t.shape, future_states.shape) # (1, H, W, F), (K, H, W, F)
-        s_t_expanded = s_t_batch[i].repeat(
-          1, mu.shape[0], 1, 1, 1).view(-1, *s_t.shape[1:])
-        mu_expanded = mu_batch.view(-1, mu.shape[-1])
+        # s_t: (D_s) -> (K, D_s)
+        s_t_expanded = s_t.unsqueeze(0).repeat(K, 1, 1, 1)  # (K, H, W, F)
 
-        values_flat = eval_policy.value(s_t_expanded, mu_expanded)  # (K, A)
-        values = values_flat.mean(dim=-1)  # V(s,g) = mean_a Q(s,g,a)
+        # s_t_expanded: (K, H, W, F), mu: (K, latent_dim) -> values_flat: (K, A)
+        values_flat = eval_policy.value(s_t_expanded, mu)  # (K, A)
 
-        # Gumbel-max trick for differentiable argmin
-        best_idx = self.gumbel_max_sample(values)
+        # old approach: take max Q-value over actions
+        # values = values_flat.max(dim=-1)
+
+        # Boltzmann exploration over Q-values
+        probs = F.softmax(values_flat / tau, dim=-1)  # (K, A)
+        values = (probs * values_flat).sum(dim=-1)  # (K,)
+
+        # Gumbel-max trick for differentiable argmin or argmax
+        best_idx = self.gumbel_sample(values)
         best_future_state = horizon[best_idx].unsqueeze(0)  # (1, H, W, F)
         # (1, latent_dim), (1, latent_dim)
         subgoal, vae_log_var = vae.encode(best_future_state)
@@ -257,7 +266,7 @@ class OpponentModel(nn.Module):
     # -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
     kld_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
 
-    return recon_loss.mean() + self.args.beta * kld_loss
+    return recon_loss.mean() + self.args.vae_beta * kld_loss
 
   def train_vae(self,
                 env,
@@ -359,7 +368,7 @@ class OpponentModel(nn.Module):
 
   def loss_function(
           self, reconstructed_x, x, cvae_mu, cvae_log_var,
-          vae_mu, vae_log_var, infer_mu, infer_log_var, dones, eta):
+          vae_mu, vae_log_var, infer_mu, infer_log_var, dones, eta, beta):
     """
     Calculates the full OMG loss for the CVAE.
     """
@@ -399,10 +408,10 @@ class OpponentModel(nn.Module):
     omg_loss = kl_div_per_example.mean()
 
     # --- 3. Total Loss ---
-    total_loss = recon_loss.mean() + self.args.beta * omg_loss
+    total_loss = recon_loss.mean() + beta * omg_loss
     return total_loss
 
-  def train_step(self, batch, eval_policy):
+  def train_step(self, batch, eval_policy, tau, beta):
     """
     Performs a single training step for the opponent model.
     Args:
@@ -418,7 +427,7 @@ class OpponentModel(nn.Module):
     """
     # Unpack the batch from the replay buffer
     x = batch['states'].to(self.device)  # (B, H, W, F)
-    history = batch['history']  # A dict of state/action lists up to s_t-1
+    history = batch['history']  # A dict of state/action/mask lists up to s_t-1
     future_states = batch['future_states'].to(self.device)  # (B, K, H, W, F)
     infer_mu = batch['infer_mu'].to(self.device)
     infer_log_var = batch['infer_log_var'].to(self.device)
@@ -431,21 +440,15 @@ class OpponentModel(nn.Module):
 
     self.inference_model.train()
     self.optimizer.zero_grad()
-    # transformers.py, line 321, in forward
-    #   mu, logvar = self.encode(x, history)
-    # File transformers.py, line 265, in encode
-    #   combined_seq = torch.cat([x_embedded, condition_seq], dim=1)
-    # Sizes of tensors must match except in dimension 1. Expected size 4 but got size 1 for tensor number 1 in the list.
-    # this happens when history is empty
-    # TODO: fix this properly
+
     reconstructed_x, cvae_mu, cvae_log_var = self.inference_model(x, history)
 
     with torch.no_grad():
       vae_mu, vae_log_var = self.subgoal_selector.select(self.prior_model, eval_policy,
-                                                         x, future_states)
+                                                         x, future_states, tau)
 
     loss = self.loss_function(reconstructed_x, x, cvae_mu, cvae_log_var,
-                              vae_mu, vae_log_var, infer_mu, infer_log_var, dones, eval_policy._gmix_eps())
+                              vae_mu, vae_log_var, infer_mu, infer_log_var, dones, eval_policy._gmix_eps(), beta)
 
     loss.backward()
     self.optimizer.step()
