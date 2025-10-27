@@ -90,7 +90,7 @@ args = OMGArgs(
     visualise_every_n_step=3,
     max_steps=args_parsed.max_steps,
     selector_mode="conservative",
-    beta=args_parsed.beta,
+    vae_beta=args_parsed.beta,
     train_vae=args_parsed.train_vae,
     state_shape=obs_sample[0].shape,
     H=H, W=W,

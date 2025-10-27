@@ -29,12 +29,18 @@ class OMGArgs:
   horizon_H: int = 3
   # "conservative" => Eq.(7), "optimistic" => Eq.(6)
   selector_mode: str = "conservative"
+  selector_tau_start: float = 1.0
+  selector_tau_end: float = 0.1
+  selector_tau_decay_steps: int = 50_000
   train_vae: bool = True
   vae_lr: float = 1e-4
   cvae_lr: float = 3e-4
 
   # Transformer architecture params
-  beta: float = 0.1  # Weight for the KL loss TODO: check if good
+  beta_start: float = 0.0  # Weight for CVAE KL loss
+  beta_end: float = 2.0
+  beta_decay_steps: int = 70_000
+  vae_beta: float = 0.1  # Weight for VAE KL loss
   state_shape: Tuple[int, int, int] = None  # (H, W, F)
   H: int = 5  # grid height
   W: int = 5  # grid width
