@@ -1,6 +1,5 @@
---train_vae
 --vae_episodes
-10_000
+1_000
 --env_size
 7
 --max_steps
@@ -27,8 +26,8 @@
 512
 --dropout
 0.1
---beta
-1.0025
+--vae_beta
+0.1
 --horizon
 3
 --eps_decay_steps
