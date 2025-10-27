@@ -136,13 +136,18 @@ class SimpleAgent:
   Simple agent, that decides by coin if he goes for the top or bottom food
   """
 
-  def __init__(self, agent_id):
+  def __init__(self, agent_id, always_go_top=False):
     self.agent_id = agent_id
     # agent randomly decides to go for top or bottom food
     self.going_for_top = True if np.random.rand() > 0.5 else False
+    self.always_go_top = always_go_top
+    if self.always_go_top:
+      self.going_for_top = True
 
   def reset(self):
     self.going_for_top = True if np.random.rand() > 0.5 else False
+    if self.always_go_top:
+      self.going_for_top = True
 
   def find_food(self, food_positions):
     if not food_positions:
