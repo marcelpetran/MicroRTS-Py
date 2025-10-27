@@ -43,8 +43,16 @@ parser.add_argument('--num_decoder_layers', type=int,
 parser.add_argument('--dim_feedforward', type=int,
                     default=1024, help='Dimension of feedforward network')
 parser.add_argument('--dropout', type=float, default=0.12, help='Dropout rate')
-parser.add_argument('--beta', type=float, default=1.002,
-                    help='Beta for KL loss in VAE/CVAE')
+parser.add_argument('--vae_beta', type=float, default=0.1,
+                    help='Beta for KL loss in VAE')
+parser.add_argument('--beta_start', type=float, default=0.0,
+                    help='Starting value of beta for KL loss in CVAE')
+parser.add_argument('--beta_end', type=float, default=2.0,
+                    help='Last value of beta for KL loss in CVAE')
+parser.add_argument('--selector_tau_start', type=float, default=2.0,
+                    help='Starting temperature value in selector module, using Boltzmann distribution')
+parser.add_argument('--selector_tau_end', type=float, default=0.1,
+                    help='Last temperature value in selector module, using Boltzmann distribution')
 parser.add_argument('--horizon', type=int, default=3,
                     help='Future window H for opponent modeling (Selector module)')
 parser.add_argument('--eps_decay_steps', type=int, default=150_000,
@@ -90,7 +98,11 @@ args = OMGArgs(
     visualise_every_n_step=3,
     max_steps=args_parsed.max_steps,
     selector_mode="conservative",
-    vae_beta=args_parsed.beta,
+    vae_beta=args_parsed.vae_beta,
+    beta_start=args_parsed.beta_start,
+    beta_end=args_parsed.beta_end,
+    selector_tau_start=args_parsed.selector_tau_start,
+    selector_tau_end=args_parsed.selector_tau_end,
     train_vae=args_parsed.train_vae,
     state_shape=obs_sample[0].shape,
     H=H, W=W,
