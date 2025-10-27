@@ -1,6 +1,8 @@
 from typing import Deque, Dict, List, Tuple, Optional
 import random
 from collections import deque
+
+from sympy import true
 from omg_args import OMGArgs
 
 from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv
@@ -85,7 +87,7 @@ class QLearningAgent:
 
   Expected OpponentModel API:
     - inference_model(...): forward(x=current_state[None], history=...) -> (recon, mu, logvar)
-    - subgoal_selector.select(vae, eval_policy, s_t, future_states) -> (mu, logvar)  # uses Eq.(6)/(7)
+    - subgoal_selector.select(vae, eval_policy, s_t, future_states, tau) -> (mu, logvar)  # uses Eq.(6)/(7)
     - train_step(batch_dict, eval_policy) -> float  # trains the CVAE part of the OpponentModel
     - prior_model: pre-trained TransformerVAE (VAE encoder returns (mu, logvar))
   """
@@ -130,6 +132,13 @@ class QLearningAgent:
     t = min(self.global_step, self.args.gmix_eps_decay_steps)
     return self.args.gmix_eps_end + (self.args.gmix_eps_start - self.args.gmix_eps_end) * (1 - t / self.args.gmix_eps_decay_steps)
 
+  def _selector_tau(self) -> float:
+    t = min(self.global_step, self.args.selector_tau_decay_steps)
+    return self.args.selector_tau_end + (self.args.selector_tau_start - self.args.selector_tau_end) * (1 - t / self.args.selector_tau_decay_steps)
+
+  def _beta(self) -> float:
+    t = min(self.global_step, self.args.beta_decay_steps)
+    return self.args.beta_end + (self.args.beta_start - self.args.beta_end) * (1 - t / self.args.beta_decay_steps)
   # ------------- policy API for selector -------------
 
   @torch.no_grad()
@@ -163,7 +172,7 @@ class QLearningAgent:
     futures = torch.from_numpy(future_states).unsqueeze(
       0).float().to(self.device)  # (1,K,H,W,F)
     mu, logvar = self.model.subgoal_selector.select(
-      self.model.prior_model, self, x, futures)
+      self.model.prior_model, self, x, futures, self._selector_tau())
     return mu, logvar
 
   # ------------- visualization utility -------------
@@ -339,7 +348,8 @@ class QLearningAgent:
         "infer_log_var": torch.stack([b["infer_log_var"] for b in batch_list], dim=0),
         "dones": torch.tensor([b["done"] for b in batch_list], dtype=torch.float32, device=self.device)
     }
-    model_loss = self.model.train_step(om_batch, self)
+    model_loss = self.model.train_step(
+      om_batch, self, self._selector_tau(), self._beta())
 
     if self.global_step % self.args.target_update_every == 0:
       self.q_tgt.load_state_dict(self.q.state_dict())
@@ -349,18 +359,25 @@ class QLearningAgent:
   def _collate_history(self, histories: List[Dict]) -> Dict[str, List[torch.Tensor]]:
     """
     Helper to batch histories of variable lengths by padding shorter ones.
+    Creates a mask to indicate real vs padded tokens.
+    Returns a dict with keys 'states', 'actions', and 'mask'.
     """
     if not histories:
       return {"states": [], "actions": []}
 
+    true_lengths = [len(h.get("states", [])) for h in histories]
     # Find the maximum history length in this batch
-    max_len = 0
-    for h in histories:
-      if "states" in h and h["states"]:
-        max_len = max(max_len, len(h["states"]))
+    max_len = max(true_lengths) if true_lengths else 0
 
     if max_len == 0:
       return {"states": [], "actions": []}
+
+    # (B, max_len) True for real tokens, False for padding.
+    mask = torch.arange(max_len, device=self.device)[None, :] < torch.tensor(
+      true_lengths, device=self.device)[:, None]
+
+    padded_states_list = []
+    padded_actions_list = []
 
     # Create null tensors for padding
     null_state = torch.zeros(*self.args.state_shape, device=self.device)
@@ -368,23 +385,27 @@ class QLearningAgent:
 
     # Pad each history to max_len
     for h in histories:
-      if "states" not in h:  # Handle empty dicts
-        h["states"], h["actions"] = [], []
-
-      num_to_pad = max_len - len(h["states"])
+      num_to_pad = max_len - len(h.get("states", []))
+      states = [s.to(self.device) for s in h.get("states", [])]
+      actions = [a.to(self.device) for a in h.get("actions", [])]
       if num_to_pad > 0:
-        h["states"].extend([null_state] * num_to_pad)
-        h["actions"].extend([null_action] * num_to_pad)
+        states.extend([null_state] * num_to_pad)
+        actions.extend([null_action] * num_to_pad)
 
-    # Now that all histories are the same length, we can stack them
-    collated = {"states": [], "actions": []}
-    for i in range(max_len):
-      collated["states"].append(torch.stack(
-        [h["states"][i].to(self.args.device) for h in histories]))
-      collated["actions"].append(torch.stack(
-        [h["actions"][i].to(self.args.device) for h in histories]))
+      padded_states_list.append(torch.stack(
+        states, dim=0))   # List of (T, H, W, F)
+      padded_actions_list.append(torch.stack(actions, dim=0))  # List of (T,)
+    
+    # list of (T,H,W,F) -> (B, T, H, W, F)
+    final_padded_states = torch.stack(padded_states_list, dim=0)
+    # list of (T,) -> (B, T)
+    final_padded_actions = torch.stack(padded_actions_list, dim=0)
 
-    return collated
+    return {
+        "states": final_padded_states,
+        "actions": final_padded_actions,
+        "mask": mask
+    }
 
   # ------------- rollout -------------
 
