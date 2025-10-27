@@ -301,6 +301,9 @@ class TransformerCVAE(nn.Module):
       states = torch.stack(states, dim=0).unsqueeze(0)  # (1, T, H, W, F)
       actions = torch.stack(actions, dim=0).unsqueeze(0)  # (1, T)
 
+    states = states.to(self.args.device)
+    actions = actions.to(self.args.device)
+
     B, T, _, _, _ = states.shape
     if mask is None:
       # during collection or evaluation -> all tokens are valid
