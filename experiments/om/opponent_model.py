@@ -98,6 +98,11 @@ class OpponentModel(nn.Module):
     self.args = args
     self.mse_loss = nn.MSELoss()
 
+    # sharing weights between prior and inference model decoders
+    self.inference_model.unconditioned_decoder.load_state_dict(
+        self.prior_model.transformer_decoder.state_dict()
+    )
+
     # Precompute feature weights for reconstruction loss
     splits = self.args.state_feature_splits
     weights = []
@@ -173,7 +178,7 @@ class OpponentModel(nn.Module):
 
     return
 
-  def visualize_subgoal_logits(self, obs: np.ndarray, reconstructed_logits: torch.Tensor, state_feature_splits: tuple, filename: str = "subgoal_logits.png"):
+  def visualize_subgoal_logits(self, obs: np.ndarray, reconstructed_logits: torch.Tensor, filename: str = "subgoal_logits.png"):
     """
     Visualizes the softmax probabilities of the reconstructed subgoal logits.
     """
@@ -183,7 +188,7 @@ class OpponentModel(nn.Module):
     # Apply softmax to get probabilities
     probs = torch.zeros_like(logits)
     start_idx = 0
-    for size in state_feature_splits:
+    for size in self.args.state_feature_splits:
       end_idx = start_idx + size
       probs[:, :, start_idx:end_idx] = F.softmax(
         logits[:, :, start_idx:end_idx], dim=-1)
@@ -235,7 +240,7 @@ class OpponentModel(nn.Module):
       reconstructed_logits = self.prior_model.decode(gbar_mu)
 
     self.visualize_subgoal_logits(
-      original_obs, reconstructed_logits, self.args.state_feature_splits, filename)
+      original_obs, reconstructed_logits, filename)
 
   # Loss function for the VAE
 

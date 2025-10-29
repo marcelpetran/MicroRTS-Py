@@ -538,7 +538,7 @@ class QLearningAgent:
             self.model.visualize_selected_subgoal(
               g_bar, obs[0], f"./diagrams_{self.args.folder_id}/selected_subgoal_step{self.global_step + step}.png")
             self.model.visualize_subgoal_logits(
-              obs[0], recon_logits, self.args.state_feature_splits, f"./diagrams_{self.args.folder_id}/subgoal_logits_step{self.global_step + step}.png")
+              obs[0], recon_logits, f"./diagrams_{self.args.folder_id}/subgoal_logits_step{self.global_step + step}.png")
 
         SimpleForagingEnv.render_from_obs(obs[0])
 
@@ -567,7 +567,7 @@ class QLearningAgent:
             torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device)
         )
         self.model.visualize_subgoal_logits(
-          obs[0], recon_logits, self.args.state_feature_splits, f"./diagrams_{self.args.folder_id}/subgoal_logits_prior_step{self.global_step}.png")
+          obs[0], recon_logits, f"./diagrams_{self.args.folder_id}/subgoal_logits_prior_step{self.global_step}.png")
 
       obs = next_obs
       self.global_step += 1
