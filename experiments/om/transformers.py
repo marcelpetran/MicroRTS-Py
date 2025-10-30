@@ -205,11 +205,12 @@ class TransformerCVAE(nn.Module):
     self.args = args
     self.state_token_type = nn.Parameter(torch.randn(1, 1, args.d_model))
     self.action_token_type = nn.Parameter(torch.randn(1, 1, args.d_model))
+    self.cls_token = nn.Parameter(torch.randn(1, 1, args.d_model))
 
     # --- Positional Encoding for history + s_t ---
     self.seq_pos_encoder = PositionalEncoding(
       args.d_model,
-      seq_len=(args.max_history_length + 1) *
+      seq_len=(args.max_history_length + 2) *
         (self.seq_len + (1 if args.action_dim else 0)),
       dropout=args.dropout)
 
@@ -346,9 +347,12 @@ class TransformerCVAE(nn.Module):
       condition_seq, condition_mask = history
     x_mask = torch.ones(
       B, x_embedded.shape[1], dtype=torch.bool, device=self.args.device)
-
-    combined_mask = torch.cat([condition_mask, x_mask], dim=1)
-    combined_seq = torch.cat([condition_seq, x_embedded], dim=1)
+    
+    cls_tokens = self.cls_token.repeat(B, 1, 1)
+    cls_mask = torch.ones(B, 1, dtype=torch.bool, device=self.args.device)
+    
+    combined_mask = torch.cat([cls_mask, condition_mask, x_mask], dim=1)
+    combined_seq = torch.cat([cls_tokens, condition_seq, x_embedded], dim=1)
     combined_seq = self.seq_pos_encoder(combined_seq)
     # PyTorch's mask expects True for padded tokens, so we invert our boolean mask
     encoder_output = self.transformer_encoder(
