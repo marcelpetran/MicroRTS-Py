@@ -219,7 +219,7 @@ class TransformerCVAE(nn.Module):
         args.H, args.W, args.state_feature_splits, args.d_model, args.dropout, self.state_token_type
     )
     self.trajectory_embedder = TrajectoryEmbedder(
-        args.H, args.W, args.state_feature_splits, args.d_model, args.dropout
+        args.H, args.W, args.state_feature_splits, args.d_model, args.dropout, self.state_token_type
     )
     if args.action_dim is None:
       if args.action_feature_splits is None:
@@ -437,10 +437,12 @@ class TransformerVAE(nn.Module):
     self.seq_len = args.H * args.W
     self.dropout = args.dropout
     self.args = args
+    self.state_token_type = nn.Parameter(torch.randn(1, 1, args.d_model))
+    self.cls_token = nn.Parameter(torch.randn(1, 1, args.d_model))
 
     # --- Feature Embedding ---
     self.embedd = StateEmbeddings(
-        args.H, args.W, args.state_feature_splits, args.d_model, args.dropout
+        args.H, args.W, args.state_feature_splits, args.d_model, args.dropout, self.state_token_type
     )
     self.pos_encoder = PositionalEncoding(
         args.d_model, seq_len=self.seq_len * 2, dropout=self.dropout
@@ -488,8 +490,12 @@ class TransformerVAE(nn.Module):
 
   def encode(self, x):
     x = x.to(self.args.device)
-    x_embedded = self.pos_encoder(self.embedd(x))
-    encoder_output = self.transformer_encoder(x_embedded)
+    x_embedded = self.embedd(x)
+    B = x_embedded.shape[0]
+    cls_tokens = self.cls_token.repeat(B, 1, 1)
+    x_seq = torch.cat([cls_tokens, x_embedded], dim=1)
+    x_seq = self.pos_encoder(x_seq)
+    encoder_output = self.transformer_encoder(x_seq)
     # we need single summary vector for mu and logvar
     aggregated_output = encoder_output[:, 0, :]
 
