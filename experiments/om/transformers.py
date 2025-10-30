@@ -118,6 +118,7 @@ class StateEmbeddings(nn.Module):
     if self.state_token is not None:
       embedded += self.state_token
     # Add positional encoding to each cell
+    embedded = embedded * math.sqrt(self.d_model)
     return self.position_encoder(embedded)
 
 
@@ -163,7 +164,7 @@ class TrajectoryEmbedder(nn.Module):
     if self.state_token is not None:
       embedded_features += self.state_token
 
-    return embedded_features
+    return embedded_features * math.sqrt(self.d_model)
 
 
 class DiscreteActionEmbedder(nn.Module):
@@ -182,7 +183,7 @@ class DiscreteActionEmbedder(nn.Module):
         Tensor: Embedded actions, shape (B, d_model).
     """
     # (B,) -> (B, d_model)
-    return self.embedding(actions)
+    return self.embedding(actions) * math.sqrt(self.d_model)
 
 
 class ActionEmbeddings(StateEmbeddings):
@@ -211,6 +212,7 @@ class TransformerCVAE(nn.Module):
     self.args = args
     self.state_token_type = nn.Parameter(torch.randn(1, 1, args.d_model))
     self.action_token_type = nn.Parameter(torch.randn(1, 1, args.d_model))
+    self.cls_token = nn.Parameter(torch.randn(1, 1, args.d_model))
 
     # --- Positional Encoding for History ---
     max_history_len = args.max_history_length * \
@@ -341,16 +343,21 @@ class TransformerCVAE(nn.Module):
         Tensor: Log-variance of the latent distribution (B, latent_dim)
     """
     x = x.to(self.args.device)
-    x_embedded = self.state_embedder(x)
+    x_embedded = self.state_embedder(x) # (B, H*W, d_model)
+    B = x_embedded.shape[0]
 
     if not is_history_seq:
       condition_seq, condition_mask = self.get_history_seq(history)
     else:
       condition_seq, condition_mask = history
     x_mask = torch.ones(
-      x_embedded.shape[0], x_embedded.shape[1], dtype=torch.bool, device=self.args.device)
-    combined_mask = torch.cat([x_mask, condition_mask], dim=1)
-    combined_seq = torch.cat([x_embedded, condition_seq], dim=1)
+      B, x_embedded.shape[1], dtype=torch.bool, device=self.args.device)
+
+    cls_tokens = self.cls_token.repeat(B, 1, 1)
+    cls_mask = torch.ones(B, 1, dtype=torch.bool, device=self.args.device)
+
+    combined_mask = torch.cat([cls_mask, x_mask, condition_mask], dim=1)
+    combined_seq = torch.cat([cls_tokens, x_embedded, condition_seq], dim=1)
     # PyTorch's mask expects True for padded tokens, so we invert our boolean mask
     encoder_output = self.transformer_encoder(
         combined_seq,
