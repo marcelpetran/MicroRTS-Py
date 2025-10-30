@@ -70,11 +70,6 @@ class StateEmbeddings(nn.Module):
         [nn.Linear(size, d_model, bias=False) for size in state_feature_splits]
     )
 
-    # Positional encoding
-    self.position_encoder = PositionalEncoding(
-        d_model, seq_len=self.seq_len * 2, dropout=self.dropout
-    )
-
   def forward(self, state_tensor):
     """
     Args:
@@ -117,9 +112,7 @@ class StateEmbeddings(nn.Module):
     # Add token type embedding
     if self.state_token is not None:
       embedded += self.state_token
-    # Add positional encoding to each cell
-    embedded = embedded * math.sqrt(self.d_model)
-    return self.position_encoder(embedded)
+    return embedded * math.sqrt(self.d_model)
 
 
 class TrajectoryEmbedder(nn.Module):
@@ -213,11 +206,12 @@ class TransformerCVAE(nn.Module):
     self.state_token_type = nn.Parameter(torch.randn(1, 1, args.d_model))
     self.action_token_type = nn.Parameter(torch.randn(1, 1, args.d_model))
 
-    # --- Positional Encoding for History ---
-    max_history_len = args.max_history_length * \
-        (self.seq_len + (1 if args.action_dim else 0))
-    self.history_pos_encoder = PositionalEncoding(
-      args.d_model, seq_len=max_history_len, dropout=args.dropout)
+    # --- Positional Encoding for history + s_t ---
+    self.seq_pos_encoder = PositionalEncoding(
+      args.d_model,
+      seq_len=(args.max_history_length + 1) *
+        (self.seq_len + (1 if args.action_dim else 0)),
+      dropout=args.dropout)
 
     # --- Feature Embedding ---
     self.state_embedder = StateEmbeddings(
@@ -328,7 +322,8 @@ class TransformerCVAE(nn.Module):
     concatenated_seq = interleaved_seq.view(
       B, -1, self.args.d_model)  # (B, T * (H*W + 1), d_model)
 
-    return self.history_pos_encoder(concatenated_seq), final_mask
+    # return self.history_pos_encoder(concatenated_seq), final_mask
+    return concatenated_seq, final_mask
 
   def encode(self, x, history, is_history_seq=False):
     """
@@ -342,7 +337,7 @@ class TransformerCVAE(nn.Module):
         Tensor: Log-variance of the latent distribution (B, latent_dim)
     """
     x = x.to(self.args.device)
-    x_embedded = self.state_embedder(x) # (B, H*W, d_model)
+    x_embedded = self.state_embedder(x)  # (B, H*W, d_model)
     B = x_embedded.shape[0]
 
     if not is_history_seq:
@@ -352,8 +347,9 @@ class TransformerCVAE(nn.Module):
     x_mask = torch.ones(
       B, x_embedded.shape[1], dtype=torch.bool, device=self.args.device)
 
-    combined_mask = torch.cat([x_mask, condition_mask], dim=1)
-    combined_seq = torch.cat([x_embedded, condition_seq], dim=1)
+    combined_mask = torch.cat([condition_mask, x_mask], dim=1)
+    combined_seq = torch.cat([condition_seq, x_embedded], dim=1)
+    combined_seq = self.seq_pos_encoder(combined_seq)
     # PyTorch's mask expects True for padded tokens, so we invert our boolean mask
     encoder_output = self.transformer_encoder(
         combined_seq,
@@ -388,14 +384,12 @@ class TransformerCVAE(nn.Module):
       history_seq, mask = history
 
     B = z.shape[0]
-    memory = history_seq
+    memory = self.seq_pos_encoder(history_seq)
 
     decoder_input = self.latent_to_decoder_input(z).view(B, self.seq_len, -1)
     tgt = self.decoder_pos_encoder(decoder_input)
 
     if history_seq.shape[1] > 0:
-      # If history exists, use the standard TransformerDecoder with memory
-      memory = history_seq
       decoder_output = self.transformer_decoder(
           tgt=tgt,
           memory=memory,
@@ -444,6 +438,9 @@ class TransformerVAE(nn.Module):
     self.embedd = StateEmbeddings(
         args.H, args.W, args.state_feature_splits, args.d_model, args.dropout
     )
+    self.pos_encoder = PositionalEncoding(
+        args.d_model, seq_len=self.seq_len * 2, dropout=self.dropout
+    )
 
     # --- Encoder ---
     encoder_layer = nn.TransformerEncoderLayer(
@@ -487,7 +484,7 @@ class TransformerVAE(nn.Module):
 
   def encode(self, x):
     x = x.to(self.args.device)
-    x_embedded = self.embedd(x)
+    x_embedded = self.pos_encoder(self.embedd(x))
     encoder_output = self.transformer_encoder(x_embedded)
     # we need single summary vector for mu and logvar
     aggregated_output = encoder_output[:, 0, :]
