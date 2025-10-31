@@ -314,8 +314,7 @@ class TransformerCVAE(nn.Module):
     action_embeddings = self.action_embedder(actions)  # (B, T, d_model)
     state_embeddings = state_embeddings.view(
       B, T, self.seq_len, self.args.d_model)  # (B, T, H*W, d_model)
-    action_embeddings = action_embeddings.view(
-      B, T, 1, self.args.d_model)  # (B, T, 1, d_model)
+    action_embeddings = action_embeddings.unsqueeze(2)  # (B, T, 1, d_model)
 
     # Interleave state and action embeddings
     # (B, T, H*W + 1, d_model)
