@@ -55,14 +55,13 @@ class StateEmbeddings(nn.Module):
   sums them, and adds positional encoding.
   """
 
-  def __init__(self, H, W, state_feature_splits, d_model, dropout, state_token: Optional[torch.Tensor] = None):
+  def __init__(self, H, W, state_feature_splits, d_model, state_token):
     super().__init__()
     self.h = H
     self.w = W
     self.seq_len = H * W
     self.state_feature_splits = state_feature_splits
     self.d_model = d_model
-    self.dropout = dropout
     self.state_token = state_token
 
     # Separate linear layer for each one-hot feature group
@@ -110,13 +109,13 @@ class StateEmbeddings(nn.Module):
     # embedded: (B, H*W, d_model)
 
     # Add token type embedding
-    if self.state_token is not None:
-      embedded += self.state_token
+    embedded += self.state_token
+
     return embedded * math.sqrt(self.d_model)
 
 
 class TrajectoryEmbedder(nn.Module):
-  def __init__(self, H, W, state_feature_splits, d_model, dropout, state_token: Optional[torch.Tensor] = None):
+  def __init__(self, H, W, state_feature_splits, d_model, state_token):
     super().__init__()
     self.seq_len_per_state = H * W
     self.F_dim = sum(state_feature_splits)
@@ -154,8 +153,7 @@ class TrajectoryEmbedder(nn.Module):
       B, T * self.seq_len_per_state, self.d_model)
 
     # Add token type embedding
-    if self.state_token is not None:
-      embedded_features += self.state_token
+    embedded_features += self.state_token
 
     return embedded_features * math.sqrt(self.d_model)
 
@@ -163,10 +161,11 @@ class TrajectoryEmbedder(nn.Module):
 class DiscreteActionEmbedder(nn.Module):
   """Embeds simple discrete actions into a d_model vector."""
 
-  def __init__(self, num_actions, d_model):
+  def __init__(self, num_actions, d_model, action_token_type):
     super().__init__()
     self.embedding = nn.Embedding(num_actions, d_model)
     self.d_model = d_model
+    self.action_token_type = action_token_type
 
   def forward(self, actions):
     """
@@ -176,7 +175,7 @@ class DiscreteActionEmbedder(nn.Module):
         Tensor: Embedded actions, shape (B, d_model).
     """
     # (B,) -> (B, d_model)
-    return self.embedding(actions) * math.sqrt(self.d_model)
+    return (self.embedding(actions) + self.action_token_type) * math.sqrt(self.d_model)
 
 
 class ActionEmbeddings(StateEmbeddings):
@@ -185,8 +184,8 @@ class ActionEmbeddings(StateEmbeddings):
   Inherits from StateEmbeddings since the logic is identical.
   """
 
-  def __init__(self, h, w, action_feature_splits, d_model, dropout):
-    super().__init__(h, w, action_feature_splits, d_model, dropout)
+  def __init__(self, h, w, action_feature_splits, d_model, action_token_type):
+    super().__init__(h, w, action_feature_splits, d_model, action_token_type)
 
 
 # Main CVAE Model using Transformer architecture
@@ -201,7 +200,7 @@ class TransformerCVAE(nn.Module):
   def __init__(self, args: OMGArgs):
     super().__init__()
     self.seq_len = args.H * args.W
-    self.droput = args.dropout
+    self.dropout = args.dropout
     self.args = args
     self.state_token_type = nn.Parameter(torch.randn(1, 1, args.d_model))
     self.action_token_type = nn.Parameter(torch.randn(1, 1, args.d_model))
@@ -216,10 +215,10 @@ class TransformerCVAE(nn.Module):
 
     # --- Feature Embedding ---
     self.state_embedder = StateEmbeddings(
-        args.H, args.W, args.state_feature_splits, args.d_model, args.dropout, self.state_token_type
+        args.H, args.W, args.state_feature_splits, args.d_model, self.state_token_type
     )
     self.trajectory_embedder = TrajectoryEmbedder(
-        args.H, args.W, args.state_feature_splits, args.d_model, args.dropout, self.state_token_type
+        args.H, args.W, args.state_feature_splits, args.d_model, self.state_token_type
     )
     if args.action_dim is None:
       if args.action_feature_splits is None:
@@ -227,11 +226,11 @@ class TransformerCVAE(nn.Module):
             "Either action_dim or action_feature_splits must be provided."
         )
       self.action_embedder = ActionEmbeddings(
-          args.H, args.W, args.action_feature_splits, args.d_model, args.dropout
+          args.H, args.W, args.action_feature_splits, args.d_model, self.action_token_type
       )
     else:
       self.action_embedder = DiscreteActionEmbedder(
-        args.action_dim, args.d_model)
+        args.action_dim, args.d_model, self.action_token_type)
 
     # --- Encoder ---
     encoder_layer = nn.TransformerEncoderLayer(
@@ -248,7 +247,7 @@ class TransformerCVAE(nn.Module):
         args.latent_dim, self.seq_len * args.d_model
     )
     self.decoder_pos_encoder = PositionalEncoding(
-        args.d_model, seq_len=self.seq_len, dropout=self.droput
+        args.d_model, seq_len=self.seq_len, dropout=self.dropout
     )
     decoder_layer = nn.TransformerDecoderLayer(
         args.d_model, args.nhead, args.dim_feedforward, batch_first=True
@@ -441,7 +440,7 @@ class TransformerVAE(nn.Module):
 
     # --- Feature Embedding ---
     self.embedd = StateEmbeddings(
-        args.H, args.W, args.state_feature_splits, args.d_model, args.dropout, self.state_token_type
+        args.H, args.W, args.state_feature_splits, args.d_model, self.state_token_type
     )
     self.pos_encoder = PositionalEncoding(
         args.d_model, seq_len=self.seq_len * 2, dropout=self.dropout
