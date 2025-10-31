@@ -347,15 +347,17 @@ class TransformerCVAE(nn.Module):
     cls_tokens = self.cls_token.repeat(B, 1, 1)
     cls_mask = torch.ones(B, 1, dtype=torch.bool, device=self.args.device)
     
-    combined_mask = torch.cat([cls_mask, condition_mask, x_mask], dim=1)
-    combined_seq = torch.cat([cls_tokens, condition_seq, x_embedded], dim=1)
+    combined_mask = torch.cat([cls_mask, condition_mask, x_mask], dim=1) # (B, total_seq_len)
+    combined_seq = torch.cat([cls_tokens, condition_seq, x_embedded], dim=1) # (B, total_seq_len, d_model)
     combined_seq = self.seq_pos_encoder(combined_seq)
     # PyTorch's mask expects True for padded tokens, so we invert our boolean mask
     encoder_output = self.transformer_encoder(
         combined_seq,
         src_key_padding_mask=~combined_mask
     )
-    aggregated_output = encoder_output[:, 0, :]
+    self.encoder_output = encoder_output # (B, total_seq_len, d_model)
+    self.mask = combined_mask
+    aggregated_output = encoder_output[:, 0, :] # (B, d_model)
 
     mu = self.fc_mu(aggregated_output)
     logvar = self.fc_logvar(aggregated_output)
@@ -385,6 +387,7 @@ class TransformerCVAE(nn.Module):
 
     B = z.shape[0]
     memory = self.seq_pos_encoder(history_seq)
+    memory = self.encoder_output
 
     decoder_input = self.latent_to_decoder_input(z).view(B, self.seq_len, -1)
     tgt = self.decoder_pos_encoder(decoder_input)
@@ -393,7 +396,7 @@ class TransformerCVAE(nn.Module):
       decoder_output = self.transformer_decoder(
           tgt=tgt,
           memory=memory,
-          memory_key_padding_mask=~mask
+          memory_key_padding_mask=~self.mask
       )
     else:
       # If history is empty, use the unconditioned VAE-style decoder
