@@ -1,5 +1,3 @@
-from typing import final
-from git import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -111,7 +109,7 @@ class StateEmbeddings(nn.Module):
     # Add token type embedding
     embedded += self.state_token
 
-    return embedded * math.sqrt(self.d_model)
+    return embedded
 
 
 class TrajectoryEmbedder(nn.Module):
@@ -155,7 +153,7 @@ class TrajectoryEmbedder(nn.Module):
     # Add token type embedding
     embedded_features += self.state_token
 
-    return embedded_features * math.sqrt(self.d_model)
+    return embedded_features
 
 
 class DiscreteActionEmbedder(nn.Module):
@@ -175,7 +173,7 @@ class DiscreteActionEmbedder(nn.Module):
         Tensor: Embedded actions, shape (B, d_model).
     """
     # (B,) -> (B, d_model)
-    return (self.embedding(actions) + self.action_token_type) * math.sqrt(self.d_model)
+    return self.embedding(actions) + self.action_token_type
 
 
 class ActionEmbeddings(StateEmbeddings):
