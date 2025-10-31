@@ -107,7 +107,7 @@ class StateEmbeddings(nn.Module):
     # embedded: (B, H*W, d_model)
 
     # Add token type embedding
-    # embedded += self.state_token
+    embedded += self.state_token
 
     return embedded
 
@@ -151,7 +151,7 @@ class TrajectoryEmbedder(nn.Module):
       B, T * self.seq_len_per_state, self.d_model)
 
     # Add token type embedding
-    # embedded_features += self.state_token
+    embedded_features += self.state_token
 
     return embedded_features
 
@@ -173,7 +173,7 @@ class DiscreteActionEmbedder(nn.Module):
         Tensor: Embedded actions, shape (B, d_model).
     """
     # (B,) -> (B, d_model)
-    return self.embedding(actions)
+    return self.embedding(actions) + self.action_token_type
 
 
 class ActionEmbeddings(StateEmbeddings):
