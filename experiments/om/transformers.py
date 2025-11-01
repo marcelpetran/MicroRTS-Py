@@ -201,10 +201,10 @@ class TransformerCVAE(nn.Module):
     self.action_token_type = nn.Parameter(torch.randn(1, 1, args.d_model))
     self.cls_token = nn.Parameter(torch.randn(1, 1, args.d_model))
 
-    # --- Positional Encoding for history + s_t ---
+    # --- Positional Encoding for history + s_t + CLS token ---
     self.seq_pos_encoder = PositionalEncoding(
       args.d_model,
-      seq_len=(args.max_history_length + 2) *
+      seq_len=1+(args.max_history_length + 1) *
         (self.seq_len + (1 if args.action_dim else 0)),
       dropout=args.dropout)
 
@@ -345,15 +345,16 @@ class TransformerCVAE(nn.Module):
     cls_mask = torch.ones(B, 1, dtype=torch.bool, device=self.args.device)
 
     combined_mask = torch.cat(
-      [cls_mask, condition_mask, x_mask], dim=1)  # (B, total_seq_len)
-    # (B, total_seq_len, d_model)
-    combined_seq = torch.cat([cls_tokens, condition_seq, x_embedded], dim=1)
+      [cls_mask, condition_mask], dim=1)  # (B, total_seq_len)
+
+    # (B, 1+T*(H*W+1)+H*W, d_model)
+    combined_seq = torch.cat([cls_tokens, condition_seq], dim=1)
     combined_seq = self.seq_pos_encoder(combined_seq)
     # PyTorch's mask expects True for padded tokens, so we invert our boolean mask
     encoder_output = self.transformer_encoder(
         combined_seq,
         src_key_padding_mask=~combined_mask
-    )
+    )  # (B, total_seq_len, d_model)
     aggregated_output = encoder_output[:, 0, :]  # (B, d_model)
 
     mu = self.fc_mu(aggregated_output)
