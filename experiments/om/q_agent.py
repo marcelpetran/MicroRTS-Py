@@ -395,7 +395,7 @@ class QLearningAgent:
       padded_states_list.append(torch.stack(
         states, dim=0))   # List of (T, H, W, F)
       padded_actions_list.append(torch.stack(actions, dim=0))  # List of (T,)
-    
+
     # list of (T,H,W,F) -> (B, T, H, W, F)
     final_padded_states = torch.stack(padded_states_list, dim=0)
     # list of (T,) -> (B, T)
@@ -495,8 +495,6 @@ class QLearningAgent:
     obs = self.env.reset()
     done = False
     ep_ret = 0.0
-    if render:
-      SimpleForagingEnv.render_from_obs(obs[0])
 
     history_len = self.args.max_history_length
     history = {
@@ -519,28 +517,25 @@ class QLearningAgent:
 
       ep_ret += reward[0]
       obs = next_obs
-      if render:
-        if render and (step + 1) % self.args.visualise_every_n_step == 0:
-          print(f"\n--- Visualization at Step {step+1} ---")
+      if render and not done and (step + 1) % self.args.visualise_every_n_step == 0:
+        print(f"\n--- Visualization at Step {step+1} ---")
 
-          print("Generating Q-value heatmap...")
-          self.heatmap_q_values(obs[0], ghat_mu.unsqueeze(
-            0), f"./diagrams_{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
+        print("Generating Q-value heatmap...")
+        self.heatmap_q_values(obs[0], ghat_mu.unsqueeze(
+          0), f"./diagrams_{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
 
-          print("Generating subgoal visualizations...")
-          with torch.no_grad():
-            self.model.inference_model.eval()
-            recon_logits, g_bar, _ = self.model.inference_model(
-                torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device),
-                current_history
-            )
-            # self.model.visualize_subgoal(ghat_mu.unsqueeze(0), f"./diagrams/subgoal_onehot_step{self.global_step + step}.png")
-            self.model.visualize_selected_subgoal(
-              g_bar, obs[0], f"./diagrams_{self.args.folder_id}/selected_subgoal_step{self.global_step + step}.png")
-            self.model.visualize_subgoal_logits(
-              obs[0], recon_logits, f"./diagrams_{self.args.folder_id}/subgoal_logits_step{self.global_step + step}.png")
-
-        SimpleForagingEnv.render_from_obs(obs[0])
+        print("Generating subgoal visualizations...")
+        with torch.no_grad():
+          self.model.inference_model.eval()
+          recon_logits, g_bar, _ = self.model.inference_model(
+              torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device),
+              current_history
+          )
+          # self.model.visualize_subgoal(ghat_mu.unsqueeze(0), f"./diagrams/subgoal_onehot_step{self.global_step + step}.png")
+          # self.model.visualize_selected_subgoal(
+          #   g_bar, obs[0], f"./diagrams_{self.args.folder_id}/selected_subgoal_step{self.global_step + step}.png")
+          self.model.visualize_subgoal_logits(
+            obs[0], recon_logits, f"./diagrams_{self.args.folder_id}/subgoal_logits_step{self.global_step + step}.png")
 
       if done:
         break

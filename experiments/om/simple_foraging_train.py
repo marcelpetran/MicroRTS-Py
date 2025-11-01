@@ -191,3 +191,6 @@ plt.legend()
 plt.tight_layout()
 plt.savefig(f"./diagrams_{args.folder_id}/training_progress.png")
 plt.show()
+
+# python -m cProfile -o run.prof simple_foraging_train.py @args.txt
+# snakeviz run.prof
