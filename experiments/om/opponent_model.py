@@ -98,11 +98,6 @@ class OpponentModel(nn.Module):
     self.args = args
     self.mse_loss = nn.MSELoss()
 
-    # sharing weights between prior and inference model decoders
-    self.inference_model.unconditioned_decoder.load_state_dict(
-        self.prior_model.transformer_decoder.state_dict()
-    )
-
     # Precompute feature weights for reconstruction loss
     splits = self.args.state_feature_splits
     weights = []

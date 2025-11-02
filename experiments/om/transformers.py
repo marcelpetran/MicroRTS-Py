@@ -359,7 +359,7 @@ class TransformerCVAE(nn.Module):
 
     mu = self.fc_mu(aggregated_output)
     logvar = self.fc_logvar(aggregated_output)
-    return mu, logvar
+    return mu, logvar # (B, latent_dim), (B, latent_dim)
 
   def reparameterize(self, mu, logvar):
     std = torch.exp(0.5 * logvar)
@@ -404,7 +404,7 @@ class TransformerCVAE(nn.Module):
     ]
     reconstructed_x_flat = torch.cat(reconstructed_features, dim=-1)
     reconstructed_x = reconstructed_x_flat.view(
-        B, self.state_embedder.h, self.state_embedder.w, -1
+        B, self.args.H, self.args.W, -1
     )
     return reconstructed_x
 
@@ -516,7 +516,7 @@ class TransformerVAE(nn.Module):
     ]
     reconstructed_x_flat = torch.cat(reconstructed_features, dim=-1)
     reconstructed_x = reconstructed_x_flat.view(
-      B, self.embedd.h, self.embedd.w, -1)
+      B, self.args.H, self.args.W, -1)
     return reconstructed_x
 
   def forward(self, x):
