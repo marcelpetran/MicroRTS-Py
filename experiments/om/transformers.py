@@ -345,10 +345,10 @@ class TransformerCVAE(nn.Module):
     cls_mask = torch.ones(B, 1, dtype=torch.bool, device=self.args.device)
 
     combined_mask = torch.cat(
-      [cls_mask, condition_mask], dim=1)  # (B, total_seq_len)
+      [cls_mask, condition_mask, x_mask], dim=1)  # (B, total_seq_len)
 
     # (B, 1+T*(H*W+1)+H*W, d_model)
-    combined_seq = torch.cat([cls_tokens, condition_seq], dim=1)
+    combined_seq = torch.cat([cls_tokens, condition_seq, x_embedded], dim=1)
     combined_seq = self.seq_pos_encoder(combined_seq)
     # PyTorch's mask expects True for padded tokens, so we invert our boolean mask
     encoder_output = self.transformer_encoder(
