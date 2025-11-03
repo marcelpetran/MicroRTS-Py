@@ -389,15 +389,15 @@ class TransformerCVAE(nn.Module):
     decoder_input = self.latent_to_decoder_input(z).view(B, self.seq_len, -1)
     tgt = self.decoder_pos_encoder(decoder_input)
 
-    # if history_seq.shape[1] > 0:
-    #   decoder_output = self.transformer_decoder(
-    #       tgt=tgt,
-    #       memory=memory,
-    #       memory_key_padding_mask=~mask
-    #   )
-    # else:
-    #   # If history is empty, use the unconditioned VAE-style decoder
-    decoder_output = self.unconditioned_decoder(tgt)
+    if history_seq.shape[1] > 0:
+      decoder_output = self.transformer_decoder(
+          tgt=tgt,
+          memory=memory,
+          memory_key_padding_mask=~mask
+      )
+    else:
+      # If history is empty, use the unconditioned VAE-style decoder
+      decoder_output = self.unconditioned_decoder(tgt)
 
     reconstructed_features = [
         proj(decoder_output) for proj in self.output_projectors
