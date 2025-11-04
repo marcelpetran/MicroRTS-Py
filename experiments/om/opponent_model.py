@@ -20,7 +20,9 @@ class SubGoalSelector:
     Returns:
         int: Index of the sampled category.
     """
-    gumbel_noise = np.random.gumbel(0, beta, logits.shape)
+    # gumbel_noise = np.random.gumbel(0, beta, logits.shape)
+    # inverse CDF method X = mu - beta * log(-log(U)) -> mu = 0, U ~ Uniform(0,1) -> X = - beta * log(U)
+    gumbel_noise = -beta * torch.empty_like(logits).exponential_().log()
     if self.args.selector_mode == "optimistic":
       return torch.argmax(logits + gumbel_noise)
     elif self.args.selector_mode == "conservative":
@@ -408,7 +410,8 @@ class OpponentModel(nn.Module):
     omg_loss = kl_div_per_example.mean()
 
     # KL Divergence loss
-    kld_loss = -0.5 * torch.mean(1 + cvae_log_var - cvae_mu.pow(2) - cvae_log_var.exp())
+    kld_loss = -0.5 * torch.mean(1 + cvae_log_var -
+                                 cvae_mu.pow(2) - cvae_log_var.exp())
 
     # --- 3. Total Loss ---
     total_loss = recon_loss.mean() + beta * omg_loss + self.args.vae_beta * kld_loss
