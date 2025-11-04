@@ -366,7 +366,7 @@ class TransformerCVAE(nn.Module):
     eps = torch.randn_like(std)
     return mu + eps * std
 
-  def decode(self, z, history, is_history_seq=False):
+  def decode(self, z):
     """
     Decodes a latent vector z conditioned on an embedded history sequence.
 
@@ -378,26 +378,13 @@ class TransformerCVAE(nn.Module):
         Tensor: Reconstructed state of shape (B, H, W, F)
     """
     z = z.to(self.args.device)
-    if not is_history_seq:
-      history_seq, mask = self.get_history_seq(history)
-    else:
-      history_seq, mask = history
 
     B = z.shape[0]
-    memory = self.seq_pos_encoder(history_seq)
 
     decoder_input = self.latent_to_decoder_input(z).view(B, self.seq_len, -1)
     tgt = self.decoder_pos_encoder(decoder_input)
 
-    if history_seq.shape[1] > 0:
-      decoder_output = self.transformer_decoder(
-          tgt=tgt,
-          memory=memory,
-          memory_key_padding_mask=~mask
-      )
-    else:
-      # If history is empty, use the unconditioned VAE-style decoder
-      decoder_output = self.unconditioned_decoder(tgt)
+    decoder_output = self.unconditioned_decoder(tgt)
 
     reconstructed_features = [
         proj(decoder_output) for proj in self.output_projectors
@@ -423,7 +410,7 @@ class TransformerCVAE(nn.Module):
     history_seq = history_seq.to(self.args.device)
     mu, logvar = self.encode(x, (history_seq, mask), is_history_seq=True)
     z = self.reparameterize(mu, logvar)
-    reconstructed_x = self.decode(z, (history_seq, mask), is_history_seq=True)
+    reconstructed_x = self.decode(z)
     return reconstructed_x, mu, logvar
 
 
