@@ -414,7 +414,7 @@ class OpponentModel(nn.Module):
                                  cvae_mu.pow(2) - cvae_log_var.exp())
 
     # --- 3. Total Loss ---
-    total_loss = recon_loss.mean() + beta * omg_loss + self.args.vae_beta * kld_loss
+    total_loss = recon_loss.mean() + beta * omg_loss #+ self.args.vae_beta * kld_loss
     return total_loss
 
   def train_step(self, batch, eval_policy, tau, beta):
