@@ -12,7 +12,7 @@ class SubGoalSelector:
   def __init__(self, args):
     self.args = args
 
-  def gumbel_sample(self, logits):
+  def gumbel_sample(self, logits, beta):
     """
     Samples from a categorical distribution using the Gumbel-max/min trick.
     Args:
@@ -20,11 +20,11 @@ class SubGoalSelector:
     Returns:
         int: Index of the sampled category.
     """
-    gumbel_noise = -torch.log(-torch.log(torch.rand_like(logits)))
+    gumbel_noise = np.random.gumbel(0, beta, logits.shape)
     if self.args.selector_mode == "optimistic":
       return torch.argmax(logits + gumbel_noise)
     elif self.args.selector_mode == "conservative":
-      return torch.argmin(logits + gumbel_noise)
+      return torch.argmin(logits - gumbel_noise)
     else:
       raise ValueError(
         f"Unknown selector_mode: {self.args.selector_mode},\nchoose from ['optimistic', 'conservative']")
@@ -69,11 +69,11 @@ class SubGoalSelector:
         # values = values_flat.max(dim=-1)
 
         # Boltzmann exploration over Q-values
-        probs = F.softmax(values_flat / tau, dim=-1)  # (K, A)
-        values = (probs * values_flat).sum(dim=-1)  # (K,)
+        probs = F.softmax(-values_flat / tau, dim=-1)  # (K, A)
+        values = (probs * values_flat).sum(dim=-1)  # (K,) Expected Q-value
 
         # Gumbel-max trick for differentiable argmin or argmax
-        best_idx = self.gumbel_sample(values)
+        best_idx = self.gumbel_sample(values, tau)
         best_future_state = horizon[best_idx].unsqueeze(0)  # (1, H, W, F)
         # (1, latent_dim), (1, latent_dim)
         subgoal, vae_log_var = vae.encode(best_future_state)
