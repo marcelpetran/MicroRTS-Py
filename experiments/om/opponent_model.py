@@ -111,7 +111,7 @@ class OpponentModel(nn.Module):
     self.register_buffer('feature_split_weights', w.to(self.device))
     # Weights for each feature type
     self.register_buffer('feature_weights', torch.tensor(
-      [1.0, 10.0, 20.0, 20.0], device=self.device))
+      [1.0, 5.0, 10.0, 10.0], device=self.device))
 
   def eval(self):
     """
@@ -414,7 +414,7 @@ class OpponentModel(nn.Module):
                                  cvae_mu.pow(2) - cvae_log_var.exp())
 
     # --- 3. Total Loss ---
-    total_loss = recon_loss.mean() + beta * omg_loss + self.args.vae_beta * kld_loss
+    total_loss = recon_loss.mean() + beta * omg_loss# + self.args.vae_beta * kld_loss
     return total_loss
 
   def train_step(self, batch, eval_policy):
