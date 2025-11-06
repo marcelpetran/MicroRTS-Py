@@ -56,7 +56,7 @@ class SubGoalSelector:
       # iterate over batch
       for i, horizon in enumerate(future_states):
         # (B, K, H, W, F) -> (K, H, W, F)
-        mu, _ = vae.encode(horizon)  # (K, latent_dim)
+        mu, logvar = vae.encode(horizon)  # (K, latent_dim)
         # policy expects a batch dim for state and subgoal
         s_t = s_t_batch[i]
         K = horizon.shape[0]
@@ -76,11 +76,9 @@ class SubGoalSelector:
 
         # Gumbel-max trick for differentiable argmin or argmax
         best_idx = self.gumbel_sample(values, tau)
-        best_future_state = horizon[best_idx].unsqueeze(0)  # (1, H, W, F)
         # (1, latent_dim), (1, latent_dim)
-        subgoal, vae_log_var = vae.encode(best_future_state)
-        subgoal_batch.append(subgoal)
-        vae_log_var_batch.append(vae_log_var)
+        subgoal_batch.append(mu[best_idx].unsqueeze(0))
+        vae_log_var_batch.append(logvar[best_idx].unsqueeze(0))
 
       # concat all subgoals and log_vars back to batch dimension
       subgoal = torch.cat(subgoal_batch, dim=0)
@@ -241,17 +239,20 @@ class OpponentModel(nn.Module):
       original_obs, reconstructed_logits, filename)
 
   def get_weight_mask(self, x):
-    weight_mask = torch.full_like(x, self.feature_weights[0], device=self.device)
+    weight_mask = torch.full_like(
+      x, self.feature_weights[0], device=self.device)
     food_mask = (x[..., 1] == 1)
     agent1_mask = (x[..., 2] == 1)
     agent2_mask = (x[..., 3] == 1)
 
-    weight_mask[..., 1][food_mask] = self.feature_weights[1] # Weight for food
-    weight_mask[..., 2][agent1_mask] = self.feature_weights[2] # Weight for agent 1
-    weight_mask[..., 3][agent2_mask] = self.feature_weights[3] # Weight for agent 2
+    weight_mask[..., 1][food_mask] = self.feature_weights[1]  # Weight for food
+    # Weight for agent 1
+    weight_mask[..., 2][agent1_mask] = self.feature_weights[2]
+    # Weight for agent 2
+    weight_mask[..., 3][agent2_mask] = self.feature_weights[3]
 
     return weight_mask
-  
+
   def vae_loss(self, reconstructed_x, x, mu, logvar):
     """
     Loss function for VAE combining reconstruction loss and KL divergence.
@@ -412,7 +413,8 @@ class OpponentModel(nn.Module):
                                  cvae_mu.pow(2) - cvae_log_var.exp())
 
     # --- 3. Total Loss ---
-    total_loss = recon_loss.mean() + beta * omg_loss# + self.args.vae_beta * kld_loss
+    # + self.args.vae_beta * kld_loss
+    total_loss = recon_loss.mean() + beta * omg_loss
     return total_loss
 
   def train_step(self, batch, eval_policy):
