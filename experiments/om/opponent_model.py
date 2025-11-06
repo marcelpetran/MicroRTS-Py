@@ -253,9 +253,17 @@ class OpponentModel(nn.Module):
         Tensor: Computed VAE loss.
     """
     recon_loss = 0
+    weight_mask = torch.full_like(x, self.feature_weights[0], device=self.device)
+    food_mask = (x[..., 1] == 1)
+    agent1_mask = (x[..., 2] == 1)
+    agent2_mask = (x[..., 3] == 1)
 
-    weight_mask = x * self.feature_weights
-    weight_mask = weight_mask + 1.0
+    weight_mask[..., 1][food_mask] = self.feature_weights[1] # Weight for food
+    weight_mask[..., 2][agent1_mask] = self.feature_weights[2] # Weight for agent 1
+    weight_mask[..., 3][agent2_mask] = self.feature_weights[3] # Weight for agent 2
+
+    # weight_mask = x * self.feature_weights
+    # weight_mask = weight_mask + 1.0
 
     bce = F.binary_cross_entropy_with_logits(
       reconstructed_x, x, weight=weight_mask, reduction='none')  # (B, H, W, F)
@@ -380,10 +388,19 @@ class OpponentModel(nn.Module):
     # This forces the CVAE to represent the current state
     recon_loss = 0
 
-    # added weight mask for critical features, to reduce problem majority problem
-    weight_mask = x * self.feature_weights
-    # base for all cells so empty cells aren't ignored completely
-    weight_mask = weight_mask + 1.0
+    weight_mask = torch.full_like(x, self.feature_weights[0], device=self.device)
+    food_mask = (x[..., 1] == 1)
+    agent1_mask = (x[..., 2] == 1)
+    agent2_mask = (x[..., 3] == 1)
+
+    weight_mask[..., 1][food_mask] = self.feature_weights[1] # Weight for food
+    weight_mask[..., 2][agent1_mask] = self.feature_weights[2] # Weight for agent 1
+    weight_mask[..., 3][agent2_mask] = self.feature_weights[3] # Weight for agent 2
+
+    # # added weight mask for critical features, to reduce problem majority problem
+    # weight_mask = x * self.feature_weights
+    # # base for all cells so empty cells aren't ignored completely
+    # weight_mask = weight_mask + 1.0
 
     bce = F.binary_cross_entropy_with_logits(
       reconstructed_x, x, weight=weight_mask, reduction='none')  # (B, H, W, F)
