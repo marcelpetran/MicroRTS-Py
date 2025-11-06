@@ -417,7 +417,7 @@ class OpponentModel(nn.Module):
     total_loss = recon_loss.mean() + beta * omg_loss + self.args.vae_beta * kld_loss
     return total_loss
 
-  def train_step(self, batch, eval_policy, tau, beta):
+  def train_step(self, batch, eval_policy):
     """
     Performs a single training step for the opponent model.
     Args:
@@ -451,10 +451,10 @@ class OpponentModel(nn.Module):
 
     with torch.no_grad():
       vae_mu, vae_log_var = self.subgoal_selector.select(self.prior_model, eval_policy,
-                                                         x, future_states, tau)
+                                                         x, future_states, eval_policy._selector_tau())
 
     loss = self.loss_function(reconstructed_x, x, cvae_mu, cvae_log_var,
-                              vae_mu, vae_log_var, infer_mu, infer_log_var, dones, eval_policy._gmix_eps(), beta)
+                              vae_mu, vae_log_var, infer_mu, infer_log_var, dones, eval_policy._gmix_eps(), eval_policy._beta())
 
     loss.backward()
     self.optimizer.step()

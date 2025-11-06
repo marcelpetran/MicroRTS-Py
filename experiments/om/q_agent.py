@@ -349,7 +349,7 @@ class QLearningAgent:
         "dones": torch.tensor([b["done"] for b in batch_list], dtype=torch.float32, device=self.device)
     }
     model_loss = self.model.train_step(
-      om_batch, self, self._selector_tau(), self._beta())
+      om_batch, self)
 
     if self.global_step % self.args.target_update_every == 0:
       self.q_tgt.load_state_dict(self.q.state_dict())
