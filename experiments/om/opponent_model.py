@@ -469,12 +469,8 @@ def _plot_foraging_grid(grid: np.ndarray, filename: str):
   Creates a plot of a single (H, W, F) foraging state.
   """
 
-  # Convert the one-hot grid to a grid of integer labels for coloring
-  # e.g., empty=0, food=1, agent1=2, agent2=3
   grid_labels = np.argmax(grid, axis=-1)
 
-  # Define colors and labels for the plot
-  # Make sure this matches the feature order in your environment!
   cmap = plt.get_cmap('viridis', 4)
   labels = {0: 'Empty', 1: 'Food',
             2: 'Agent 1 (Self)', 3: 'Agent 2 (Opponent)'}
