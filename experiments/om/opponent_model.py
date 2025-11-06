@@ -239,8 +239,18 @@ class OpponentModel(nn.Module):
     self.visualize_subgoal_logits(
       original_obs, reconstructed_logits, filename)
 
-  # Loss function for the VAE
+  def get_weight_mask(self, x):
+    weight_mask = torch.full_like(x, self.feature_weights[0], device=self.device)
+    food_mask = (x[..., 1] == 1)
+    agent1_mask = (x[..., 2] == 1)
+    agent2_mask = (x[..., 3] == 1)
 
+    weight_mask[..., 1][food_mask] = self.feature_weights[1] # Weight for food
+    weight_mask[..., 2][agent1_mask] = self.feature_weights[2] # Weight for agent 1
+    weight_mask[..., 3][agent2_mask] = self.feature_weights[3] # Weight for agent 2
+
+    return weight_mask
+  
   def vae_loss(self, reconstructed_x, x, mu, logvar):
     """
     Loss function for VAE combining reconstruction loss and KL divergence.
@@ -253,24 +263,12 @@ class OpponentModel(nn.Module):
         Tensor: Computed VAE loss.
     """
     recon_loss = 0
-    weight_mask = torch.full_like(x, self.feature_weights[0], device=self.device)
-    food_mask = (x[..., 1] == 1)
-    agent1_mask = (x[..., 2] == 1)
-    agent2_mask = (x[..., 3] == 1)
-
-    weight_mask[..., 1][food_mask] = self.feature_weights[1] # Weight for food
-    weight_mask[..., 2][agent1_mask] = self.feature_weights[2] # Weight for agent 1
-    weight_mask[..., 3][agent2_mask] = self.feature_weights[3] # Weight for agent 2
-
-    # weight_mask = x * self.feature_weights
-    # weight_mask = weight_mask + 1.0
+    weight_mask = self.get_weight_mask(x)
 
     bce = F.binary_cross_entropy_with_logits(
       reconstructed_x, x, weight=weight_mask, reduction='none')  # (B, H, W, F)
     per_cell = (bce * self.feature_split_weights).sum(dim=-1)
     recon_loss = per_cell.mean(dim=(1, 2))
-    # per_cell = bce.mean(dim=(1, 2, 3))
-    # recon_loss = per_cell.mean()
 
     # KL Divergence Loss
     # -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
@@ -382,31 +380,16 @@ class OpponentModel(nn.Module):
     """
     Calculates the full OMG loss for the CVAE.
     """
-    # mask = (1.0 - dones.float())
-    # denom = mask.sum().clamp_min(1.0)
     # --- 1. Reconstruction Loss ---
     # This forces the CVAE to represent the current state
     recon_loss = 0
 
-    weight_mask = torch.full_like(x, self.feature_weights[0], device=self.device)
-    food_mask = (x[..., 1] == 1)
-    agent1_mask = (x[..., 2] == 1)
-    agent2_mask = (x[..., 3] == 1)
-
-    weight_mask[..., 1][food_mask] = self.feature_weights[1] # Weight for food
-    weight_mask[..., 2][agent1_mask] = self.feature_weights[2] # Weight for agent 1
-    weight_mask[..., 3][agent2_mask] = self.feature_weights[3] # Weight for agent 2
-
-    # # added weight mask for critical features, to reduce problem majority problem
-    # weight_mask = x * self.feature_weights
-    # # base for all cells so empty cells aren't ignored completely
-    # weight_mask = weight_mask + 1.0
+    weight_mask = self.get_weight_mask(x)
 
     bce = F.binary_cross_entropy_with_logits(
       reconstructed_x, x, weight=weight_mask, reduction='none')  # (B, H, W, F)
     per_cell = (bce * self.feature_split_weights).sum(dim=-1)
     recon_loss = per_cell.mean(dim=(1, 2))
-    # recon_loss = (per_ex * mask).sum() / denom
 
     # --- 2. Inference Loss ---
     # This forces the CVAE latent vector g_hat to point towards high-probability future
@@ -426,7 +409,7 @@ class OpponentModel(nn.Module):
     # omg_loss = (kl_div_per_example * mask).sum() / denom
     omg_loss = kl_div_per_example.mean()
 
-    # KL Divergence loss
+    # KL Divergence loss || Gaussian KL Divergence for regularization
     kld_loss = -0.5 * torch.mean(1 + cvae_log_var -
                                  cvae_mu.pow(2) - cvae_log_var.exp())
 
