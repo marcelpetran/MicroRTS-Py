@@ -111,7 +111,7 @@ class OpponentModel(nn.Module):
     self.register_buffer('feature_split_weights', w.to(self.device))
     # Weights for each feature type
     self.register_buffer('feature_weights', torch.tensor(
-      [1.0, 5.0, 10.0, 10.0], device=self.device))
+      [1.0, 2.0, 3.0, 3.0], device=self.device))
 
   def eval(self):
     """
@@ -406,7 +406,6 @@ class OpponentModel(nn.Module):
                                             cvae_log_var.exp()) / target_log_var.exp()),
                                           dim=-1)
 
-    # omg_loss = (kl_div_per_example * mask).sum() / denom
     omg_loss = kl_div_per_example.mean()
 
     # KL Divergence loss || Gaussian KL Divergence for regularization
