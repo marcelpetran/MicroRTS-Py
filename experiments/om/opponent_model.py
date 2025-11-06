@@ -164,6 +164,7 @@ class OpponentModel(nn.Module):
     self.prior_model.eval()  # Use the frozen, pre-trained VAE for reconstruction
 
     with torch.no_grad():
+      # Bad approach, latent vectors from CVAE might/will not match the prior VAE's latent space at all
       reconstructed_logits = self.prior_model.decode(ghat_mu)
       reconstructed_state_one_hot = self.reconstruct_state(
           reconstructed_logits, self.args.state_feature_splits
@@ -267,8 +268,7 @@ class OpponentModel(nn.Module):
 
     bce = F.binary_cross_entropy_with_logits(
       reconstructed_x, x, weight=weight_mask, reduction='none')  # (B, H, W, F)
-    per_cell = (bce * self.feature_split_weights).sum(dim=-1)
-    recon_loss = per_cell.mean(dim=(1, 2))
+    recon_loss = bce.mean(dim=(1, 2, 3))
 
     # KL Divergence Loss
     # -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
@@ -388,8 +388,7 @@ class OpponentModel(nn.Module):
 
     bce = F.binary_cross_entropy_with_logits(
       reconstructed_x, x, weight=weight_mask, reduction='none')  # (B, H, W, F)
-    per_cell = (bce * self.feature_split_weights).sum(dim=-1)
-    recon_loss = per_cell.mean(dim=(1, 2))
+    recon_loss = bce.mean(dim=[1, 2, 3])
 
     # --- 2. Inference Loss ---
     # This forces the CVAE latent vector g_hat to point towards high-probability future
