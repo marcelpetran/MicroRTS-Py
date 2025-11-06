@@ -67,11 +67,8 @@ class SubGoalSelector:
         # s_t_expanded: (K, H, W, F), mu: (K, latent_dim) -> values_flat: (K, A)
         values_flat = eval_policy.value(s_t_expanded, mu)  # (K, A)
 
-        # old approach: take max Q-value over actions
-        # values = values_flat.max(dim=-1)
-
         # Boltzmann exploration over Q-values
-        probs = F.softmax(-values_flat / tau, dim=-1)  # (K, A)
+        probs = F.softmax(values_flat / tau, dim=-1)  # (K, A)
         values = (probs * values_flat).sum(dim=-1)  # (K,) Expected Q-value
 
         # Gumbel-max trick for differentiable argmin or argmax
@@ -245,10 +242,8 @@ class OpponentModel(nn.Module):
     agent1_mask = (x[..., 2] == 1)
     agent2_mask = (x[..., 3] == 1)
 
-    weight_mask[..., 1][food_mask] = self.feature_weights[1]  # Weight for food
-    # Weight for agent 1
+    weight_mask[..., 1][food_mask] = self.feature_weights[1]
     weight_mask[..., 2][agent1_mask] = self.feature_weights[2]
-    # Weight for agent 2
     weight_mask[..., 3][agent2_mask] = self.feature_weights[3]
 
     return weight_mask
