@@ -174,7 +174,7 @@ class OpponentModel(nn.Module):
 
     return
 
-  def visualize_subgoal_logits(self, obs: np.ndarray, reconstructed_logits: torch.Tensor, filename: str = "subgoal_logits.png"):
+  def visualize_subgoal_logits(self, obs: np.ndarray, reconstructed_logits: torch.Tensor, filename: str = None):
     """
     Visualizes the softmax probabilities of the reconstructed subgoal logits.
     """
@@ -224,7 +224,10 @@ class OpponentModel(nn.Module):
 
     fig.suptitle("Current obs and Inferred Subgoal Probabilities", fontsize=16)
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig(filename)
+    if filename is None:
+      plt.show()
+    else:
+      plt.savefig(filename)
     plt.close()
 
   def visualize_selected_subgoal(self, gbar_mu: torch.Tensor, original_obs: np.ndarray, filename: str = "selected_subgoal.png"):

@@ -33,6 +33,9 @@ class SimpleForagingEnv:
 
     # obs, info
     return self._get_observations()
+  
+  def _place_agent(self, agent_id, position):
+    self.agents[agent_id] = position
 
   def _get_action_space(self):
     # 4 actions: up, down, left, right
