@@ -366,7 +366,7 @@ class TransformerCVAE(nn.Module):
     eps = torch.randn_like(std)
     return mu + eps * std
 
-  def decode(self, z):
+  def decode(self, z, history_seq, history_mask):
     """
     Decodes a latent vector z conditioned on an embedded history sequence.
 
@@ -384,8 +384,27 @@ class TransformerCVAE(nn.Module):
     decoder_input = self.latent_to_decoder_input(z).view(B, self.seq_len, -1)
     tgt = self.decoder_pos_encoder(decoder_input)
 
-    decoder_output = self.unconditioned_decoder(tgt)
+    tokens_per_step = (self.args.H * self.args.W)
+    if self.args.action_dim:
+      tokens_per_step += 1
 
+    # Check if history has at least one step to remove
+    if history_seq.shape[1] >= tokens_per_step*2:
+      # Remove the last `tokens_per_step` tokens from the sequence and mask
+      decoder_history_seq = history_seq[:, :-tokens_per_step, :]
+      decoder_history_mask = history_mask[:, :-tokens_per_step]
+      decoder_output = self.transformer_decoder(
+        tgt=tgt,
+        memory=decoder_history_seq,
+        memory_key_padding_mask=~decoder_history_mask
+      )
+    else:
+      # History is empty or shorter than one step, just pass it along
+      decoder_history_seq = history_seq
+      decoder_history_mask = history_mask
+      decoder_output = self.unconditioned_decoder(tgt)
+    
+    
     reconstructed_features = [
         proj(decoder_output) for proj in self.output_projectors
     ]
@@ -410,7 +429,7 @@ class TransformerCVAE(nn.Module):
     history_seq = history_seq.to(self.args.device)
     mu, logvar = self.encode(x, (history_seq, mask), is_history_seq=True)
     z = self.reparameterize(mu, logvar)
-    reconstructed_x = self.decode(z)
+    reconstructed_x = self.decode(z, history_seq, mask)
     return reconstructed_x, mu, logvar
 
 
