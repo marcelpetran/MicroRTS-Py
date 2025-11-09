@@ -25,7 +25,7 @@ class OMGArgs:
   # OMG-specific
   gmix_eps_start: float = 1.0      # Eq.(8): start using mostly g_bar
   gmix_eps_end: float = 0.0        # goes to 0 -> use g_hat only
-  gmix_eps_decay_steps: int = 50_000
+  gmix_eps_decay_steps: int = 200_000
   horizon_H: int = 3
   # "conservative" => Eq.(7), "optimistic" => Eq.(6)
   selector_mode: str = "conservative"
@@ -34,12 +34,12 @@ class OMGArgs:
   selector_tau_decay_steps: int = 150_000
   train_vae: bool = True
   vae_lr: float = 1e-4
-  cvae_lr: float = 3e-4
+  cvae_lr: float = 4e-4
 
   # Transformer architecture params
-  beta_start: float = 0.0  # Weight for CVAE KL loss
+  beta_start: float = 1.0  # Weight for CVAE KL loss
   beta_end: float = 2.0
-  beta_decay_steps: int = 150_000
+  beta_decay_steps: int = 200_000
   vae_beta: float = 0.1  # Weight for VAE KL loss
   state_shape: Tuple[int, int, int] = None  # (H, W, F)
   H: int = 5  # grid height

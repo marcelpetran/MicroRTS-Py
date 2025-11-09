@@ -106,7 +106,7 @@ class OpponentModel(nn.Module):
     self.register_buffer('feature_split_weights', w.to(self.device))
     # Weights for each feature type
     self.register_buffer('feature_weights', torch.tensor(
-      [1.0, 2.0, 3.0, 3.0], device=self.device))
+      [1.0, 2.0, 4.0, 4.0], device=self.device))
 
   def eval(self):
     """
