@@ -14,7 +14,7 @@ parser.add_argument('--train_vae', action='store_true',
                     default=False, help='Whether to pre-train the VAE')
 parser.add_argument('--visualize_vae', action='store_true',
                     default=False, help='Visualize VAE reconstructions logits')
-parser.add_argument('--vae_path', type=str, default='./trained_vae/vae.pth',
+parser.add_argument('--vae_path', type=str, default='./models/vae.pth',
                     help='Path to pre-trained VAE weights')
 parser.add_argument('--classic', action='store_true', default=False,
                     help='Use classic Q-learning agent without opponent modeling')
@@ -70,9 +70,7 @@ parser.add_argument('--folder_id', type=int, default=0,
 args_parsed = parser.parse_args()
 
 # Necessary directories
-os.makedirs(f"./trained_vae_{args_parsed.folder_id}", exist_ok=True)
-os.makedirs(f"./trained_cvae", exist_ok=True)
-os.makedirs(f"./trained_qnet", exist_ok=True)
+os.makedirs(f"./models_{args_parsed.folder_id}", exist_ok=True)
 os.makedirs(f"./diagrams_{args_parsed.folder_id}", exist_ok=True)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -168,9 +166,9 @@ for ep in range(args_parsed.episodes):
     episode_list.append(ep + 1)
 
 # Save the trained models
-# torch.save(cvae.state_dict(), "./trained_cvae/cvae.pth")
+torch.save(cvae.state_dict(), f"./models_{args.folder_id}/cvae.pth")
 # Save the Q-network
-# torch.save(agent.q.state_dict(), "./trained_qnet/qnet.pth")
+torch.save(agent.q.state_dict(), f"./models_{args.folder_id}/qnet.pth")
 # torch.save(agent.q.state_dict(), "./trained_qnet/qnetclassic.pth")
 # print("Training complete and models saved.")
 

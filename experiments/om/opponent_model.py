@@ -358,7 +358,7 @@ class OpponentModel(nn.Module):
 
       if (i + 1) % save_every_n_epochs == 0:
         torch.save(self.prior_model.state_dict(),
-                   f"./trained_vae_{self.args.folder_id}/vae_epoch_{i + 1}.pth")
+                   f"./models_{self.args.folder_id}/vae_epoch_{i + 1}.pth")
         print(f"Model saved at epoch {i + 1}")
 
     loss_collector = np.array(loss_collector)
