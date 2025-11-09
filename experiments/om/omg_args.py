@@ -39,7 +39,7 @@ class OMGArgs:
   # Transformer architecture params
   beta_start: float = 1.0  # Weight for CVAE KL loss
   beta_end: float = 2.0
-  beta_decay_steps: int = 200_000
+  beta_decay_steps: int = 150_000
   vae_beta: float = 0.1  # Weight for VAE KL loss
   state_shape: Tuple[int, int, int] = None  # (H, W, F)
   H: int = 5  # grid height
@@ -52,7 +52,7 @@ class OMGArgs:
   latent_dim: int = 32
   d_model: int = 256
   nhead: int = 8
-  num_encoder_layers: int = 6
-  num_decoder_layers: int = 6
+  num_encoder_layers: int = 2
+  num_decoder_layers: int = 2
   dim_feedforward: int = 1024
   dropout: float = 0.1
