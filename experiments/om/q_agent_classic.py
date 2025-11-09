@@ -77,10 +77,10 @@ class QLearningAgentClassic:
   Q(s, a) Classic agent without opponent modeling.
   """
 
-  def __init__(self, env, device="cpu", args: OMGArgs = OMGArgs()):
+  def __init__(self, env, args: OMGArgs = OMGArgs()):
     self.env = env
     self.args = args
-    self.device = torch.device(device)
+    self.device = torch.device(args.device)
     self.opponent_agent = RandomAgent(1)
 
     # Try to infer dims from env

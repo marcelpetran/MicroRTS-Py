@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from simple_foraging_env import RandomAgent, SimpleAgent
 from q_agent import ReplayBuffer
+from omg_args import OMGArgs
 
 
 class SubGoalSelector:
@@ -85,13 +86,15 @@ class SubGoalSelector:
 
 
 class OpponentModel(nn.Module):
-  def __init__(self, cvae: t.TransformerCVAE, vae: t.TransformerVAE, selector: SubGoalSelector, optimizer, device, args):
+  def __init__(self, cvae: t.TransformerCVAE, vae: t.TransformerVAE, selector: SubGoalSelector, args: OMGArgs = OMGArgs()):
     super(OpponentModel, self).__init__()
     self.inference_model = cvae
     self.prior_model = vae  # pre-trained VAE
     self.subgoal_selector = selector
-    self.optimizer = optimizer
-    self.device = device
+    self.optimizer = torch.optim.Adam(cvae.parameters(), lr=args.cvae_lr)
+    self.vae_optimizer = torch.optim.Adam(vae.parameters(), lr=args.vae_lr)
+    self.replay = ReplayBuffer(args.capacity)
+    self.device = args.device
     self.args = args
     self.mse_loss = nn.MSELoss()
 
@@ -274,11 +277,8 @@ class OpponentModel(nn.Module):
 
   def train_vae(self,
                 env,
-                replay: ReplayBuffer,
-                optimizer,
                 num_epochs=10000,
                 save_every_n_epochs=1000,
-                max_steps=None,
                 logg=100
                 ):
     def collect_single_episode():
@@ -294,14 +294,14 @@ class OpponentModel(nn.Module):
       step = 0
       ep_ret = 0.0
 
-      while not done and (max_steps is None or step < max_steps):
+      while not done and (self.args.max_steps is None or step < self.args.max_steps):
         a = agent1.select_action(obs[0])
         a_opponent = agent2.select_action(obs[1])
         actions = {0: a, 1: a_opponent}
         next_obs, reward, done, info = env.step(actions)
 
         # store transition
-        replay.push(
+        self.replay.push(
             {
                 "state": obs[0].copy(),
                 "action": a,
@@ -324,11 +324,11 @@ class OpponentModel(nn.Module):
       collect_single_episode()
 
       # fill the buffer so we can at least sample
-      while replay.__len__() < self.args.batch_size:
+      while self.replay.__len__() < self.args.batch_size:
         collect_single_episode()
 
       # Sample a batch from the replay buffer
-      batch = replay.sample(self.args.batch_size)
+      batch = self.replay.sample(self.args.batch_size)
       state_batch = torch.from_numpy(
           np.array([b["state"] for b in batch])
       ).float()  # (B, H, W, F)
@@ -342,9 +342,9 @@ class OpponentModel(nn.Module):
           logvar
       )
 
-      optimizer.zero_grad()
+      self.vae_optimizer.zero_grad()
       loss.backward()
-      optimizer.step()
+      self.vae_optimizer.step()
 
       avg_loss += loss.item()
 

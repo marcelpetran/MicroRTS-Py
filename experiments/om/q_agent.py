@@ -92,11 +92,11 @@ class QLearningAgent:
     - prior_model: pre-trained TransformerVAE (VAE encoder returns (mu, logvar))
   """
 
-  def __init__(self, env, opponent_model, device="cpu", args: OMGArgs = OMGArgs()):
+  def __init__(self, env, opponent_model, args: OMGArgs = OMGArgs()):
     self.env = env
     self.model = opponent_model
     self.args = args
-    self.device = torch.device(device)
+    self.device = torch.device(args.device)
     self.opponent_agent = RandomAgent(1)
 
     # Try to infer dims from env

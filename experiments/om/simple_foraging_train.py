@@ -122,19 +122,16 @@ if not args_parsed.classic:
   cvae = t.TransformerCVAE(args).to(device)
 
   selector = SubGoalSelector(args)
-  cvae_optimizer = torch.optim.Adam(cvae.parameters(), lr=args.cvae_lr)
 
   op_model = OpponentModel(
-    cvae, vae, selector, optimizer=cvae_optimizer, device=device, args=args)
+    cvae, vae, selector, args=args)
 
   # --- Pre-train the VAE ---
   if args.train_vae:
     print("Pre-training VAE...")
-    vae_optimizer = torch.optim.Adam(vae.parameters(), lr=args.vae_lr)
-    vae_replay = ReplayBuffer(10_000)
 
-    op_model.train_vae(env, vae_replay, vae_optimizer, num_epochs=args_parsed.vae_episodes,
-                       save_every_n_epochs=args_parsed.vae_episodes, max_steps=args.max_steps, logg=1_000)
+    op_model.train_vae(env, num_epochs=args_parsed.vae_episodes,
+                       save_every_n_epochs=args_parsed.vae_episodes, logg=1_000)
     print("VAE pre-training complete.")
   else:
     assert os.path.exists(args_parsed.vae_path), "VAE path does not exist!"
@@ -142,11 +139,11 @@ if not args_parsed.classic:
       args_parsed.vae_path, map_location=device))
     print("Loaded pre-trained VAE.")
 
-  agent = QLearningAgent(env, op_model, device=device, args=args)
+  agent = QLearningAgent(env, op_model, args=args)
   if args_parsed.visualize_vae:
     agent.visualize_prior()
 else:
-  agent = QLearningAgentClassic(env, device=device, args=args)
+  agent = QLearningAgentClassic(env, args=args)
 
 return_list = []
 steps_list = []
