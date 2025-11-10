@@ -34,7 +34,7 @@ class OMGArgs:
   selector_tau_decay_steps: int = 150_000
   train_vae: bool = True
   vae_lr: float = 1e-4
-  cvae_lr: float = 4e-4
+  cvae_lr: float = 1e-4
 
   # Transformer architecture params
   beta_start: float = 1.0  # Weight for CVAE KL loss
