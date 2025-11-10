@@ -200,6 +200,7 @@ class TransformerCVAE(nn.Module):
     self.state_token_type = nn.Parameter(torch.randn(1, 1, args.d_model))
     self.action_token_type = nn.Parameter(torch.randn(1, 1, args.d_model))
     self.cls_token = nn.Parameter(torch.randn(1, 1, args.d_model))
+    self.empty_history_token = nn.Parameter(torch.randn(1, 1, args.d_model))
 
     # --- Positional Encoding for history + s_t + CLS token ---
     self.seq_pos_encoder = PositionalEncoding(
@@ -391,20 +392,20 @@ class TransformerCVAE(nn.Module):
     # Check if history has at least one step to remove
     if history_seq.shape[1] >= tokens_per_step*2:
       # Remove the last `tokens_per_step` tokens from the sequence and mask
-      decoder_history_seq = history_seq[:, :-tokens_per_step, :]
-      decoder_history_mask = history_mask[:, :-tokens_per_step]
-      self.seq_pos_encoder(decoder_history_seq)
-      decoder_output = self.transformer_decoder(
-        tgt=tgt,
-        memory=decoder_history_seq,
-        memory_key_padding_mask=~decoder_history_mask
-      )
+      memory_seq = history_seq[:, :-tokens_per_step, :]
+      memory_mask = history_mask[:, :-tokens_per_step]
     else:
       # History is empty or shorter than one step, just pass it along
-      decoder_history_seq = history_seq
-      decoder_history_mask = history_mask
+      memory_seq = self.empty_history_token.repeat(B, 1, 1)
+      memory_mask = torch.ones(B, 1, dtype=torch.bool, device=self.args.device)
       decoder_output = self.unconditioned_decoder(tgt)
     
+    self.seq_pos_encoder(memory_seq)
+    decoder_output = self.transformer_decoder(
+      tgt=tgt,
+      memory=memory_seq,
+      memory_key_padding_mask=~memory_mask
+    )
     
     reconstructed_features = [
         proj(decoder_output) for proj in self.output_projectors
