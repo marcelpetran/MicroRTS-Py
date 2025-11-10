@@ -251,12 +251,12 @@ class TransformerCVAE(nn.Module):
     self.transformer_decoder = nn.TransformerDecoder(
         decoder_layer, args.num_decoder_layers
     )
-    unconditioned_decoder_layer = nn.TransformerEncoderLayer(
-        args.d_model, args.nhead, args.dim_feedforward, batch_first=True
-    )
-    self.unconditioned_decoder = nn.TransformerEncoder(
-        unconditioned_decoder_layer, args.num_decoder_layers
-    )
+    # unconditioned_decoder_layer = nn.TransformerEncoderLayer(
+    #     args.d_model, args.nhead, args.dim_feedforward, batch_first=True
+    # )
+    # self.unconditioned_decoder = nn.TransformerEncoder(
+    #     unconditioned_decoder_layer, args.num_decoder_layers
+    # )
 
     # --- Output Projection ---
     self.output_projectors = nn.ModuleList(
