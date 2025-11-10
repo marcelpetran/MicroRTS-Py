@@ -393,6 +393,7 @@ class TransformerCVAE(nn.Module):
       # Remove the last `tokens_per_step` tokens from the sequence and mask
       decoder_history_seq = history_seq[:, :-tokens_per_step, :]
       decoder_history_mask = history_mask[:, :-tokens_per_step]
+      self.seq_pos_encoder(decoder_history_seq)
       decoder_output = self.transformer_decoder(
         tgt=tgt,
         memory=decoder_history_seq,
