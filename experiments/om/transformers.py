@@ -398,7 +398,6 @@ class TransformerCVAE(nn.Module):
       # History is empty or shorter than one step, just pass it along
       memory_seq = self.empty_history_token.repeat(B, 1, 1)
       memory_mask = torch.ones(B, 1, dtype=torch.bool, device=self.args.device)
-      decoder_output = self.unconditioned_decoder(tgt)
     
     self.seq_pos_encoder(memory_seq)
     decoder_output = self.transformer_decoder(
