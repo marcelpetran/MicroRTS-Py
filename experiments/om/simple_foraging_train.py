@@ -163,9 +163,9 @@ for ep in range(args_parsed.episodes):
     episode_list.append(ep + 1)
 
 # Save the trained models
-torch.save(cvae.state_dict(), f"./models_{args.folder_id}/cvae.pth")
+# torch.save(cvae.state_dict(), f"./models_{args.folder_id}/cvae.pth")
 # Save the Q-network
-torch.save(agent.q.state_dict(), f"./models_{args.folder_id}/qnet.pth")
+# torch.save(agent.q.state_dict(), f"./models_{args.folder_id}/qnet.pth")
 # torch.save(agent.q.state_dict(), "./trained_qnet/qnetclassic.pth")
 # print("Training complete and models saved.")
 
