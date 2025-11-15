@@ -36,6 +36,22 @@ class SimpleForagingEnv:
   
   def _place_agent(self, agent_id, position):
     self.agents[agent_id] = position
+  
+  def _get_freed_positions(self):
+    occupied = set(self.agents.values()).union(self.food_positions)
+    freed = []
+    for i in range(self.grid_size):
+      for j in range(self.grid_size):
+        if (i, j) not in occupied:
+          freed.append((i, j))
+    return freed
+  
+  def reset_random_spawn(self, agent_id):
+    _ = self.reset()
+    freed = self._get_freed_positions()
+    pos = freed[np.random.randint(0, len(freed))]
+    self.agents[agent_id] = pos
+    return self._get_observations()
 
   def _get_action_space(self):
     # 4 actions: up, down, left, right
