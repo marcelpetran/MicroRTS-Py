@@ -1,3 +1,4 @@
+from json import decoder
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -280,6 +281,7 @@ class TransformerCVAE(nn.Module):
     """
     states = history["states"]  # (B, T, H, W, F), where T is longest history
     actions = history["actions"]  # (B, T) discrete actions
+    # opp_actions = history["opp_actions"]  # (B, T) discrete actions
     # (B, T) boolean mask for real vs padded tokens
     mask = history.get("mask", None)
 
@@ -390,7 +392,7 @@ class TransformerCVAE(nn.Module):
       tokens_per_step += 1
 
     # Check if history has at least one step to remove
-    if history_seq.shape[1] >= tokens_per_step*2:
+    if history_seq.shape[1] >= tokens_per_step * 2:
       # Remove the last `tokens_per_step` tokens from the sequence and mask
       memory_seq = history_seq[:, :-tokens_per_step, :]
       memory_mask = history_mask[:, :-tokens_per_step]
@@ -398,14 +400,15 @@ class TransformerCVAE(nn.Module):
       # History is empty or shorter than one step, just pass it along
       memory_seq = self.empty_history_token.repeat(B, 1, 1)
       memory_mask = torch.ones(B, 1, dtype=torch.bool, device=self.args.device)
-    
+
     self.seq_pos_encoder(memory_seq)
     decoder_output = self.transformer_decoder(
       tgt=tgt,
       memory=memory_seq,
       memory_key_padding_mask=~memory_mask
     )
-    
+    # decoder_output = self.unconditioned_decoder(tgt)
+
     reconstructed_features = [
         proj(decoder_output) for proj in self.output_projectors
     ]
