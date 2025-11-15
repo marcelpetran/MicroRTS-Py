@@ -4,6 +4,7 @@ from collections import deque
 from omg_args import OMGArgs
 
 from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv
+from priority_replay_buffer import PrioritizedReplayBuffer
 
 import numpy as np
 import torch
@@ -23,6 +24,7 @@ def flatten_state(obs: np.ndarray) -> torch.Tensor:
   # return torch.from_numpy(obs).float().permute(2, 0, 1)  # (F, H, W) for Conv
   return torch.from_numpy(obs).float()
 
+
 class QNetClassic(nn.Module):
   """
   Simple MLP Q-network for Q(s, a)
@@ -36,7 +38,8 @@ class QNetClassic(nn.Module):
     super().__init__()
     H, W, F_dim = args.state_shape
     self.state_dim = H * W * F_dim
-    self.action_dim = args.action_dim # WARNING: might not work with complex action spaces
+    # WARNING: might not work with complex action spaces
+    self.action_dim = args.action_dim
 
     hidden = args.qnet_hidden
     self.net = nn.Sequential(
@@ -101,12 +104,17 @@ class QLearningAgentClassic:
     self.opt = torch.optim.Adam(self.q.parameters(), lr=self.args.lr)
 
     # Replay
-    self.replay = ReplayBuffer(self.args.capacity)
+    # self.replay = ReplayBuffer(self.args.capacity)
+    self.replay = PrioritizedReplayBuffer(self.args.capacity)
 
     # Schedules
     self.global_step = 0
 
   # ------------- epsilon schedules --------------
+
+  def _tau(self) -> float:
+    t = min(self.global_step, self.args.selector_tau_decay_steps)
+    return self.args.selector_tau_end + (self.args.selector_tau_start - self.args.selector_tau_end) * (1 - t / self.args.selector_tau_decay_steps)
 
   def _eps(self) -> float:
     t = min(self.global_step, self.args.eps_decay_steps)
@@ -114,17 +122,11 @@ class QLearningAgentClassic:
 
   # ------------- acting -------------
 
-  def _choose_action(self, qvals: torch.Tensor, eps: float, eval) -> int:
-    if random.random() < eps and eval == False:
-      # TODO: for more complex action spaces, adapt this
-      return random.randrange(self.args.action_dim)
-    # else choose greedy action with ties broken randomly
-    qvals = qvals.squeeze(0)  # (A,)
-    max_q = torch.max(qvals).item()
-    max_actions = (qvals == max_q).nonzero(as_tuple=False).view(-1)
-    if len(max_actions) > 1:
-      return int(max_actions[torch.randint(len(max_actions), (1,))].item())
-    return int(torch.argmax(qvals, dim=-1).item())
+  def _choose_action(self, qvals: torch.Tensor, beta: float, eval) -> int:
+    gumbel_noise = -beta * torch.empty_like(qvals).exponential_().log()
+    if eval == True:
+      print((qvals + gumbel_noise).squeeze(0).detach().numpy())
+    return int(torch.argmax(qvals + gumbel_noise))
 
   def select_action(self, s_t: np.ndarray, eval=False) -> Tuple[int, torch.Tensor]:
     """
@@ -132,7 +134,7 @@ class QLearningAgentClassic:
     """
     s = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
     qvals = self.q(s)
-    return self._choose_action(qvals, self._eps(), eval)
+    return self._choose_action(qvals, self._tau(), eval)
 
   # ------------- training -------------
 
@@ -151,11 +153,11 @@ class QLearningAgentClassic:
     a = torch.tensor([b["action"] for b in batch], dtype=torch.long,
                      device=self.device)                  # (B,)
     r = torch.tensor([b["reward"] for b in batch],
-                     dtype=torch.float32, device=self.device)               # (B,)
+                     dtype=torch.float32, device=self.device)  # (B,)
     done = torch.tensor([b["done"] for b in batch],
-                        dtype=torch.float32, device=self.device)              # (B,)                       # (B,g)
+                        dtype=torch.float32, device=self.device)  # (B,)
 
-    # Q(s,g,a) and target r + gamma * max_{a'} Q(s',a')
+    # Q(s,a) and target r + gamma * max_{a'} Q(s',a')
     q_sa = self.q(s).gather(1, a.view(-1, 1)).squeeze(1)
     with torch.no_grad():
       q_next = self.q_tgt(sp).max(dim=1).values
@@ -169,15 +171,24 @@ class QLearningAgentClassic:
     if self.global_step % self.args.train_every != 0:
       return None  # only train every few steps
 
-    batch_list = self.replay.sample(self.args.batch_size)
+    batch_list, is_weights, tree_indices = self.replay.sample(self.args.batch_size)
+
+    is_weights = torch.tensor(is_weights, dtype=torch.float32, device=self.args.device)
 
     # --- 1. Update the Q-Network ---
     q_sa, target = self._compute_targets(batch_list)
-    loss = F.mse_loss(q_sa, target)
+    with torch.no_grad():
+        td_errors = (q_sa - target).cpu().numpy()
+    
+    loss_per_element = (q_sa - target) ** 2
+    loss = (loss_per_element * is_weights).mean()
+
     self.opt.zero_grad(set_to_none=True)
     loss.backward()
     nn.utils.clip_grad_norm_(self.q.parameters(), 10.0)
     self.opt.step()
+
+    self.replay.update_priorities(tree_indices, td_errors)
 
     if self.global_step % self.args.target_update_every == 0:
       self.q_tgt.load_state_dict(self.q.state_dict())
@@ -191,16 +202,11 @@ class QLearningAgentClassic:
     Gathers a trajectory, stores future slices for subgoal selection,
     and trains the Q-network and OpponentModel.
     """
-    # self.opponent_agent = SimpleAgent(1)
-    if random.random() < self._eps():
-      self.opponent_agent = RandomAgent(1)
-    else:
-      self.opponent_agent = SimpleAgent(1)
-    
-    obs = self.env.reset()
+    self.opponent_agent = SimpleAgent(1, True)
+
+    obs = self.env.reset_random_spawn(0)
     done = False
     ep_ret = 0.0
-
 
     step_buffer = deque(maxlen=self.args.horizon_H + 1)
 
@@ -235,22 +241,23 @@ class QLearningAgentClassic:
       Q_loss = self.update()
 
       if Q_loss is not None and self.global_step % 100 == 0:
-        print(f"Step {self.global_step}: Q_loss={Q_loss:.4f}, Eps={self._eps():.3f}")
+        print(
+          f"Step {self.global_step}: Q_loss={Q_loss:.4f}, Tau={self._tau():.3f}")
 
       if done:
         break
 
     return {"return": ep_ret, "steps": step + 1}
-  
+
   def run_test_episode(self, max_steps: Optional[int] = None, render: bool = False) -> Dict[str, float]:
-    self.opponent_agent = SimpleAgent(1)
+    self.opponent_agent = SimpleAgent(1, True)
     obs = self.env.reset()
     done = False
     ep_ret = 0.0
 
     if render:
       SimpleForagingEnv.render_from_obs(obs[0])
-    
+
     for step in range(max_steps or 500):
 
       a = self.select_action(obs[0], True)
@@ -261,9 +268,8 @@ class QLearningAgentClassic:
       obs = next_obs
       if render:
         SimpleForagingEnv.render_from_obs(obs[0])
-      
+
       if done:
         break
-
 
     return {"return": ep_ret, "steps": step + 1}
