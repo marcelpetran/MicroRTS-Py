@@ -6,6 +6,7 @@ from sympy import true
 from omg_args import OMGArgs
 
 from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv
+from priority_replay_buffer import PrioritizedReplayBuffer
 
 import numpy as np
 import torch
@@ -117,7 +118,8 @@ class QLearningAgent:
     self.opt = torch.optim.Adam(self.q.parameters(), lr=self.args.lr)
 
     # Replay
-    self.replay = ReplayBuffer(self.args.capacity)
+    # self.replay = ReplayBuffer(self.args.capacity)
+    self.replay = PrioritizedReplayBuffer(self.args.capacity)
 
     # Schedules
     self.global_step = 0
@@ -327,15 +329,26 @@ class QLearningAgent:
     if self.global_step % self.args.train_every != 0:
       return (None, None)  # only train every few steps
 
-    batch_list = self.replay.sample(self.args.batch_size)
+    batch_list, is_weights, tree_indices = self.replay.sample(
+      self.args.batch_size)
+
+    is_weights = torch.tensor(
+      is_weights, dtype=torch.float32, device=self.args.device)
 
     # --- 1. Update the Q-Network ---
     q_sa, target = self._compute_targets(batch_list)
-    loss = F.mse_loss(q_sa, target)
+    with torch.no_grad():
+      td_errors = (q_sa - target).cpu().numpy()
+
+    loss_per_element = (q_sa - target) ** 2
+    loss = (loss_per_element * is_weights).mean()
+
     self.opt.zero_grad(set_to_none=True)
     loss.backward()
     nn.utils.clip_grad_norm_(self.q.parameters(), 10.0)
     self.opt.step()
+
+    self.replay.update_priorities(tree_indices, td_errors)
 
     # --- 2. Update the Opponent Model ---
     # Construct a proper batch dictionary for the OpponentModel
@@ -415,12 +428,12 @@ class QLearningAgent:
     and trains the Q-network and OpponentModel.
     """
     # self.opponent_agent = SimpleAgent(1)
-    if random.random() < self._eps():
-      self.opponent_agent = RandomAgent(1)
-    else:
-      self.opponent_agent = SimpleAgent(1)
+    # if random.random() < self._eps():
+    #   self.opponent_agent = RandomAgent(1)
+    # else:
+    self.opponent_agent = SimpleAgent(1, True)
 
-    obs = self.env.reset()
+    obs = self.env.reset_random_spawn(0)
     done = False
     ep_ret = 0.0
 
