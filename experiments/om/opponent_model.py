@@ -449,7 +449,7 @@ class OpponentModel(nn.Module):
 
     with torch.no_grad():
       vae_mu, vae_log_var = self.subgoal_selector.select(self.prior_model, eval_policy,
-                                                         x, future_states, eval_policy._selector_tau())
+                                                         x, future_states, eval_policy._tau())
 
     loss = self.loss_function(reconstructed_x, x, cvae_mu, cvae_log_var,
                               vae_mu, vae_log_var, infer_mu, infer_log_var, dones, eval_policy._gmix_eps(), eval_policy._beta())

@@ -134,7 +134,7 @@ class QLearningAgent:
     t = min(self.global_step, self.args.gmix_eps_decay_steps)
     return self.args.gmix_eps_end + (self.args.gmix_eps_start - self.args.gmix_eps_end) * (1 - t / self.args.gmix_eps_decay_steps)
 
-  def _selector_tau(self) -> float:
+  def _tau(self) -> float:
     t = min(self.global_step, self.args.selector_tau_decay_steps)
     return self.args.selector_tau_end + (self.args.selector_tau_start - self.args.selector_tau_end) * (1 - t / self.args.selector_tau_decay_steps)
 
@@ -174,7 +174,7 @@ class QLearningAgent:
     futures = torch.from_numpy(future_states).unsqueeze(
       0).float().to(self.device)  # (1,K,H,W,F)
     mu, logvar = self.model.subgoal_selector.select(
-      self.model.prior_model, self, x, futures, self._selector_tau())
+      self.model.prior_model, self, x, futures, self._tau())
     return mu, logvar
 
   # ------------- visualization utility -------------
@@ -254,26 +254,18 @@ class QLearningAgent:
 
   # ------------- acting -------------
 
-  def _choose_action(self, qvals: torch.Tensor, eps: float, eval) -> int:
-    if random.random() < eps and eval == False:
-      # TODO: for more complex action spaces, adapt this
-      return random.randrange(self.args.action_dim)
-    # else choose greedy action with ties broken randomly
-    qvals = qvals.squeeze(0)  # (A,)
-    max_q = torch.max(qvals).item()
-    max_actions = (qvals == max_q).nonzero(as_tuple=False).view(-1)
-    if len(max_actions) > 1:
-      return int(max_actions[torch.randint(len(max_actions), (1,))].item())
-    return int(torch.argmax(qvals, dim=-1).item())
+  def _choose_action(self, qvals: torch.Tensor, beta: float) -> int:
+    gumbel_noise = -beta * torch.empty_like(qvals).exponential_().log()
+    return int(torch.argmax(qvals + gumbel_noise))
 
-  def select_action(self, s_t: np.ndarray, history: Dict[str, List[torch.Tensor]], eval=False) -> Tuple[int, torch.Tensor]:
+  def select_action(self, s_t: np.ndarray, history: Dict[str, List[torch.Tensor]]) -> Tuple[int, torch.Tensor]:
     """
     (interaction phase) Infer g_hat and act eps-greedily on Q(s,g_hat,*)
     """
     ghat_mu, ghat_logvar = self._infer_ghat(s_t, history)  # (1, latent_dim)
     s = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
     qvals = self.q(s, ghat_mu)
-    a = self._choose_action(qvals, self._eps(), eval)
+    a = self._choose_action(qvals, self._tau())
     return a, ghat_mu.squeeze(0), ghat_logvar.squeeze(0)
 
   # ------------- training -------------
@@ -496,7 +488,7 @@ class QLearningAgent:
       Q_loss, model_loss = self.update()
 
       if Q_loss is not None and model_loss is not None and self.global_step % 100 == 0:
-        print(f"Step {self.global_step}: Q_loss={Q_loss:.4f}, Model_loss={model_loss:.4f}, Eps={self._eps():.3f}, Gmix_eps={self._gmix_eps():.3f}")
+        print(f"Step {self.global_step}: Q_loss={Q_loss:.4f}, Model_loss={model_loss:.4f}, Tau={self._tau():.3f}, Gmix_eps={self._gmix_eps():.3f}")
 
       if done:
         break
@@ -520,7 +512,7 @@ class QLearningAgent:
       current_history = {k: list(v) for k, v in history.items()}
 
       a, ghat_mu, ghat_logvar = self.select_action(
-        obs[0], current_history, True)
+        obs[0], current_history)
       a_opponent = self.opponent_agent.select_action(obs[1])
       actions = {0: a, 1: a_opponent}
       next_obs, reward, done, info = self.env.step(actions)
