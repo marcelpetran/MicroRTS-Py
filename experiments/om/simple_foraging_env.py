@@ -46,6 +46,9 @@ class SimpleForagingEnv:
           freed.append((i, j))
     return freed
   
+  def _get_agent_positions(self):
+    return list(self.agents.values())
+  
   def reset_random_spawn(self, agent_id):
     _ = self.reset()
     freed = self._get_freed_positions()
