@@ -496,7 +496,7 @@ class QLearningAgent:
     return {"return": ep_ret, "steps": step + 1}
 
   def run_test_episode(self, max_steps: Optional[int] = None, render: bool = False) -> Dict[str, float]:
-    self.opponent_agent = SimpleAgent(1)
+    self.opponent_agent = SimpleAgent(1, True)
     obs = self.env.reset()
     done = False
     ep_ret = 0.0
