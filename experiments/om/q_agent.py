@@ -12,6 +12,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
 
 
 # ------ helpers ------
@@ -179,7 +180,7 @@ class QLearningAgent:
 
   # ------------- visualization utility -------------
   @torch.no_grad()
-  def heatmap_q_values(self, state_hwf: np.ndarray, g: torch.Tensor, filename: str = "q_heatmap.png"):
+  def heatmap_q_values(self, g: torch.Tensor, filename: str = "q_heatmap.png"):
     """
     Utility to visualize Q-values as a heatmap over the grid for a given state and subgoal.
 
@@ -197,40 +198,29 @@ class QLearningAgent:
     policy_map = np.zeros((H, W))
 
     # Find the original position of our agent (agent 1, feature index 2)
-    agent_pos_indices = np.where(state_hwf[:, :, 2] == 1)
-    if len(agent_pos_indices[0]) == 0:
-      print("Warning: Agent not found in state for heatmap visualization.")
-      return
-    original_pos = (agent_pos_indices[0][0], agent_pos_indices[1][0])
-
+    original_pos = self.env._get_agent_positions()[0]
     # Iterate over every possible cell in the grid
-    for r in range(H):
-      for c in range(W):
-        # Create a copy of the state
-        temp_state = state_hwf.copy()
+    for pos in self.env._get_freed_positions() + [original_pos]:
+      r, c = pos
+      
+      self.env.set_agent_position(0, pos)
+      temp_state = self.env._get_observations()[0]  # Get the modified state
 
-        # Move the agent to the new (r, c) position
-        # 1. Erase the agent's original position
-        temp_state[original_pos[0], original_pos[1], 2] = 0
-        temp_state[original_pos[0], original_pos[1], 0] = 1  # Set to empty
+      s_tensor = torch.from_numpy(
+        temp_state).float().unsqueeze(0).to(self.device)
+      
+      # subgoal is valid only for the current agent position
+      # but true q-values with correct subgoals are expensive to compute
+      # so this is an approximation
+      q_values = self.q(s_tensor, g)  # (1, num_actions)
 
-        # 2. Place the agent at the new position
-        # Make sure no other object is there before placing the agent
-        if np.sum(temp_state[r, c, 1:]) == 0:  # Check if food or other agent is there
-          temp_state[r, c, 2] = 1
-          temp_state[r, c, 0] = 0  # Not empty anymore
+      max_q_val, best_action = torch.max(q_values, dim=1)
+      q_value_map[r, c] = max_q_val.item()
+      policy_map[r, c] = best_action.item()
 
-          # Convert to tensor and get Q-values
-          s_tensor = torch.from_numpy(
-            temp_state).float().unsqueeze(0).to(self.device)
-          q_values = self.q(s_tensor, g)  # (1, num_actions)
-
-          max_q_val, best_action = torch.max(q_values, dim=1)
-          q_value_map[r, c] = max_q_val.item()
-          policy_map[r, c] = best_action.item()
-
+    # Restore the agent's original position
+    self.env.set_agent_position(0, original_pos)
     # --- Plotting the Heatmap ---
-    import matplotlib.pyplot as plt
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
 
     # Plot Q-value heatmap
@@ -292,14 +282,15 @@ class QLearningAgent:
     # Prepare g_hat (from stored inference) and g_bar (from selector over future window)
     ghat_mu = torch.stack([b["infer_mu"] for b in batch], dim=0).to(
       self.device)                           # (B,g)
-    gbar_mu = []
-    for b in batch:
-      # Shape (K,H,W,F) for next few steps (collected during rollout)
-      futures = np.stack(b["future_states"], axis=0) if b["future_states"] else np.zeros(
-        (1, H, W, F_dim), dtype=np.float32)
-      mu, _ = self._select_gbar(b["state"], futures)
-      gbar_mu.append(mu.squeeze(0))
-    gbar_mu = torch.stack(gbar_mu, dim=0)                         # (B,g)
+    with torch.no_grad():
+      gbar_mu = []
+      for b in batch:
+        # Shape (K,H,W,F) for next few steps (collected during rollout)
+        futures = np.stack(b["future_states"], axis=0) if b["future_states"] else np.zeros(
+          (1, H, W, F_dim), dtype=np.float32)
+        mu, _ = self._select_gbar(b["state"], futures)
+        gbar_mu.append(mu.squeeze(0))
+      gbar_mu = torch.stack(gbar_mu, dim=0)                         # (B,g)
 
     # Eq.(8): gt = g_hay if eta > eps_gmix else g_bar
     eps_gmix = self._gmix_eps()
@@ -526,8 +517,7 @@ class QLearningAgent:
         print(f"\n--- Visualization at Step {step+1} ---")
 
         print("Generating Q-value heatmap...")
-        self.heatmap_q_values(obs[0], ghat_mu.unsqueeze(
-          0), f"./diagrams_{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
+        self.heatmap_q_values(ghat_mu, f"./diagrams_{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
 
         print("Generating subgoal visualizations...")
         with torch.no_grad():
