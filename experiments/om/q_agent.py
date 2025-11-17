@@ -458,14 +458,20 @@ class QLearningAgent:
         future_states = [s["state"] for s in list(step_buffer)[1:]]
         transition_to_store["future_states"] = future_states
         self.replay.push(transition_to_store)
-      elif done and len(step_buffer) > 1:
+      elif done and len(step_buffer) > 0:
         # If episode ends, fill the future window with remaining states
-        while len(step_buffer) > 1:
+        while step_buffer: 
           transition_to_store = step_buffer.popleft()
-          future_states = [s["state"] for s in list(step_buffer)]
-          # Fill the rest with copies of the terminal state
+          
+          future_states = [s["state"] for s in list(step_buffer)] 
+          
+          pad_state = transition_to_store["state"] 
+          if future_states:
+             pad_state = future_states[-1] # if future exists, pad with its last
+             
           for _ in range(self.args.horizon_H - len(future_states)):
-            future_states.append(step_buffer[-1]["state"])
+            future_states.append(pad_state) # Pad with the terminal state
+            
           transition_to_store["future_states"] = future_states
           self.replay.push(transition_to_store)
 
@@ -484,23 +490,6 @@ class QLearningAgent:
 
       if done:
         break
-    
-    # Handle any remaining transitions in the buffer after episode ends
-    while step_buffer:
-      transition_to_store = step_buffer.popleft()
-      
-      if not transition_to_store["future_states"]:
-        # This is the final transition, it has no future.
-        future_states = [transition_to_store["state"]] * self.args.horizon_H
-      else:
-        # This is a transition from the done loop, it has a partial future
-        future_states = transition_to_store["future_states"]
-        # Fill the rest with copies of the terminal state
-        for _ in range(self.args.horizon_H - len(future_states)):
-            future_states.append(transition_to_store["state"])
-
-      transition_to_store["future_states"] = future_states
-      self.replay.push(transition_to_store)
 
     return {"return": ep_ret, "steps": step + 1}
 
