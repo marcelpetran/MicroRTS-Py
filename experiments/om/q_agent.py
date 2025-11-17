@@ -203,7 +203,7 @@ class QLearningAgent:
     for pos in self.env._get_freed_positions() + [original_pos]:
       r, c = pos
       
-      self.env.set_agent_position(0, pos)
+      self.env._place_agent(0, pos)
       temp_state = self.env._get_observations()[0]  # Get the modified state
 
       s_tensor = torch.from_numpy(
@@ -219,7 +219,7 @@ class QLearningAgent:
       policy_map[r, c] = best_action.item()
 
     # Restore the agent's original position
-    self.env.set_agent_position(0, original_pos)
+    self.env._place_agent(0, original_pos)
     # --- Plotting the Heatmap ---
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
 
