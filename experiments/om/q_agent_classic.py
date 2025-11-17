@@ -208,8 +208,6 @@ class QLearningAgentClassic:
     done = False
     ep_ret = 0.0
 
-    step_buffer = deque(maxlen=self.args.horizon_H + 1)
-
     for step in range(max_steps or 500):
 
       a = self.select_action(obs[0])
@@ -225,14 +223,8 @@ class QLearningAgentClassic:
           "next_state": next_obs[0].copy(),
           "done": bool(done),
       }
-      step_buffer.append(step_info)
-
-      # Once the buffer is full, the oldest step has its full future window
-      if len(step_buffer) == self.args.horizon_H + 1:
-        transition_to_store = step_buffer[0]
-        future_states = [s["state"] for s in list(step_buffer)[1:]]
-        transition_to_store["future_states"] = future_states
-        self.replay.push(transition_to_store)
+      
+      self.replay.push(step_info)
 
       ep_ret += reward[0]
       obs = next_obs
