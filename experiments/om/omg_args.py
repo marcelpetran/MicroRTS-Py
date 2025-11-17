@@ -5,7 +5,7 @@ from typing import Tuple
 @dataclass
 class OMGArgs:
   device: str = "cpu"  # "cpu" or "cuda"
-  gamma: float = 1.0
+  gamma: float = 0.99
   lr: float = 3e-4
   batch_size: int = 16
   capacity: int = 250_000
@@ -15,8 +15,8 @@ class OMGArgs:
   visualise_every_n_step: int = 3
   eps_start: float = 1.0
   eps_end: float = 0.05
-  eps_decay_steps: int = 50_000
-  qnet_hidden: int = 256
+  eps_decay_steps: int = 800_000
+  qnet_hidden: int = 128
   max_history_length: int = 100
   max_steps: int = 30
   seed: int = 0
@@ -30,7 +30,7 @@ class OMGArgs:
   # "conservative" => Eq.(7), "optimistic" => Eq.(6)
   selector_mode: str = "conservative"
   selector_tau_start: float = 20.0
-  selector_tau_end: float = 0.1
+  selector_tau_end: float = 0.01
   selector_tau_decay_steps: int = 800_000
   train_vae: bool = True
   vae_lr: float = 1e-4

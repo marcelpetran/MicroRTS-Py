@@ -191,6 +191,7 @@ class QLearningAgent:
     """
     self.q.eval()
     H, W, _ = self.args.state_shape
+    g = g.unsqueeze(0)  # (1, latent_dim)
 
     # This will store the max Q-value for each grid cell
     q_value_map = np.zeros((H, W))
