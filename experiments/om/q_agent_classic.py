@@ -163,6 +163,7 @@ class QLearningAgentClassic:
       best_actions = self.q(sp).argmax(dim=1, keepdim=True)
       q_next = self.q_tgt(sp).gather(1, best_actions).squeeze(1)
       target = r + (1.0 - done) * self.args.gamma * q_next
+      target = torch.clamp(target, min=-10.0, max=25.0)
     return q_sa, target
 
   def update(self):
@@ -180,8 +181,12 @@ class QLearningAgentClassic:
     q_sa, target = self._compute_targets(batch_list)
     with torch.no_grad():
         td_errors = (q_sa - target).cpu().numpy()
-    
-    loss_per_element = (q_sa - target) ** 2
+    # MSE loss
+    # loss_per_element = (q_sa - target) ** 2
+    # loss = (loss_per_element * is_weights).mean()
+
+    # Huber loss
+    loss_per_element = F.smooth_l1_loss(q_sa, target, reduction='none')
     loss = (loss_per_element * is_weights).mean()
 
     self.opt.zero_grad(set_to_none=True)

@@ -55,8 +55,8 @@ parser.add_argument('--selector_tau_end', type=float, default=0.1,
                     help='Last temperature value in selector module, using Boltzmann distribution')
 parser.add_argument('--horizon', type=int, default=3,
                     help='Future window H for opponent modeling (Selector module)')
-parser.add_argument('--eps_decay_steps', type=int, default=150_000,
-                    help='Epsilon decay steps for epsilon-greedy policy')
+parser.add_argument('--selector_tau_decay_steps', type=int, default=400_000,
+                    help='Tau decay steps for Gumbel noise in selector and policy modules')
 parser.add_argument('--train_every', type=int, default=4,
                     help='Train every N steps')
 parser.add_argument('--target_update_every', type=int,
@@ -92,7 +92,6 @@ args = OMGArgs(
     qnet_hidden=args_parsed.qnet_dim,
     train_every=args_parsed.train_every,
     target_update_every=args_parsed.target_update_every,
-    eps_decay_steps=args_parsed.eps_decay_steps,
     visualise_every_n_step=3,
     max_steps=args_parsed.max_steps,
     selector_mode="conservative",
@@ -101,6 +100,7 @@ args = OMGArgs(
     beta_end=args_parsed.beta_end,
     selector_tau_start=args_parsed.selector_tau_start,
     selector_tau_end=args_parsed.selector_tau_end,
+    selector_tau_decay_steps=args_parsed.selector_tau_decay_steps,
     train_vae=args_parsed.train_vae,
     state_shape=obs_sample[0].shape,
     H=H, W=W,
