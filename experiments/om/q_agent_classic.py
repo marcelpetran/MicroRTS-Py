@@ -160,7 +160,8 @@ class QLearningAgentClassic:
     # Q(s,a) and target r + gamma * max_{a'} Q(s',a')
     q_sa = self.q(s).gather(1, a.view(-1, 1)).squeeze(1)
     with torch.no_grad():
-      q_next = self.q_tgt(sp).max(dim=1).values
+      best_actions = self.q(sp).argmax(dim=1, keepdim=True)
+      q_next = self.q_tgt(sp).gather(1, best_actions).squeeze(1)
       target = r + (1.0 - done) * self.args.gamma * q_next
     return q_sa, target
 
