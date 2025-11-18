@@ -125,7 +125,7 @@ class QLearningAgentClassic:
   def _choose_action(self, qvals: torch.Tensor, beta: float, eval) -> int:
     gumbel_noise = -beta * torch.empty_like(qvals).exponential_().log()
     if eval == True:
-      print((qvals + gumbel_noise).squeeze(0).detach().numpy())
+      print((qvals).squeeze(0).detach().numpy())
     return int(torch.argmax(qvals + gumbel_noise))
 
   def select_action(self, s_t: np.ndarray, eval=False) -> Tuple[int, torch.Tensor]:
