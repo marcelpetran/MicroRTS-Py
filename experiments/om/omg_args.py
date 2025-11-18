@@ -6,7 +6,7 @@ from typing import Tuple
 class OMGArgs:
   device: str = "cpu"  # "cpu" or "cuda"
   gamma: float = 0.99
-  lr: float = 3e-4
+  lr: float = 5e-5
   batch_size: int = 16
   capacity: int = 250_000
   min_replay: int = 1_000

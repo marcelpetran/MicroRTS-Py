@@ -412,7 +412,7 @@ class OpponentModel(nn.Module):
 
     # --- 3. Total Loss ---
     # + self.args.vae_beta * kld_loss
-    total_loss = recon_loss.mean() + beta * omg_loss + self.args.vae_beta * kld_loss
+    total_loss = recon_loss.mean() + beta * omg_loss
     return total_loss
 
   def train_step(self, batch, eval_policy):
