@@ -144,3 +144,4 @@ experiments/om/diagrams_*/*
 
 # ignored folder:
 experiments/om/ignore/*
+experiments/om/args.txt
