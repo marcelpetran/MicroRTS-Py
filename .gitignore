@@ -141,3 +141,6 @@ dmypy.json
 # Images inside diagrams folder
 experiments/om/diagrams/*
 experiments/om/diagrams_*/*
+
+# ignored folder:
+experiments/om/ignored/*
