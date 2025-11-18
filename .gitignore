@@ -143,4 +143,4 @@ experiments/om/diagrams/*
 experiments/om/diagrams_*/*
 
 # ignored folder:
-experiments/om/ignored/*
+experiments/om/ignore/*
