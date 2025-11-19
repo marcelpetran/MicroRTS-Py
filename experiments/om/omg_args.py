@@ -6,8 +6,8 @@ from typing import Tuple
 class OMGArgs:
   device: str = "cpu"  # "cpu" or "cuda"
   gamma: float = 0.99
-  lr: float = 5e-5
-  batch_size: int = 16
+  lr: float = 1e-4
+  batch_size: int = 32
   capacity: int = 250_000
   min_replay: int = 1_000
   train_every: int = 4
@@ -26,13 +26,13 @@ class OMGArgs:
   oracle: bool = False
   gmix_eps_start: float = 1.0      # Eq.(8): start using mostly g_bar
   gmix_eps_end: float = 0.0        # goes to 0 -> use g_hat only
-  gmix_eps_decay_steps: int = 600_000
+  gmix_eps_decay_steps: int = 800_000
   horizon_H: int = 6
   # "conservative" => Eq.(7), "optimistic" => Eq.(6)
   selector_mode: str = "conservative"
   selector_tau_start: float = 40.0
   selector_tau_end: float = 0.01
-  selector_tau_decay_steps: int = 600_000
+  selector_tau_decay_steps: int = 800_000
   train_vae: bool = True
   vae_lr: float = 1e-4
   cvae_lr: float = 1e-4
