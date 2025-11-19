@@ -1,3 +1,4 @@
+from typing import Dict, Tuple
 import transformers as t
 import torch
 import torch.nn as nn
@@ -96,7 +97,6 @@ class OpponentModel(nn.Module):
     self.replay = ReplayBuffer(args.capacity)
     self.device = args.device
     self.args = args
-    self.mse_loss = nn.MSELoss()
 
     # Precompute feature weights for reconstruction loss
     splits = self.args.state_feature_splits
@@ -110,6 +110,21 @@ class OpponentModel(nn.Module):
     # Weights for each feature type
     self.register_buffer('feature_weights', torch.tensor(
       [1.0, 20.0, 20.0, 20.0], device=self.device))
+
+  def forward(self, x: torch.Tensor, history: Dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Calculates the forward pass, using the inference model (CVAE) 
+    to predict the reconstructed state and the latent distribution.
+
+    Args:
+        x (Tensor): Current state s_t (B, H, W, F).
+        history (Dict): Historical trajectory (states/actions).
+
+    Returns:
+        Tuple[recon, mu, logvar]
+    """
+    self.inference_model.eval()
+    return self.inference_model.encode(x, history)
 
   def eval(self):
     """
@@ -150,29 +165,6 @@ class OpponentModel(nn.Module):
       start_idx = end_idx
 
     return reconstructed_state
-
-  def visualize_subgoal(self, ghat_mu: torch.Tensor, filename: str = "./subgoal_visualization.png"):
-    """
-    Reconstructs visualization of a subgoal state from a latent vector.
-
-    Args:
-        ghat_mu (torch.Tensor): The mean of the inferred latent distribution (ĝt), shape (B, latent_dim).
-    """
-    print(f"Visualizing subgoal and saving to {filename}...")
-    self.prior_model.eval()  # Use the frozen, pre-trained VAE for reconstruction
-
-    with torch.no_grad():
-      # Bad approach, latent vectors from CVAE might/will not match the prior VAE's latent space at all
-      reconstructed_logits = self.prior_model.decode(ghat_mu)
-      reconstructed_state_one_hot = self.reconstruct_state(
-          reconstructed_logits, self.args.state_feature_splits
-      )
-    # Shape: (H, W, F)
-    state_to_plot = reconstructed_state_one_hot[0].cpu().numpy()
-
-    _plot_foraging_grid(state_to_plot, filename)
-
-    return
 
   def visualize_subgoal_logits(self, obs: np.ndarray, reconstructed_logits: torch.Tensor, filename: str = None):
     """
