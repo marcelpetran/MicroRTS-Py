@@ -23,6 +23,7 @@ class OMGArgs:
   folder_id: int = 0
 
   # OMG-specific
+  oracle: bool = False
   gmix_eps_start: float = 1.0      # Eq.(8): start using mostly g_bar
   gmix_eps_end: float = 0.0        # goes to 0 -> use g_hat only
   gmix_eps_decay_steps: int = 600_000
