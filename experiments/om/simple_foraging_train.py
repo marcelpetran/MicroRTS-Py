@@ -1,5 +1,6 @@
 from simple_foraging_env import SimpleForagingEnv
 from opponent_model import OpponentModel, SubGoalSelector
+from opponent_model_oracle import OpponentModelOracle, SubGoalSelectorOracle
 from q_agent import QLearningAgent, ReplayBuffer
 from q_agent_classic import QLearningAgentClassic
 from omg_args import OMGArgs
@@ -16,6 +17,8 @@ parser.add_argument('--visualize_vae', action='store_true',
                     default=False, help='Visualize VAE reconstructions logits')
 parser.add_argument('--vae_path', type=str, default='./models/vae.pth',
                     help='Path to pre-trained VAE weights')
+parser.add_argument('--oracle', action='store_true', default=False,
+                    help='Use oracle opponent model (ground-truth future states)')
 parser.add_argument('--classic', action='store_true', default=False,
                     help='Use classic Q-learning agent without opponent modeling')
 parser.add_argument('--episodes', type=int, default=50_000,
@@ -85,6 +88,7 @@ NUM_ACTIONS = 4  # Up, Down, Left, Right
 
 args = OMGArgs(
     device=device,
+    oracle=args_parsed.oracle,
     folder_id=args_parsed.folder_id,
     batch_size=args_parsed.batch_size,
     capacity=args_parsed.replay_capacity,
@@ -120,11 +124,14 @@ if not args_parsed.classic:
 
   # CVAE (Student)
   cvae = t.TransformerCVAE(args).to(device)
-
-  selector = SubGoalSelector(args)
-
-  op_model = OpponentModel(
-    cvae, vae, selector, args=args)
+  if args.oracle == False:
+    selector = SubGoalSelector(args)
+    op_model = OpponentModel(
+      cvae, vae, selector, args=args)
+  else:
+    selector = SubGoalSelectorOracle(args)
+    op_model = OpponentModelOracle(
+      cvae, vae, selector, args=args)
 
   # --- Pre-train the VAE ---
   if args.train_vae:
