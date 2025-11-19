@@ -155,19 +155,12 @@ class QLearningAgent:
   # ------------- subgoal inference utilities -------------
 
   @torch.no_grad()
-  def _select_gbar(self, s_t: np.ndarray, future_states: np.ndarray) -> Tuple[torch.Tensor, torch.Tensor]:
+  def _select_gbar(self, x: torch.tensor, future_states: torch.tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Uses SubGoalSelector over H future states. Returns (mu, logvar) for g_bar
     """
-    x = torch.from_numpy(s_t).float().to(self.device)
-    futures = torch.from_numpy(future_states).float().to(self.device)
-
-    if x.dim() == 3:
-      x = x.unsqueeze(0)  # (1, H, W, F)
-      futures = futures.unsqueeze(0)  # (1, K, H, W, F)
-
     mu, logvar = self.model.subgoal_selector.select(
-      self.model.prior_model, self, x, futures, self._tau())
+      self.model.prior_model, self, x, future_states, self._tau())
     return mu, logvar
 
   # ------------- visualization utility -------------
@@ -272,15 +265,15 @@ class QLearningAgent:
                      dtype=torch.float32, device=self.device)               # (B,)
     done = torch.tensor([b["done"] for b in batch],
                         dtype=torch.float32, device=self.device)              # (B,)
-    future_states = np.stack(
-      [b["future_states"] for b in batch], axis=0)  # (B,K,H,W,F)
+    future_states = torch.stack([torch.stack([torch.from_numpy(fs).float(
+    ) for fs in b["future_states"]]) for b in batch], dim=0).to(self.device)  # (B,K,H,W,F)
 
     # Prepare g_hat (from stored inference) and g_bar (from selector over future window)
     ghat_mu = torch.stack([b["infer_mu"] for b in batch], dim=0).to(
       self.device)                           # (B,g)
     with torch.no_grad():
       gbar_mu, _ = self._select_gbar(
-        s.numpy(), future_states)               # (B,g)
+        s, future_states)               # (B,g)
 
     # Eq.(8): gt = g_hay if eta > eps_gmix else g_bar
     eps_gmix = self._gmix_eps()
