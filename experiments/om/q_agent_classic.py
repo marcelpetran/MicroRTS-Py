@@ -174,6 +174,7 @@ class QLearningAgentClassic:
       return None  # only train every few steps
 
     batch_list, is_weights, tree_indices = self.replay.sample(self.args.batch_size)
+    # batch_list = self.replay.sample(self.args.batch_size)
 
     is_weights = torch.tensor(is_weights, dtype=torch.float32, device=self.args.device)
 
@@ -186,6 +187,7 @@ class QLearningAgentClassic:
     # loss = (loss_per_element * is_weights).mean()
 
     # Huber loss
+    # loss = F.smooth_l1_loss(q_sa, target, reduction='mean')
     loss_per_element = F.smooth_l1_loss(q_sa, target, reduction='none')
     loss = (loss_per_element * is_weights).mean()
 

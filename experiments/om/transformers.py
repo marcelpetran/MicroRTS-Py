@@ -271,7 +271,7 @@ class TransformerCVAE(nn.Module):
         if m.bias is not None:
           nn.init.zeros_(m.bias)
 
-  def get_history_seq(self, history):
+  def get_history_seq(self, history, B):
     """
     Concatenates the embedded history into a single sequence tensor.
     Args:
@@ -287,8 +287,8 @@ class TransformerCVAE(nn.Module):
 
     if isinstance(states, list):
       if not states:
-        return torch.empty(1, 0, self.args.d_model, device=self.args.device), \
-            torch.empty(1, 0, dtype=torch.bool, device=self.args.device)
+        return torch.empty(B, 0, self.args.d_model, device=self.args.device), \
+            torch.empty(B, 0, dtype=torch.bool, device=self.args.device)
 
       # evaluation mode - states are in format list of (H, W, F) of length T
       states = torch.stack(states, dim=0).unsqueeze(0)  # (1, T, H, W, F)
@@ -297,7 +297,7 @@ class TransformerCVAE(nn.Module):
     states = states.to(self.args.device)
     actions = actions.to(self.args.device)
 
-    B, T, _, _, _ = states.shape
+    T = states.shape[1]
     if mask is None:
       # during collection or evaluation -> all tokens are valid
       mask = torch.ones(B, T, dtype=torch.bool, device=self.args.device)
@@ -338,7 +338,7 @@ class TransformerCVAE(nn.Module):
     B = x_embedded.shape[0]
 
     if not is_history_seq:
-      condition_seq, condition_mask = self.get_history_seq(history)
+      condition_seq, condition_mask = self.get_history_seq(history, B)
     else:
       condition_seq, condition_mask = history
     x_mask = torch.ones(
@@ -429,7 +429,7 @@ class TransformerCVAE(nn.Module):
         Tensor: Log-variance of the latent distribution (B, latent_dim)
     """
     x = x.to(self.args.device)
-    history_seq, mask = self.get_history_seq(history)
+    history_seq, mask = self.get_history_seq(history, x.shape[0])
     history_seq = history_seq.to(self.args.device)
     mu, logvar = self.encode(x, (history_seq, mask), is_history_seq=True)
     z = self.reparameterize(mu, logvar)
