@@ -156,16 +156,6 @@ class QLearningAgent:
   # ------------- subgoal inference utilities -------------
 
   @torch.no_grad()
-  def _infer_ghat(self, state_hwf: np.ndarray, history: Dict[str, List[torch.Tensor]]) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Returns (mu, logvar) for g_hat
-    """
-    x = torch.from_numpy(state_hwf).float().unsqueeze(
-      0).to(self.device)  # (1,H,W,F)
-    _, mu, logvar = self.model.inference_model(x, history)
-    return mu, logvar
-
-  @torch.no_grad()
   def _select_gbar(self, s_t: np.ndarray, future_states: np.ndarray) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Uses SubGoalSelector over H future states. Returns (mu, logvar) for g_bar
@@ -203,13 +193,13 @@ class QLearningAgent:
     # Iterate over every possible cell in the grid
     for pos in self.env._get_freed_positions() + [original_pos]:
       r, c = pos
-      
+
       self.env._place_agent(0, pos)
       temp_state = self.env._get_observations()[0]  # Get the modified state
 
       s_tensor = torch.from_numpy(
         temp_state).float().unsqueeze(0).to(self.device)
-      
+
       # subgoal is valid only for the current agent position
       # but true q-values with correct subgoals are expensive to compute
       # so this is an approximation
@@ -253,9 +243,10 @@ class QLearningAgent:
     """
     (interaction phase) Infer g_hat and act eps-greedily on Q(s,g_hat,*)
     """
-    ghat_mu, ghat_logvar = self._infer_ghat(s_t, history)  # (1, latent_dim)
-    s = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
-    qvals = self.q(s, ghat_mu)
+    x = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
+    with torch.no_grad():
+      ghat_mu, ghat_logvar = self.model(x, history)
+    qvals = self.q(x, ghat_mu)
     a = self._choose_action(qvals, self._tau())
     return a, ghat_mu.squeeze(0), ghat_logvar.squeeze(0)
 
@@ -298,6 +289,10 @@ class QLearningAgent:
     eta = torch.rand(B, device=self.device)
     use_ghat = (eta > eps_gmix).float().unsqueeze(-1)
     g_mix = use_ghat * ghat_mu + (1 - use_ghat) * gbar_mu         # (B,g)
+
+    if self.args.oracle == True:
+      # In oracle mode, always use g_hat, selector gives zeroed tensor
+      g_mix = ghat_mu
 
     # Q(s,g,a) and target r + gamma * max_{a'} Q(s',g,a')  (same g)
     q_sa = self.q(s, g_mix).gather(1, a.view(-1, 1)).squeeze(1)
@@ -466,18 +461,19 @@ class QLearningAgent:
         self.replay.push(transition_to_store)
       elif done and len(step_buffer) > 0:
         # If episode ends, fill the future window with remaining states
-        while step_buffer: 
+        while step_buffer:
           transition_to_store = step_buffer.popleft()
-          
-          future_states = [s["state"] for s in list(step_buffer)] 
-          
-          pad_state = transition_to_store["state"] 
+
+          future_states = [s["state"] for s in list(step_buffer)]
+
+          pad_state = transition_to_store["state"]
           if future_states:
-             pad_state = future_states[-1] # if future exists, pad with its last
-             
+            # if future exists, pad with its last
+            pad_state = future_states[-1]
+
           for _ in range(self.args.horizon_H - len(future_states)):
-            future_states.append(pad_state) # Pad with the terminal state
-            
+            future_states.append(pad_state)  # Pad with the terminal state
+
           transition_to_store["future_states"] = future_states
           self.replay.push(transition_to_store)
 
@@ -530,20 +526,22 @@ class QLearningAgent:
         print(f"\n--- Visualization at Step {step+1} ---")
 
         print("Generating Q-value heatmap...")
-        self.heatmap_q_values(ghat_mu, f"./diagrams_{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
+        self.heatmap_q_values(
+          ghat_mu, f"./diagrams_{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
 
-        print("Generating subgoal visualizations...")
-        with torch.no_grad():
-          self.model.inference_model.eval()
-          recon_logits, g_bar, _ = self.model.inference_model(
-              torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device),
-              current_history
-          )
-          # self.model.visualize_subgoal(ghat_mu.unsqueeze(0), f"./diagrams/subgoal_onehot_step{self.global_step + step}.png")
-          # self.model.visualize_selected_subgoal(
-          #   g_bar, obs[0], f"./diagrams_{self.args.folder_id}/selected_subgoal_step{self.global_step + step}.png")
-          self.model.visualize_subgoal_logits(
-            obs[0], recon_logits, f"./diagrams_{self.args.folder_id}/subgoal_logits_step{self.global_step + step}.png")
+        if self.args.oracle == False:
+          print("Generating subgoal visualizations...")
+          with torch.no_grad():
+            self.model.inference_model.eval()
+            recon_logits, _, _ = self.model.inference_model(
+                torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device),
+                current_history
+            )
+            # self.model.visualize_subgoal(ghat_mu.unsqueeze(0), f"./diagrams/subgoal_onehot_step{self.global_step + step}.png")
+            # self.model.visualize_selected_subgoal(
+            #   g_bar, obs[0], f"./diagrams_{self.args.folder_id}/selected_subgoal_step{self.global_step + step}.png")
+            self.model.visualize_subgoal_logits(
+              obs[0], recon_logits, f"./diagrams_{self.args.folder_id}/subgoal_logits_step{self.global_step + step}.png")
 
       if done:
         break
