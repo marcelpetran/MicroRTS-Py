@@ -49,6 +49,7 @@ class OpponentModelOracle(nn.Module):
 
   def forward(self, x: torch.Tensor, history: Dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     # find opponent position in x
+    agent_idx = (x[..., 2] == 1).nonzero(as_tuple=False)
     opp_idx = (x[..., 3] == 1).nonzero(as_tuple=False)
     food_idxs = (x[..., 1] == 1).nonzero(as_tuple=False)
     # we know that opponent goes to the top food first
@@ -65,13 +66,24 @@ class OpponentModelOracle(nn.Module):
       # move opponent to target food position
       x_clone = x.clone()
 
-      H_coord = opp_idx[0, 1] 
+      H_coord = opp_idx[0, 1]
       W_coord = opp_idx[0, 2]
 
-      H_target = target_food[0, 1] 
+      H_target = target_food[0, 1]
       W_target = target_food[0, 2]
 
+      H_agent = agent_idx[0, 1]
+      W_agent = agent_idx[0, 2]
+
+      # handle agent
+      x_clone[0, H_agent, W_agent, 0] = 1  # place empty
+      x_clone[..., 2] = 0  # remove self agent
+      x_clone[0, 0, 0, 2] = 1
+      x_clone[0, 0, 0, 0] = 0
+
+      # handle opponent
       x_clone[0, H_coord, W_coord, 3] = 0  # remove opponent
+      x_clone[0, H_coord, W_coord, 0] = 1  # place empty
       x_clone[0, H_target, W_target, 1] = 0  # remove food
       x_clone[0, H_target, W_target, 3] = 1  # place opponent
       x = x_clone
