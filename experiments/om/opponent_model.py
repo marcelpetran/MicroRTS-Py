@@ -48,41 +48,57 @@ class SubGoalSelector:
     """
     vae.eval()
     with torch.no_grad():
-      subgoal_batch = []
-      vae_log_var_batch = []
       assert s_t_batch.dim(
       ) == 4, f"s_t_ba should be 4D (B, H, W, F), got {s_t_batch.shape}"
       assert future_states.dim(
       ) == 5, f"future_states should be 5D (B, K, H, W, F), got {future_states.shape}"
 
-      # iterate over batch
-      for i, horizon in enumerate(future_states):
-        # (B, K, H, W, F) -> (K, H, W, F)
-        mu, logvar = vae.encode(horizon)  # (K, latent_dim)
-        # policy expects a batch dim for state and subgoal
-        s_t = s_t_batch[i]
-        K = horizon.shape[0]
+      B, K, H, W, F_dim = future_states.shape
 
-        # s_t: (D_s) -> (K, D_s)
-        s_t_expanded = s_t.unsqueeze(0).repeat(K, 1, 1, 1)  # (K, H, W, F)
+      # (B, K, H, W, F) -> (B*K, H, W, F)
+      all_future_states = future_states.view(B * K, H, W, F_dim)
 
-        # s_t_expanded: (K, H, W, F), mu: (K, latent_dim) -> values_flat: (K, A)
-        values_flat = eval_policy.value(s_t_expanded, mu)  # (K, A)
+      # (B, H, W, F) -> (B, 1, H, W, F) -> (B*K, H, W, F)
+      s_t_expanded = s_t_batch.unsqueeze(1).repeat(
+        1, K, 1, 1, 1).view(B * K, H, W, F_dim)
 
-        # Boltzmann exploration over Q-values
-        probs = F.softmax(values_flat / tau, dim=-1)  # (K, A)
-        values = (probs * values_flat).sum(dim=-1)  # (K,) Expected Q-value
+      mu, logvar = vae.encode(all_future_states)  # (B*K, latent_dim)
 
-        # Gumbel-max trick for differentiable argmin or argmax
-        best_idx = self.gumbel_sample(values, tau)
-        # (1, latent_dim), (1, latent_dim)
-        subgoal_batch.append(mu[best_idx].unsqueeze(0))
-        vae_log_var_batch.append(logvar[best_idx].unsqueeze(0))
+      # s_t_expanded: (B*K, H, W, F), mu: (B*K, latent_dim) -> values_flat: (B*K, A)
+      values_flat = eval_policy.value(s_t_expanded, mu)
 
-      # concat all subgoals and log_vars back to batch dimension
-      subgoal = torch.cat(subgoal_batch, dim=0)
-      vae_log_var = torch.cat(vae_log_var_batch, dim=0)
-      # (B, latent_dim), (B, latent_dim)
+      # reshape back to (B, K, ...)
+      mu = mu.view(B, K, self.args.latent_dim)
+      logvar = logvar.view(B, K, self.args.latent_dim)
+      values = values_flat.view(B, K, self.args.action_dim)
+
+      # Calculate V(s, g) = Expected Q-value over actions (B, K)
+      probs = F.softmax(values / tau, dim=-1)  # (B, K, A)
+      expected_values = (probs * values).sum(dim=-1)  # (B, K)
+
+
+      # best_idx is (B,) containing the index (0 to K-1) for each item
+      gumbel_noise = -tau * \
+          torch.empty_like(expected_values).exponential_().log()
+
+      if self.args.selector_mode == "optimistic":
+        best_idx = torch.argmax(expected_values + gumbel_noise, dim=1)
+      else:  # conservative
+        best_idx = torch.argmin(expected_values - gumbel_noise, dim=1)
+
+      # Gather the Selected Latent Vector
+      # We need to gather the selected indices from the K dimension
+      # best_idx is (B,). We need to transform it to (B, 1, latent_dim) for gather.
+
+      # Create indexing mask (B, 1, latent_dim)
+      idx_mask = best_idx.unsqueeze(-1).unsqueeze(-1).repeat(1,
+                                                             1, self.args.latent_dim)
+
+      # Gather the selected mu and logvar
+      subgoal = torch.gather(mu, 1, idx_mask).squeeze(1)  # (B, latent_dim)
+      vae_log_var = torch.gather(
+        logvar, 1, idx_mask).squeeze(1)  # (B, latent_dim)
+
     return subgoal, vae_log_var
 
 

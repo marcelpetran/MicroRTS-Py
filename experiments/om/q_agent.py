@@ -2,7 +2,6 @@ from typing import Deque, Dict, List, Tuple, Optional
 import random
 from collections import deque
 
-from sympy import true
 from omg_args import OMGArgs
 
 from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv
@@ -160,10 +159,13 @@ class QLearningAgent:
     """
     Uses SubGoalSelector over H future states. Returns (mu, logvar) for g_bar
     """
-    x = torch.from_numpy(s_t).float().unsqueeze(
-      0).to(self.device)    # (1,H,W,F)
-    futures = torch.from_numpy(future_states).unsqueeze(
-      0).float().to(self.device)  # (1,K,H,W,F)
+    x = torch.from_numpy(s_t).float().to(self.device)
+    futures = torch.from_numpy(future_states).float().to(self.device)
+
+    if x.dim() == 3:
+      x = x.unsqueeze(0)  # (1, H, W, F)
+      futures = futures.unsqueeze(0)  # (1, K, H, W, F)
+
     mu, logvar = self.model.subgoal_selector.select(
       self.model.prior_model, self, x, futures, self._tau())
     return mu, logvar
@@ -270,19 +272,15 @@ class QLearningAgent:
                      dtype=torch.float32, device=self.device)               # (B,)
     done = torch.tensor([b["done"] for b in batch],
                         dtype=torch.float32, device=self.device)              # (B,)
+    future_states = np.stack(
+      [b["future_states"] for b in batch], axis=0)  # (B,K,H,W,F)
 
     # Prepare g_hat (from stored inference) and g_bar (from selector over future window)
     ghat_mu = torch.stack([b["infer_mu"] for b in batch], dim=0).to(
       self.device)                           # (B,g)
     with torch.no_grad():
-      gbar_mu = []
-      for b in batch:
-        # Shape (K,H,W,F) for next few steps (collected during rollout)
-        futures = np.stack(b["future_states"], axis=0) if b["future_states"] else np.zeros(
-          (1, H, W, F_dim), dtype=np.float32)
-        mu, _ = self._select_gbar(b["state"], futures)
-        gbar_mu.append(mu.squeeze(0))
-      gbar_mu = torch.stack(gbar_mu, dim=0)                         # (B,g)
+      gbar_mu, _ = self._select_gbar(
+        s.numpy(), future_states)               # (B,g)
 
     # Eq.(8): gt = g_hay if eta > eps_gmix else g_bar
     eps_gmix = self._gmix_eps()
