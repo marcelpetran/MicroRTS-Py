@@ -16,6 +16,7 @@ class SumTree:
     # The first capacity-1 nodes are parents.
     # The last capacity nodes are the leaves (priorities).
     self.tree = np.zeros(2 * capacity - 1)
+    self.min_tree = np.full(2 * capacity - 1, float('inf'))
     # Store the actual transitions
     self.data = np.zeros(capacity, dtype=object)
     self.data_pointer = 0
@@ -40,11 +41,21 @@ class SumTree:
     """Update the priority of a node and propagate the change up the tree."""
     change = priority - self.tree[tree_idx]
     self.tree[tree_idx] = priority
+    self.min_tree[tree_idx] = priority
 
     # Propagate the change up
     while tree_idx != 0:
       tree_idx = (tree_idx - 1) // 2
       self.tree[tree_idx] += change
+      
+      # Update min_tree: parent is min of children
+      left = 2 * tree_idx + 1
+      right = left + 1
+      # Handle case where right child might be out of bounds
+      if right < len(self.min_tree):
+          self.min_tree[tree_idx] = min(self.min_tree[left], self.min_tree[right])
+      else:
+          self.min_tree[tree_idx] = self.min_tree[left]
 
   def get_leaf(self, s: float) -> tuple:
     """Find the leaf node for a given sum 's'."""
@@ -72,6 +83,15 @@ class SumTree:
   def total_priority(self) -> float:
     """Get the total sum of all priorities (the root node)."""
     return self.tree[0]
+  
+  @property
+  def min_priority(self) -> float:
+    # If the tree is not full, the empty leaves are inf. 
+    # We want the min of the filled leaves.
+    # However, standard MinTree impl usually just queries the root 
+    # if we initialize empty spots with INF.
+    val = self.min_tree[0]
+    return val if val != float('inf') else 1.0
 
   def __len__(self):
     return self.n_entries
@@ -82,11 +102,11 @@ class PrioritizedReplayBuffer:
   The PER Buffer. It uses a SumTree to manage priorities.
   """
   # Epsilon: a small value to ensure no transition has 0 priority
-  eps = 1e-6
+  eps = 1e-2
   # Alpha: determines how much prioritization is used (0=uniform, 1=full)
-  alpha = 0.6
+  alpha = 0.2
   # Beta: Importance-sampling correction (starts at 0.4, anneals to 1.0)
-  beta_start = 0.4
+  beta_start = 0.6
   beta_inc = 1e-4
 
   def __init__(self, capacity: int):
@@ -115,9 +135,8 @@ class PrioritizedReplayBuffer:
     # Anneal beta
     self.beta = np.min([1., self.beta + self.beta_inc])
 
-    # Calculate min probability for IS weight calculation
-    min_prob = np.min(
-      self.tree.tree[-self.capacity:]) / self.tree.total_priority
+    min_prob = self.tree.min_priority / self.tree.total_priority
+    if min_prob == 0: min_prob = 1e-10
 
     for i in range(batch_size):
       # Sample a value from each segment
@@ -130,7 +149,11 @@ class PrioritizedReplayBuffer:
 
       # Calculate sampling probability and IS weight
       prob = priority / self.tree.total_priority
-      is_weights[i] = (prob / min_prob) ** (-self.beta)
+
+      # IS Weights calculation
+      # w = (N * P)^-beta / max_w
+      # simplified: w = (prob / min_prob)^-beta
+      is_weights[i] = np.power(prob / min_prob, -self.beta)
 
       batch.append(data)
       tree_indices[i] = tree_idx
