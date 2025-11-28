@@ -33,10 +33,10 @@ class SimpleForagingEnv:
 
     # obs, info
     return self._get_observations()
-  
+
   def _place_agent(self, agent_id, position):
     self.agents[agent_id] = position
-  
+
   def _get_freed_positions(self):
     occupied = set(self.agents.values()).union(self.food_positions)
     freed = []
@@ -45,12 +45,20 @@ class SimpleForagingEnv:
         if (i, j) not in occupied:
           freed.append((i, j))
     return freed
-  
+
   def _get_agent_positions(self):
     return list(self.agents.values())
-  
+
   def reset_random_spawn(self, agent_id):
     _ = self.reset()
+
+    # Remove a random food
+    if np.random.rand() > 0.5:
+      food_list = list(self.food_positions)
+      if len(food_list) > 0:
+        removed_food = food_list[np.random.randint(len(food_list))]
+        self.food_positions.remove(removed_food)
+
     freed = self._get_freed_positions()
     pos = freed[np.random.randint(0, len(freed))]
     self.agents[agent_id] = pos
@@ -111,10 +119,10 @@ class SimpleForagingEnv:
     # Check for food collection
     for agent_id, pos in self.agents.items():
       if pos in self.food_positions:
-        rewards[agent_id] += 10
+        rewards[agent_id] += 1
         self.food_positions.remove(pos)
       else:
-        rewards[agent_id] -= 0.1  # Penalty for step
+        rewards[agent_id] -= 0.01  # Penalty for step
     # obs, rewards, done, info
     return self._get_observations(), rewards, self._check_terminal(), {}
 
