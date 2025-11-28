@@ -34,6 +34,7 @@ class QNet(nn.Module):
   latent_dim: dimension of latent opponent representation
   action_dim: number of discrete actions
   Returns Q-values for all actions.
+
   """
 
   def __init__(self, args: OMGArgs):
@@ -41,23 +42,67 @@ class QNet(nn.Module):
     H, W, F_dim = args.state_shape
     self.state_dim = H * W * F_dim
     self.latent_dim = args.latent_dim
-    # WARNING: might not work with complex action spaces
     self.action_dim = args.action_dim
-
     hidden = args.qnet_hidden
-    self.net = nn.Sequential(
-        nn.Linear(self.state_dim + self.latent_dim, hidden),
+    cnn_2d_out = 32
+    cnn_hidden = 16
+    goal_hidden = 64
+    projector_out = 64
+
+    # Calculate CNN output size
+    # With padding=1 and stride=1, H and W stay same.
+    cnn_out_dim = cnn_2d_out * H * W
+
+    # Stream 1: CNN for Spatial State (H, W, F)
+    # Input: (B, H, W, F) -> Permute to (B, F, H, W)
+    self.cnn = nn.Sequential(
+        nn.Conv2d(F_dim, cnn_hidden, kernel_size=3, stride=1, padding=1),
         nn.ReLU(),
-        nn.Linear(hidden, hidden),
+        nn.Conv2d(cnn_hidden, cnn_2d_out, kernel_size=3, stride=1, padding=1),
         nn.ReLU(),
-        nn.Linear(hidden, self.action_dim),
+        nn.Flatten()
     )
 
+    self.cnn_projector = nn.Sequential(
+        nn.Linear(cnn_out_dim, projector_out),
+        nn.ReLU()
+    )
+
+    # Stream 2: Goal Encoder
+    self.goal_encoder = nn.Sequential(
+        nn.Linear(self.latent_dim, goal_hidden),
+        nn.Tanh()
+    )
+
+    combined_dim = projector_out + goal_hidden
+    # Stream 3: Fusion Head
+    self.head = nn.Sequential(
+        nn.Linear(combined_dim, hidden),
+        nn.ReLU(),
+        nn.Linear(hidden, self.action_dim)
+    )
+
+    # Initialize weights to small values to prevent initial explosion
+    self.apply(self._init_weights)
+
+  def _init_weights(self, m):
+    if isinstance(m, nn.Linear):
+      nn.init.xavier_uniform_(m.weight)
+      if m.bias is not None:
+        nn.init.constant_(m.bias, 0.01)
+
   def forward(self, batch: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
-    B, H, W, F_dim = batch.shape  # (B, H, W, F) float
-    s = batch.view(B, H * W * F_dim)
-    x = torch.cat([s, g], dim=-1)
-    return self.net(x)  # (B, A)
+    # Batch shape: (B, H, W, F)
+    # Permute to (B, F, H, W) for PyTorch Conv2d
+    s = batch.permute(0, 3, 1, 2)
+
+    features = self.cnn_projector(self.cnn(s))
+
+    goal = self.goal_encoder(g)
+
+    combined = torch.cat([features, goal], dim=1)
+
+    return self.head(combined)
 
 
 class ReplayBuffer:
@@ -118,8 +163,8 @@ class QLearningAgent:
     self.opt = torch.optim.Adam(self.q.parameters(), lr=self.args.lr)
 
     # Replay
-    # self.replay = ReplayBuffer(self.args.capacity)
-    self.replay = PrioritizedReplayBuffer(self.args.capacity)
+    self.replay = ReplayBuffer(self.args.capacity)
+    # self.replay = PrioritizedReplayBuffer(self.args.capacity)
 
     # Schedules
     self.global_step = 0
@@ -230,11 +275,14 @@ class QLearningAgent:
 
   # ------------- acting -------------
 
-  def _choose_action(self, qvals: torch.Tensor, beta: float) -> int:
+  def _choose_action(self, qvals: torch.Tensor, beta: float, eval=False) -> int:
     gumbel_noise = -beta * torch.empty_like(qvals).exponential_().log()
+    if eval == True:
+      noise = torch.rand_like(qvals) * 1e-6
+      return int(torch.argmax(qvals + noise))
     return int(torch.argmax(qvals + gumbel_noise))
 
-  def select_action(self, s_t: np.ndarray, history: Dict[str, List[torch.Tensor]]) -> Tuple[int, torch.Tensor]:
+  def select_action(self, s_t: np.ndarray, history: Dict[str, List[torch.Tensor]], eval=False) -> Tuple[int, torch.Tensor]:
     """
     (interaction phase) Infer g_hat and act eps-greedily on Q(s,g_hat,*)
     """
@@ -242,7 +290,7 @@ class QLearningAgent:
     with torch.no_grad():
       ghat_mu, ghat_logvar = self.model(x, history)
     qvals = self.q(x, ghat_mu)
-    a = self._choose_action(qvals, self._tau())
+    a = self._choose_action(qvals, self._tau(), eval)
     return a, ghat_mu.squeeze(0), ghat_logvar.squeeze(0)
 
   # ------------- training -------------
@@ -269,8 +317,9 @@ class QLearningAgent:
     ) for fs in b["future_states"]]) for b in batch], dim=0).to(self.device)  # (B,K,H,W,F)
 
     # Prepare g_hat (from stored inference) and g_bar (from selector over future window)
-    ghat_mu = torch.stack([b["infer_mu"] for b in batch], dim=0).to(
-      self.device)                           # (B,g)
+    ghat_mu = torch.stack([b["infer_mu"]
+                          for b in batch], dim=0).to(self.device)  # (B,g)
+
     with torch.no_grad():
       gbar_mu, _ = self._select_gbar(
         s, future_states)               # (B,g)
@@ -288,10 +337,13 @@ class QLearningAgent:
     # Q(s,g,a) and target r + gamma * max_{a'} Q(s',g,a')  (same g)
     q_sa = self.q(s, g_mix).gather(1, a.view(-1, 1)).squeeze(1)
     with torch.no_grad():
-      best_actions = self.q(sp, g_mix).argmax(dim=1, keepdim=True)
-      q_next = self.q_tgt(sp, g_mix).gather(1, best_actions).squeeze(1)
+      g_next, _ = self.model(sp, {})
+      q_val = self.q(sp, g_next)
+      noise = torch.rand_like(q_val) * 1e-6
+      best_actions = (q_val + noise).argmax(dim=1, keepdim=True)
+      q_next = self.q_tgt(sp, g_next).gather(1, best_actions).squeeze(1)
       target = r + (1.0 - done) * self.args.gamma * q_next
-      target = torch.clamp(target, min=-10.0, max=25.0)
+      target = torch.clamp(target, min=-5.0, max=5.0)
     return q_sa, target
 
   def update(self):
@@ -301,30 +353,33 @@ class QLearningAgent:
     if self.global_step % self.args.train_every != 0:
       return (None, None)  # only train every few steps
 
-    batch_list, is_weights, tree_indices = self.replay.sample(
-      self.args.batch_size)
+    batch_list = self.replay.sample(self.args.batch_size)
+    # batch_list, is_weights, tree_indices = self.replay.sample(
+    #   self.args.batch_size)
 
-    is_weights = torch.tensor(
-      is_weights, dtype=torch.float32, device=self.args.device)
+    # is_weights = torch.tensor(
+    #   is_weights, dtype=torch.float32, device=self.args.device)
+    # is_weights /= is_weights.max() # normalize for stability
 
     # --- 1. Update the Q-Network ---
     q_sa, target = self._compute_targets(batch_list)
     with torch.no_grad():
-      td_errors = (q_sa - target).cpu().numpy()
+      td_errors = (q_sa - target).detach().cpu().numpy()
     # MSE loss
     # loss_per_element = (q_sa - target) ** 2
     # loss = (loss_per_element * is_weights).mean()
 
     # Huber loss
-    loss_per_element = F.smooth_l1_loss(q_sa, target, reduction='none')
-    loss = (loss_per_element * is_weights).mean()
+    loss = F.smooth_l1_loss(q_sa, target, reduction='mean')
+    # loss_per_element = F.smooth_l1_loss(q_sa, target, reduction='none')
+    # loss = (loss_per_element * is_weights).mean()
 
     self.opt.zero_grad(set_to_none=True)
     loss.backward()
-    nn.utils.clip_grad_norm_(self.q.parameters(), 10.0)
+    nn.utils.clip_grad_norm_(self.q.parameters(), 1.0)
     self.opt.step()
 
-    self.replay.update_priorities(tree_indices, td_errors)
+    # self.replay.update_priorities(tree_indices, td_errors)
 
     # --- 2. Update the Opponent Model ---
     # Construct a proper batch dictionary for the OpponentModel
@@ -407,9 +462,11 @@ class QLearningAgent:
     # if random.random() < self._eps():
     #   self.opponent_agent = RandomAgent(1)
     # else:
-    self.opponent_agent = SimpleAgent(1, True)
-
-    obs = self.env.reset_random_spawn(0)
+    self.opponent_agent = SimpleAgent(1)
+    if np.random.rand() < self._eps():
+      obs = self.env.reset_random_spawn(0)
+    else:
+      obs = self.env.reset()
     done = False
     ep_ret = 0.0
 
@@ -479,7 +536,7 @@ class QLearningAgent:
       Q_loss, model_loss = self.update()
 
       if Q_loss is not None and model_loss is not None and self.global_step % 100 == 0:
-        print(f"Step {self.global_step}: Q_loss={Q_loss:.4f}, Model_loss={model_loss:.4f}, Tau={self._tau():.3f}, Gmix_eps={self._gmix_eps():.3f}")
+        print(f"Step {self.global_step}: Q_loss={Q_loss:.5f}, Model_loss={model_loss:.1f}, Tau={self._tau():.2f}, Gmix_eps={self._gmix_eps():.2f}")
 
       if done:
         break
@@ -487,7 +544,7 @@ class QLearningAgent:
     return {"return": ep_ret, "steps": step + 1}
 
   def run_test_episode(self, max_steps: Optional[int] = None, render: bool = False) -> Dict[str, float]:
-    self.opponent_agent = SimpleAgent(1, True)
+    self.opponent_agent = SimpleAgent(1)
     obs = self.env.reset()
     done = False
     ep_ret = 0.0
@@ -503,9 +560,15 @@ class QLearningAgent:
       current_history = {k: list(v) for k, v in history.items()}
 
       a, ghat_mu, ghat_logvar = self.select_action(
-        obs[0], current_history)
+        obs[0], current_history, eval=True)
       a_opponent = self.opponent_agent.select_action(obs[1])
       actions = {0: a, 1: a_opponent}
+
+      if render:
+        self.heatmap_q_values(
+          ghat_mu, f"./diagrams_{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
+        SimpleForagingEnv.render_from_obs(obs[0])
+
       next_obs, reward, done, info = self.env.step(actions)
 
       history["states"].append(torch.from_numpy(obs[0]).float())
@@ -513,26 +576,21 @@ class QLearningAgent:
 
       ep_ret += reward[0]
       obs = next_obs
-      if render and not done and (step + 1) % self.args.visualise_every_n_step == 0:
-        print(f"\n--- Visualization at Step {step+1} ---")
 
-        print("Generating Q-value heatmap...")
-        self.heatmap_q_values(
-          ghat_mu, f"./diagrams_{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
-
-        if self.args.oracle == False:
-          print("Generating subgoal visualizations...")
-          with torch.no_grad():
-            self.model.inference_model.eval()
-            recon_logits, _, _ = self.model.inference_model(
-                torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device),
-                current_history
-            )
-            # self.model.visualize_subgoal(ghat_mu.unsqueeze(0), f"./diagrams/subgoal_onehot_step{self.global_step + step}.png")
-            # self.model.visualize_selected_subgoal(
-            #   g_bar, obs[0], f"./diagrams_{self.args.folder_id}/selected_subgoal_step{self.global_step + step}.png")
-            self.model.visualize_subgoal_logits(
-              obs[0], recon_logits, f"./diagrams_{self.args.folder_id}/subgoal_logits_step{self.global_step + step}.png")
+      # if render and not done and (step + 1) % self.args.visualise_every_n_step == 0:
+      # if self.args.oracle == False:
+      #   print("Generating subgoal visualizations...")
+      #   with torch.no_grad():
+      #     self.model.inference_model.eval()
+      #     recon_logits, _, _ = self.model.inference_model(
+      #         torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device),
+      #         current_history
+      #     )
+      # self.model.visualize_subgoal(ghat_mu.unsqueeze(0), f"./diagrams/subgoal_onehot_step{self.global_step + step}.png")
+      # self.model.visualize_selected_subgoal(
+      #   g_bar, obs[0], f"./diagrams_{self.args.folder_id}/selected_subgoal_step{self.global_step + step}.png")
+      # self.model.visualize_subgoal_logits(
+      #   obs[0], recon_logits, f"./diagrams_{self.args.folder_id}/subgoal_logits_step{self.global_step + step}.png")
 
       if done:
         break
