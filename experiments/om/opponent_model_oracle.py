@@ -1,3 +1,4 @@
+from math import e
 from typing import Dict, List, Tuple
 import transformers as t
 import torch
@@ -33,6 +34,7 @@ class OpponentModelOracle(nn.Module):
     self.replay = ReplayBuffer(args.capacity)
     self.device = args.device
     self.args = args
+    self.projector = torch.randn(args.latent_dim, device=self.device, requires_grad=False)
 
     # Precompute feature weights for reconstruction loss
     splits = self.args.state_feature_splits
@@ -48,48 +50,32 @@ class OpponentModelOracle(nn.Module):
       [1.0, 20.0, 20.0, 20.0], device=self.device))
 
   def forward(self, x: torch.Tensor, history: Dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    # find opponent position in x
-    agent_idx = (x[..., 2] == 1).nonzero(as_tuple=False)
-    opp_idx = (x[..., 3] == 1).nonzero(as_tuple=False)
-    food_idxs = (x[..., 1] == 1).nonzero(as_tuple=False)
-    # we know that opponent goes to the top food first
-    # if there are still 2 food items, place opponent at the top one
-    # else, place him at the only food item
-    if len(food_idxs) == 2:
-      target_food = food_idxs[food_idxs[:, 1].argmin()].unsqueeze(0)
-    elif len(food_idxs) == 1:
-      target_food = food_idxs[0].unsqueeze(0)
-    else:
-      target_food = None
+    B, H, W, _ = x.shape
+    g = torch.zeros((B, self.args.latent_dim), device=self.device)
+    # opp start is at row 3, col 6
+    opp_start = torch.tensor([3, 6], device=self.device).float()
+    for b in range(B):
+      food_indices = (x[b, :, :, 1] == 1).nonzero(as_tuple=False)
+      opp_idx = (x[b, :, :, 3] == 1).nonzero(as_tuple=False).float()
 
-    if target_food is not None:
-      # move opponent to target food position
-      x_clone = x.clone()
+      is_top_food = 0.0
+      # if we have food and opponent is not at start position
+      if len(food_indices) > 1 and not torch.all(opp_idx[0] == opp_start):
+        # find closest food to opponent
+        dists = torch.norm(food_indices - opp_idx[0], dim=1)
+        target_idx = torch.argmin(dists)
+        target_row = food_indices[target_idx][0]
+        # target_row is food that is closes to opponent
 
-      H_coord = opp_idx[0, 1]
-      W_coord = opp_idx[0, 2]
+        # If target row is in upper half, it's Top (1.0), else Bottom (-1.0)
+        is_top_food = 1.0 if target_row < H / 2 else -1.0
+      elif len(food_indices) == 1:
+        target_row = food_indices[0][0]
+        is_top_food = 1.0 if target_row < H / 2 else -1.0
 
-      H_target = target_food[0, 1]
-      W_target = target_food[0, 2]
+      g[b] = is_top_food * self.projector
 
-      H_agent = agent_idx[0, 1]
-      W_agent = agent_idx[0, 2]
-
-      # handle agent
-      x_clone[0, H_agent, W_agent, 0] = 1  # place empty
-      x_clone[..., 2] = 0  # remove self agent
-      x_clone[0, 0, 0, 2] = 1
-      x_clone[0, 0, 0, 0] = 0
-
-      # handle opponent
-      x_clone[0, H_coord, W_coord, 3] = 0  # remove opponent
-      x_clone[0, H_coord, W_coord, 0] = 1  # place empty
-      x_clone[0, H_target, W_target, 1] = 0  # remove food
-      x_clone[0, H_target, W_target, 3] = 1  # place opponent
-      x = x_clone
-    # this new x is the "oracle" subgoal state in this simple foraging setup
-    self.prior_model.eval()
-    return self.prior_model.encode(x)
+    return g, torch.zeros_like(g)
 
   def eval(self):
     """
