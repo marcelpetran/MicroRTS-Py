@@ -15,7 +15,7 @@ parser.add_argument('--train_vae', action='store_true',
                     default=False, help='Whether to pre-train the VAE')
 parser.add_argument('--visualize_vae', action='store_true',
                     default=False, help='Visualize VAE reconstructions logits')
-parser.add_argument('--vae_path', type=str, default='./models/vae.pth',
+parser.add_argument('--vae_path', type=str, default='./models_0/vae.pth',
                     help='Path to pre-trained VAE weights')
 parser.add_argument('--oracle', action='store_true', default=False,
                     help='Use oracle opponent model (ground-truth future states)')
@@ -58,8 +58,6 @@ parser.add_argument('--selector_tau_end', type=float, default=0.1,
                     help='Last temperature value in selector module, using Boltzmann distribution')
 parser.add_argument('--horizon', type=int, default=3,
                     help='Future window H for opponent modeling (Selector module)')
-parser.add_argument('--selector_tau_decay_steps', type=int, default=400_000,
-                    help='Tau decay steps for Gumbel noise in selector and policy modules')
 parser.add_argument('--train_every', type=int, default=4,
                     help='Train every N steps')
 parser.add_argument('--target_update_every', type=int,
@@ -77,6 +75,7 @@ os.makedirs(f"./models_{args_parsed.folder_id}", exist_ok=True)
 os.makedirs(f"./diagrams_{args_parsed.folder_id}", exist_ok=True)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
+# device = "mps" if torch.backends.mps.is_available() else device
 print(f"Using device: {device}")
 
 env = SimpleForagingEnv(grid_size=args_parsed.env_size,
@@ -104,7 +103,6 @@ args = OMGArgs(
     beta_end=args_parsed.beta_end,
     selector_tau_start=args_parsed.selector_tau_start,
     selector_tau_end=args_parsed.selector_tau_end,
-    selector_tau_decay_steps=args_parsed.selector_tau_decay_steps,
     train_vae=args_parsed.train_vae,
     state_shape=obs_sample[0].shape,
     H=H, W=W,
@@ -142,8 +140,8 @@ if not args_parsed.classic:
     print("VAE pre-training complete.")
   else:
     assert os.path.exists(args_parsed.vae_path), "VAE path does not exist!"
-    op_model.prior_model.load_state_dict(torch.load(
-      args_parsed.vae_path, map_location=device))
+    # op_model.prior_model.load_state_dict(torch.load(
+    #   args_parsed.vae_path, map_location=device))
     print("Loaded pre-trained VAE.")
 
   agent = QLearningAgent(env, op_model, args=args)
@@ -165,6 +163,8 @@ for ep in range(args_parsed.episodes):
   # run a test episode
   if (ep + 1) % 500 == 0:
     stats = agent.run_test_episode(max_steps=args.max_steps, render=True)
+    print(
+      f"Test Episode {ep+1}: Return={stats['return']:.2f}, Steps={stats['steps']}")
     return_list.append(stats['return'])
     steps_list.append(stats['steps'])
     episode_list.append(ep + 1)
