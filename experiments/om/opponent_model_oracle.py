@@ -34,7 +34,8 @@ class OpponentModelOracle(nn.Module):
     self.replay = ReplayBuffer(args.capacity)
     self.device = args.device
     self.args = args
-    self.projector = torch.randn(args.latent_dim, device=self.device, requires_grad=False)
+    self.projector = torch.randn(
+      args.latent_dim, device=self.device, requires_grad=False)
 
     # Precompute feature weights for reconstruction loss
     splits = self.args.state_feature_splits
@@ -63,6 +64,20 @@ class OpponentModelOracle(nn.Module):
       if len(food_indices) > 1 and not torch.all(opp_idx[0] == opp_start):
         # find closest food to opponent
         dists = torch.norm(food_indices - opp_idx[0], dim=1)
+        if len(dists) > 1:
+          _, min_idx = torch.min(dists, dim=0)
+
+          # Sort distances to check the gap between closest and second closest
+          sorted_dists, _ = torch.sort(dists)
+          diff = sorted_dists[1] - sorted_dists[0]
+
+          # If the difference is small (e.g., < 0.1), it is ambiguous -> Output 0.0
+          if diff < 0.1:
+            is_top_food = 0.0
+          else:
+            # Not ambiguous: Snap to the closest
+            target_row = food_indices[min_idx][0]
+            is_top_food = 1.0 if target_row < H / 2 else -1.0
         target_idx = torch.argmin(dists)
         target_row = food_indices[target_idx][0]
         # target_row is food that is closes to opponent
