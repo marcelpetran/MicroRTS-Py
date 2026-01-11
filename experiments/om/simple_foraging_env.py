@@ -108,11 +108,7 @@ class SimpleForagingEnv:
         new_pos[1] = max(0, new_pos[1] - 1)
       elif action == 3:  # Right
         new_pos[1] = min(self.grid_size - 1, new_pos[1] + 1)  # Right
-      # Check for collisions with other agents
-      if tuple(new_pos) not in new_positions.values():
-        new_positions[agent_id] = tuple(new_pos)
-      else:
-        new_positions[agent_id] = current_pos  # Stay in place if collision
+      new_positions[agent_id] = tuple(new_pos)
 
     self.agents = new_positions
     self.steps += 1
@@ -121,8 +117,6 @@ class SimpleForagingEnv:
       if pos in self.food_positions:
         rewards[agent_id] += 1
         self.food_positions.remove(pos)
-      else:
-        rewards[agent_id] -= 0.01  # Penalty for step
     # obs, rewards, done, info
     return self._get_observations(), rewards, self._check_terminal(), {}
 
@@ -141,10 +135,13 @@ class SimpleForagingEnv:
       for j in range(grid_size):
         if obs[i, j, 1] == 1:
           render_grid[i, j] = 'F'  # Food
-        if obs[i, j, 2] == 1:
-          render_grid[i, j] = 'A'  # Agent 1
-        if obs[i, j, 3] == 1:
-          render_grid[i, j] = 'B'  # Agent 2
+        if obs[i, j, 2] == 1 and obs[i, j, 3] == 1:
+          render_grid[i, j] = 'X'  # Both agents
+        else:
+          if obs[i, j, 2] == 1:
+            render_grid[i, j] = 'A'  # Agent 1
+          if obs[i, j, 3] == 1:
+            render_grid[i, j] = 'B'  # Agent 2
     for row in render_grid:
       print(' '.join(row))
     print()
@@ -241,3 +238,108 @@ class SimpleAgent:
       return action_seq[0]  # Take the first step in the path
     else:
       return np.random.randint(0, 4)  # random action, should not happen
+
+
+class ZigZagAgent:
+  """
+  Agent that moves Left first (ambiguous), then zig-zags to the target.
+  Training policies went straight Up/Down then Left.
+  This policy goes Left, then Up/Left or Down/Left.
+  """
+
+  def __init__(self, agent_id, always_go_top=False):
+    self.agent_id = agent_id
+    # agent randomly decides to go for top or bottom food
+    self.going_for_top = True if np.random.rand() > 0.5 else False
+    self.always_go_top = always_go_top
+    self.grid_size = None
+    if self.always_go_top:
+      self.going_for_top = True
+
+  def reset(self):
+    self.going_for_top = True if np.random.rand() > 0.5 else False
+    if self.always_go_top:
+      self.going_for_top = True
+
+  def find_food(self, food_positions):
+    if not food_positions:
+      return None
+    if self.going_for_top == True:
+      # food with smallest row index
+      return min(food_positions, key=lambda x: x[0])
+    else:
+      # food with largest row index
+      return max(food_positions, key=lambda x: x[0])
+
+  def select_action(self, observation):
+    if self.grid_size is None:
+      self.grid_size = observation.shape[0]
+      # Find self
+    agent_pos = None
+    food_positions = []
+    obstacle = []
+    for i in range(observation.shape[0]):
+      for j in range(observation.shape[1]):
+        if observation[i, j, 2 + self.agent_id] == 1:
+          agent_pos = (i, j)
+        if observation[i, j, 2 + (1 - self.agent_id)] == 1:
+          obstacle.append((i, j))
+        if observation[i, j, 1] == 1:
+          food_positions.append((i, j))
+    if not food_positions or agent_pos is None:
+      return np.random.randint(0, 4)  # No food left, random action
+
+    r, c = agent_pos
+    # 1. FIRST MOVE LEFT
+    if c == self.grid_size - 1:
+      return 2  # Left
+
+    # 2. ZIG-ZAG LOGIC
+    # We need to alternate between Vertical and Horizontal moves.
+    # Logic: If we are on an "even" column distance from start, move Vertical.
+    # If "odd", move Horizontal.
+
+    target_pos = self.find_food(food_positions)
+    if len(food_positions) > 1:
+      target_row = 0 if self.going_for_top else self.grid_size - 1
+
+      # If we are at the target row, just go Left
+      if r == target_row:
+        return 2  # Left
+
+      # cases (r, c): if grid_size = 5, for 7 is swapped since 7//2 = 3 is odd and 5//2 = 2 is even
+      # (Even, Odd) -> Up if going for top, Down if going for bottom
+      # (Odd, Odd) -> Left
+      # (Odd, Even) -> Up if going for top, Down if going for bottom
+      # (Even, Even) -> Left
+      if self.grid_size % 2 == 1:
+        r_odd = (r % 2) == 1
+        c_odd = (c % 2) == 1
+      else:
+        r_odd = (r % 2) == 0
+        c_odd = (c % 2) == 0
+      
+      # E/O
+      if not r_odd and c_odd:
+        return 2
+      # O/O
+      elif r_odd and c_odd:
+        return 0 if self.going_for_top else 1
+      # O/E
+      elif r_odd and not c_odd:
+        return 2
+      # E/E
+      elif not r_odd and not c_odd:
+        return 0 if self.going_for_top else 1
+      
+    else:
+      # Only one food left, go straight to it
+      target_r, target_c = target_pos
+      if r < target_r:
+        return 1  # Down
+      elif r > target_r:
+        return 0  # Up
+      elif c > target_c:
+        return 2  # Left
+      else:
+        return np.random.randint(0, 4)  # random action, should not happen
