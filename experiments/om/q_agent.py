@@ -4,7 +4,7 @@ from collections import deque
 
 from omg_args import OMGArgs
 
-from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv
+from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv, ZigZagAgent
 from priority_replay_buffer import PrioritizedReplayBuffer
 
 import numpy as np
@@ -46,8 +46,8 @@ class QNet(nn.Module):
     hidden = args.qnet_hidden
     cnn_2d_out = 32
     cnn_hidden = 16
-    goal_hidden = 64
-    projector_out = 64
+    goal_hidden = 32
+    projector_out = 32
 
     # Calculate CNN output size
     # With padding=1 and stride=1, H and W stay same.
@@ -65,7 +65,7 @@ class QNet(nn.Module):
 
     self.cnn_projector = nn.Sequential(
         nn.Linear(cnn_out_dim, projector_out),
-        nn.ReLU()
+        nn.Tanh()
     )
 
     # Stream 2: Goal Encoder
@@ -75,6 +75,7 @@ class QNet(nn.Module):
     )
 
     combined_dim = projector_out + goal_hidden
+
     # Stream 3: Fusion Head
     self.head = nn.Sequential(
         nn.Linear(combined_dim, hidden),
@@ -160,7 +161,7 @@ class QLearningAgent:
     self.q = QNet(args).to(self.device)
     self.q_tgt = QNet(args).to(self.device)
     self.q_tgt.load_state_dict(self.q.state_dict())
-    self.opt = torch.optim.Adam(self.q.parameters(), lr=self.args.lr)
+    self.opt = torch.optim.Adam(self.q.parameters(), lr=self.args.lr, weight_decay=1e-5)
 
     # Replay
     self.replay = ReplayBuffer(self.args.capacity)
@@ -363,8 +364,8 @@ class QLearningAgent:
 
     # --- 1. Update the Q-Network ---
     q_sa, target = self._compute_targets(batch_list)
-    with torch.no_grad():
-      td_errors = (q_sa - target).detach().cpu().numpy()
+    # with torch.no_grad():
+    #   td_errors = (q_sa - target).detach().cpu().numpy()
     # MSE loss
     # loss_per_element = (q_sa - target) ** 2
     # loss = (loss_per_element * is_weights).mean()
@@ -395,8 +396,13 @@ class QLearningAgent:
     model_loss = self.model.train_step(
       om_batch, self)
 
-    if self.global_step % self.args.target_update_every == 0:
-      self.q_tgt.load_state_dict(self.q.state_dict())
+    # if self.global_step % self.args.target_update_every == 0:
+    #   self.q_tgt.load_state_dict(self.q.state_dict())
+
+    with torch.no_grad():
+        for param, target_param in zip(self.q.parameters(), self.q_tgt.parameters()):
+            target_param.data.mul_(1 - self.args.tau_soft)
+            target_param.data.add_(self.args.tau_soft * param.data)
 
     return loss.item(), model_loss
 
@@ -543,8 +549,10 @@ class QLearningAgent:
 
     return {"return": ep_ret, "steps": step + 1}
 
-  def run_test_episode(self, max_steps: Optional[int] = None, render: bool = False) -> Dict[str, float]:
+  def run_test_episode(self, max_steps: Optional[int] = None, render: bool = False, zigzag: bool = False) -> Dict[str, float]:
     self.opponent_agent = SimpleAgent(1)
+    if zigzag:
+      self.opponent_agent = ZigZagAgent(1)
     obs = self.env.reset()
     done = False
     ep_ret = 0.0

@@ -3,7 +3,7 @@ import random
 from collections import deque
 from omg_args import OMGArgs
 
-from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv
+from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv, ZigZagAgent
 from priority_replay_buffer import PrioritizedReplayBuffer
 
 import numpy as np
@@ -330,8 +330,10 @@ class QLearningAgentClassic:
 
     return {"return": ep_ret, "steps": step + 1}
 
-  def run_test_episode(self, max_steps: Optional[int] = None, render: bool = False) -> Dict[str, float]:
+  def run_test_episode(self, max_steps: Optional[int] = None, render: bool = False, zigzag: bool = False) -> Dict[str, float]:
     self.opponent_agent = SimpleAgent(1)
+    if zigzag:
+      self.opponent_agent = ZigZagAgent(1)
     obs = self.env.reset()
     done = False
     ep_ret = 0.0
