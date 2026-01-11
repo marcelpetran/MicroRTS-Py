@@ -542,3 +542,55 @@ class TransformerVAE(nn.Module):
     z = self.reparameterize(mu, logvar)
     reconstructed_x = self.decode(z)
     return reconstructed_x, mu, logvar
+
+class VAE(nn.Module):
+  def __init__(self, args: OMGArgs):
+    super().__init__()
+    self.args = args
+    input_dim = sum(args.state_feature_splits)
+    hidden_dim = args.dim_feedforward
+    latent_dim = args.latent_dim
+
+    # Encoder
+    self.encoder = nn.Sequential(
+        nn.Flatten(),
+        nn.Linear(input_dim, hidden_dim),
+        nn.ReLU(),
+        nn.Linear(hidden_dim, hidden_dim),
+        nn.ReLU(),
+    )
+    self.fc_mu = nn.Linear(hidden_dim, latent_dim)
+    self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
+
+    # Decoder
+    self.decoder_input = nn.Linear(latent_dim, hidden_dim)
+    self.decoder = nn.Sequential(
+        nn.ReLU(),
+        nn.Linear(hidden_dim, hidden_dim),
+        nn.ReLU(),
+        nn.Linear(hidden_dim, input_dim),
+    )
+
+  def encode(self, x):
+    x = x.to(self.args.device)
+    h = self.encoder(x)
+    mu = self.fc_mu(h)
+    logvar = self.fc_logvar(h)
+    return mu, logvar
+
+  def reparameterize(self, mu, logvar):
+    std = torch.exp(0.5 * logvar)
+    eps = torch.randn_like(std)
+    return mu + eps * std
+
+  def decode(self, z):
+    z = z.to(self.args.device)
+    h = self.decoder_input(z)
+    x_recon = self.decoder(h)
+    return x_recon.view(-1, self.args.H, self.args.W, sum(self.args.state_feature_splits))
+
+  def forward(self, x):
+    mu, logvar = self.encode(x)
+    z = self.reparameterize(mu, logvar)
+    reconstructed_x = self.decode(z)
+    return reconstructed_x, mu, logvar
