@@ -162,19 +162,28 @@ for ep in range(args_parsed.episodes):
 
   # run a test episode
   if (ep + 1) % 500 == 0:
-    stats = agent.run_test_episode(max_steps=args.max_steps, render=True)
-    print(
-      f"Test Episode {ep+1}: Return={stats['return']:.2f}, Steps={stats['steps']}")
-    return_list.append(stats['return'])
-    steps_list.append(stats['steps'])
+    avg_ret, avg_steps = [], []
+    stats = agent.run_test_episode(max_steps=args.max_steps, render=True)  
+    avg_ret.append(stats['return'])
+    avg_steps.append(stats['steps'])
+    for i in range(99):
+      st = agent.run_test_episode(max_steps=args.max_steps, render=False)
+      avg_ret.append(st['return'])
+      avg_steps.append(st['steps'])
+    return_list.append(sum(avg_ret)/len(avg_ret))
+    steps_list.append(sum(avg_steps)/len(avg_steps))
     episode_list.append(ep + 1)
+    print(
+      f"Test Episode {ep+1}: Return={stats['return']:.2f} | Avg={return_list[-1]:.2f}, Steps={stats['steps']} | Avg={steps_list[-1]:.1f}")
 
 # Save the trained models
 # torch.save(cvae.state_dict(), f"./models_{args.folder_id}/cvae.pth")
 # Save the Q-network
-# torch.save(agent.q.state_dict(), f"./models_{args.folder_id}/qnet.pth")
-# torch.save(agent.q.state_dict(), "./trained_qnet/qnetclassic.pth")
-# print("Training complete and models saved.")
+torch.save(agent.q.state_dict(), f"./models_{args.folder_id}/qnet.pth")
+# torch.save(agent.q.state_dict(), "./models_{args.folder_id}/qnetclassic.pth")
+print("Training complete and models saved.")
+if args.oracle == True:
+  print(op_model.projector)
 
 # Two graphs: return over episodes on the left and steps over episodes on the right
 plt.figure(figsize=(12, 5))
