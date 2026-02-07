@@ -1,0 +1,36 @@
+\begin{algorithm}
+    \caption{A$^*$}\label{alg:AStar}
+\begin{algorithmic}
+    \Require An initial state $s_0$, \mintinline{scheme}{isGoal}, \mintinline{scheme}{getApplicable}, a heuristic $h$
+    \State $g(s)\gets\infty$ for all states $s$.
+    \Comment{Initialize gscores to infinity.}
+    \State $g(s_0)\gets 0$
+    \Comment{Gscore of $s_0$ is $0$.}
+    \State \mintinline{scheme}{insert}($s_0$, $h(s_0)$, $Open$)
+    \Comment{To the empty $Open$, insert $s_0$ with priority $f(s_0)=h(s_0)$.}
+    \While{not \mintinline{scheme}{isEmpty}($Open$)}
+        \Comment{If there is no state to expand, return failure.}
+        \State $s$ \gets \mintinline{scheme}{pop}($Open$) 
+        \Comment{Get the state $s$ with the least $f(s)=g(s)+h(s)$.}
+        \If{\mintinline{scheme}{isGoal}$(s)$}
+            \State \Return \mintinline{scheme}{getPath}$(s)$
+            \Comment{A solution was found.}
+        \EndIf
+        \ForAll{$a\in$ \mintinline{scheme}{getApplicable}$(s)$}
+            \Comment{Expand $s$.}
+            \State $v\gets g(s)+\cost(a)$
+            \Comment{$v$ is possibly a new gscore of $a(s)$.}
+            \If{$v<g(a(s))$}
+                \Comment{If we found a shorter path to $a(s)$,}
+                \State $g(a(s))\gets v$
+                \Comment{update its gscore and}
+                \State $Parent(a(s))\gets \tuple{s,a}$
+                \Comment{its predecessor.}
+                \State \mintinline{scheme}{insert}($a(s)$, $v+h(a(s))$, $Open$)
+                \Comment{(re)insert $a(s)$ to $Open$ with new priority.}
+            \EndIf
+        \EndFor
+    \EndWhile
+    \State \Return failure
+\end{algorithmic}
+\end{algorithm}
