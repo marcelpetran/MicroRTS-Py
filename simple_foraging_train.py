@@ -182,8 +182,6 @@ for ep in range(args_parsed.episodes):
 torch.save(agent.q.state_dict(), f"./models_{args.folder_id}/qnet.pth")
 # torch.save(agent.q.state_dict(), "./models_{args.folder_id}/qnetclassic.pth")
 print("Training complete and models saved.")
-if args.oracle == True:
-  print(op_model.projector)
 
 # Two graphs: return over episodes on the left and steps over episodes on the right
 plt.figure(figsize=(12, 5))
