@@ -34,8 +34,8 @@ class OpponentModelOracle(nn.Module):
     self.replay = ReplayBuffer(args.capacity)
     self.device = args.device
     self.args = args
-    self.projector = torch.randn(
-      args.latent_dim, device=self.device, requires_grad=False)
+    # self.projector = torch.randn(
+    #   args.latent_dim, device=self.device, requires_grad=False)
 
     # Precompute feature weights for reconstruction loss
     splits = self.args.state_feature_splits
@@ -52,7 +52,7 @@ class OpponentModelOracle(nn.Module):
 
   def forward(self, x: torch.Tensor, history: Dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     B, H, W, _ = x.shape
-    g = torch.zeros((B, self.args.latent_dim), device=self.device)
+    g_map = torch.zeros((B, H, W), device=self.device)
     # opp start is at row 3, col 6
     opp_start = torch.tensor([3, 6], device=self.device).float()
     for b in range(B):
@@ -60,6 +60,7 @@ class OpponentModelOracle(nn.Module):
       opp_idx = (x[b, :, :, 3] == 1).nonzero(as_tuple=False).float()
 
       is_top_food = 0.0
+      target_coords = torch.tensor([0, 0], device=self.device).int()
       # if we have food and opponent is not at start position
       if len(food_indices) > 1 and not torch.all(opp_idx[0] == opp_start):
         # find closest food to opponent
@@ -78,19 +79,23 @@ class OpponentModelOracle(nn.Module):
             # Not ambiguous: Snap to the closest
             target_row = food_indices[min_idx][0]
             is_top_food = 1.0 if target_row < H / 2 else -1.0
+            target_coords = food_indices[min_idx].int()
         target_idx = torch.argmin(dists)
         target_row = food_indices[target_idx][0]
         # target_row is food that is closes to opponent
 
         # If target row is in upper half, it's Top (1.0), else Bottom (-1.0)
         is_top_food = 1.0 if target_row < H / 2 else -1.0
+        target_coords = food_indices[target_idx].int()
       elif len(food_indices) == 1:
         target_row = food_indices[0][0]
         is_top_food = 1.0 if target_row < H / 2 else -1.0
+        target_coords = food_indices[0].int()
 
-      g[b] = is_top_food * self.projector
+      if len(food_indices) > 0:
+        g_map[b, target_coords[0], target_coords[1]] = 1.0
 
-    return g, torch.zeros_like(g)
+    return g_map, torch.zeros_like(g_map)
 
   def eval(self):
     """
