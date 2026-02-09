@@ -43,34 +43,16 @@ class QNet(nn.Module):
     self.state_dim = H * W * F_dim
     self.latent_dim = args.latent_dim
     self.action_dim = args.action_dim
-    hidden = args.qnet_hidden
-    cnn_2d_out = 32
-    goal_hidden = 32
+
     self.flat_dim = 64 * H * W
+    input_channels = F_dim + 1
 
-    # Calculate CNN output size
-    # With padding=1 and stride=1, H and W stay same.
-    self.cnn_out_dim = cnn_2d_out * H * W
-
-    # CNN for Spatial State (H, W, F)
-    # Input: (B, F_dim, H, W) -> Output: (B, 32, H, W)
-    self.cnn_part1 = nn.Sequential(
-            nn.Conv2d(F_dim, 32, kernel_size=3, stride=1, padding=1),
+    self.cnn = nn.Sequential(
+            nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.ReLU(),
-        )
-    
-    self.g_projector = nn.Sequential(
-        nn.Linear(self.latent_dim, goal_hidden),
-        nn.Tanh()
-    )
-
-    # Input channels = 32 (Image) + 32 (Goal) = 64
-    self.cnn_part2 = nn.Sequential(
-            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Flatten()
         )
@@ -97,7 +79,7 @@ class QNet(nn.Module):
       if m.bias is not None:
         nn.init.constant_(m.bias, 0.01)
 
-  def forward(self, batch: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
+  def forward(self, batch: torch.Tensor, g_map: torch.Tensor) -> torch.Tensor:
     """
     Args:
         batch: Game state (B, H, W, F)
@@ -107,25 +89,16 @@ class QNet(nn.Module):
     # Batch shape: (B, H, W, F)
     # Permute to (B, F, H, W) for PyTorch Conv2d
     s = batch.permute(0, 3, 1, 2)
+    g = g_map.unsqueeze(1)
+
     B, _, H, W = s.shape
 
-    # 1. Process Image
-    img_feats = self.cnn_part1(s)  # (B, 32, H, W)
+    x = torch.cat([s, g], dim=1)
+    features = self.cnn(x)
 
-    # 2. Process & Broadcast Subgoal
-    g_feats = self.g_projector(g)       # (B, 32)
-    g_feats = g_feats.unsqueeze(-1).unsqueeze(-1) # (B, 32, 1, 1)
-    g_tiled = g_feats.repeat(1, 1, H, W)   # (B, 32, H, W)
-
-    # 3. Concatenate (Spatial Fusion)
-    combined = torch.cat([img_feats, g_tiled], dim=1) # (B, 64, H, W)
-
-    # 4. Finish Processing
-    final_feats = self.cnn_part2(combined) # (B, 64*H*W)
-
-    # 5. Dueling Heads
-    adv = self.advantage_head(final_feats)
-    val = self.value_head(final_feats)
+    # Dueling Heads
+    adv = self.advantage_head(features)
+    val = self.value_head(features)
     q_vals = val + adv - adv.mean(dim=1, keepdim=True)
 
     return q_vals
@@ -356,7 +329,7 @@ class QLearningAgent:
     eps_gmix = self._gmix_eps()
     eta = torch.rand(B, device=self.device)
     use_ghat = (eta > eps_gmix).float().unsqueeze(-1)
-    g_mix = use_ghat * ghat_mu + (1 - use_ghat) * gbar_mu         # (B,g)
+    # g_mix = use_ghat * ghat_mu + (1 - use_ghat) * gbar_mu         # (B,g)
 
     if self.args.oracle == True:
       # In oracle mode, always use g_hat, selector gives zeroed tensor
