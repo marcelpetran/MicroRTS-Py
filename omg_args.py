@@ -6,9 +6,9 @@ from typing import Tuple
 class OMGArgs:
   device: str = "cpu"  # "cpu" or "cuda"
   gamma: float = 0.955
-  lr: float = 3e-4
+  lr: float = 5e-4
   batch_size: int = 128
-  capacity: int = 50_000
+  capacity: int = 150_000
   min_replay: int = 1_000
   train_every: int = 4
   target_update_every: int = 1_000
@@ -33,7 +33,7 @@ class OMGArgs:
   selector_mode: str = "conservative"
   selector_tau_start: float = 2.0
   selector_tau_end: float = 5e-4
-  selector_tau_decay_steps: int = 80_000
+  selector_tau_decay_steps: int = 50_000
   train_vae: bool = True
   vae_lr: float = 1e-4
   cvae_lr: float = 1e-4
