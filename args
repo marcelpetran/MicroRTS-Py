@@ -2,13 +2,13 @@
 --vae_episodes
 1_000
 --episodes
-14_000
+12_000
 --env_size
 7
 --max_steps
 30
 --batch_size
-64
+128
 --qnet_dim
 256
 --train_every
@@ -36,4 +36,4 @@
 --selector_tau_end
 0.0005
 --horizon
-3
+1
