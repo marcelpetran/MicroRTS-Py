@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import math
 import numpy as np
 from omg_args import OMGArgs
+from typing import Dict, List, Optional
 
 
 class PositionalEncoding(nn.Module):
@@ -543,6 +544,7 @@ class TransformerVAE(nn.Module):
     reconstructed_x = self.decode(z)
     return reconstructed_x, mu, logvar
 
+
 class VAE(nn.Module):
   def __init__(self, args: OMGArgs):
     super().__init__()
@@ -594,3 +596,117 @@ class VAE(nn.Module):
     z = self.reparameterize(mu, logvar)
     reconstructed_x = self.decode(z)
     return reconstructed_x, mu, logvar
+
+
+class SpatialOpponentModel(nn.Module):
+  def __init__(self, args: OMGArgs):
+    super().__init__()
+    self.args = args
+    H, W, F_dim = args.state_shape
+
+    # 1. Feature Extractor to embed each (H, W, F) state into a d_model vector
+    # Projects (H, W, F) -> d_model
+    self.feature_extractor = nn.Sequential(
+        nn.Conv2d(F_dim, 16, kernel_size=3, padding=1),
+        nn.ReLU(),
+        nn.Flatten(),
+        nn.Linear(16 * H * W, args.d_model)
+    )
+
+    self.pos_encoder = PositionalEncoding(
+      args.d_model, max_len=args.max_history_length)
+
+    # Transformer Encoder
+    encoder_layer = nn.TransformerEncoderLayer(
+        d_model=args.d_model,
+        nhead=args.nhead,
+        dim_feedforward=args.dim_feedforward,
+        dropout=args.dropout,
+        batch_first=True
+    )
+    self.transformer = nn.TransformerEncoder(
+      encoder_layer, num_layers=args.num_encoder_layers)
+
+    # Spatial Head to predict heatmap of opponent location: d_model -> H*W
+    self.spatial_head = nn.Sequential(
+        nn.Linear(args.d_model, 128),
+        nn.ReLU(),
+        nn.Linear(128, H * W)
+    )
+
+  def forward(self, history: Dict[str, torch.Tensor]) -> torch.Tensor:
+    states = history['states']  # (B, T, H, W, F)
+    B, T, H, W, F_dim = states.shape
+
+    # Embed the States
+    # (B*T, F, H, W)
+    x = states.view(B * T, H, W, F_dim).permute(0, 3, 1, 2)
+    feats = self.feature_extractor(x)  # (B*T, d_model)
+
+    # Reshape to (B, T, d_model)
+    seq_feats = feats.view(B, T, -1)
+
+    # Add Positional Encoding
+    seq_feats = seq_feats * np.sqrt(self.args.d_model)
+    seq_feats = self.pos_encoder(seq_feats)
+
+    # C. Pass through Transformer
+    # We need a mask for padding if history is variable length!
+    # Assuming history['mask'] exists from your collate_fn
+    # mask shape: (B, T), True where valid, False where padding
+    # Transformer expects: key_padding_mask (B, T) where True is PADDING (ignore)
+    # Your collate usually gives True for Valid. Check this!
+    src_key_padding_mask = ~history['mask'] if 'mask' in history else None
+
+    memory = self.transformer(
+      seq_feats, src_key_padding_mask=src_key_padding_mask)
+
+    # D. Pooling / Summary
+    # If using padding, taking -1 is risky (it might be padding).
+    # Better to take the embedding at the index of the last *valid* token.
+    # For simplicity (assuming batch_first=True):
+    if 'mask' in history:
+      # Find last True index for each batch
+      last_indices = history['mask'].sum(dim=1) - 1  # (B,)
+      # Gather: memory[b, last_indices[b], :]
+      final_memory = memory[torch.arange(B), last_indices.long(), :]
+    else:
+      final_memory = memory[:, -1, :]
+
+    # E. Predict Map
+    logits = self.spatial_head(final_memory)  # (B, H*W)
+    heatmap_logits = logits.view(B, H, W)
+
+    # Standardize output for Agent (add channel dim if needed by QNet)
+    # (B, H, W) is fine if your QNet expects it that way.
+
+    return heatmap_logits  # Return logits for Loss, softmax for Agent
+
+  def train_step(self, batch, agent):
+    # 1. Get Prediction
+    pred_heatmap = self.forward(batch['history'])  # (B, H, W)
+
+    # 2. Get Target (Ground Truth Future Location)
+    # We need to create a mask from the future states in the batch
+    # Assuming batch['future_states'] contains the actual path
+    # You can select the LAST state in the horizon as the target
+    future_states = batch['future_states']  # (B, Horizon, H, W, F)
+    target_state = future_states[:, -1]    # Take the state at H
+
+    # Extract food channel (index 1) or Agent 2 channel (index 3) from target?
+    # Since we want to predict WHERE the opponent ends up:
+    target_mask = target_state[:, :, :, 3]  # Channel 3 is Opponent
+
+    # 3. Compute Loss (Cross Entropy)
+    # Flatten for loss: Pred (B, H*W), Target (B, H*W) indices
+    target_indices = target_mask.view(
+      pred_heatmap.shape[0], -1).argmax(dim=1)
+    loss = F.cross_entropy(pred_heatmap.view(
+      pred_heatmap.shape[0], -1), target_indices)
+
+    # Optimization
+    self.optimizer.zero_grad()
+    loss.backward()
+    self.optimizer.step()
+
+    return loss.item()
