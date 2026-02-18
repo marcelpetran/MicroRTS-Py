@@ -33,7 +33,7 @@ class OMGArgs:
   selector_mode: str = "conservative"
   selector_tau_start: float = 2.0
   selector_tau_end: float = 5e-4
-  selector_tau_decay_steps: int = 50_000
+  selector_tau_decay_steps: int = 25_000
   train_vae: bool = True
   vae_lr: float = 1e-4
   cvae_lr: float = 1e-4
