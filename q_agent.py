@@ -5,7 +5,6 @@ from collections import deque
 from omg_args import OMGArgs
 
 from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv, ZigZagAgent
-from priority_replay_buffer import PrioritizedReplayBuffer
 
 import numpy as np
 import torch
@@ -48,27 +47,27 @@ class QNet(nn.Module):
     input_channels = F_dim + 1
 
     self.cnn = nn.Sequential(
-            nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Flatten()
-        )
-    
+        nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
+        nn.ReLU(),
+        nn.Conv2d(32, 64, kernel_size=3, padding=1),
+        nn.ReLU(),
+        nn.Conv2d(64, 64, kernel_size=3, padding=1),
+        nn.ReLU(),
+        nn.Flatten()
+    )
+
     # Heads (Dueling)
     self.advantage_head = nn.Sequential(
-            nn.Linear(self.flat_dim, args.qnet_hidden),
-            nn.ReLU(),
-            nn.Linear(args.qnet_hidden, self.action_dim)
-        )
-    
+        nn.Linear(self.flat_dim, args.qnet_hidden),
+        nn.ReLU(),
+        nn.Linear(args.qnet_hidden, self.action_dim)
+    )
+
     self.value_head = nn.Sequential(
-            nn.Linear(self.flat_dim, args.qnet_hidden),
-            nn.ReLU(),
-            nn.Linear(args.qnet_hidden, 1)
-        )
+        nn.Linear(self.flat_dim, args.qnet_hidden),
+        nn.ReLU(),
+        nn.Linear(args.qnet_hidden, 1)
+    )
 
     # Initialize weights to small values to prevent initial explosion
     self.apply(self._init_weights)
@@ -83,15 +82,14 @@ class QNet(nn.Module):
     """
     Args:
         batch: Game state (B, H, W, F)
-        g: Subgoal vector (B, latent_dim)
+        g_map: Heatmap of inferred opponent subgoal (B, H, W)
         return_aux: Whether to return auxiliary prediction (used during training)
     """
     # Batch shape: (B, H, W, F)
     # Permute to (B, F, H, W) for PyTorch Conv2d
     s = batch.permute(0, 3, 1, 2)
+    # (B, 1, H, W) - broadcast latent g across spatial dimensions
     g = g_map.unsqueeze(1)
-
-    B, _, H, W = s.shape
 
     x = torch.cat([s, g], dim=1)
     features = self.cnn(x)
@@ -160,11 +158,9 @@ class QLearningAgent:
     self.q_tgt = QNet(args).to(self.device)
     self.q_tgt.load_state_dict(self.q.state_dict())
     self.opt = torch.optim.Adam(self.q.parameters(), lr=self.args.lr)
-    self.scheduler = torch.optim.lr_scheduler.StepLR(self.opt, step_size=5000, gamma=0.5)
 
     # Replay
     self.replay = ReplayBuffer(self.args.capacity)
-    # self.replay = PrioritizedReplayBuffer(self.args.capacity)
 
     # Schedules
     self.global_step = 0
@@ -319,8 +315,6 @@ class QLearningAgent:
     # Prepare g_hat (from stored inference) and g_bar (from selector over future window)
     ghat_mu = torch.stack([b["infer_mu"]
                           for b in batch], dim=0).to(self.device)  # (B,g)
-    opp_actions = torch.tensor([b["opp_action"] for b in batch], dtype=torch.long,
-                     device=self.device)                  # (B,)
     with torch.no_grad():
       gbar_mu, _ = self._select_gbar(
         s, future_states)               # (B,g)
@@ -339,15 +333,14 @@ class QLearningAgent:
 
     q_sa = self.q(s, g_mix).gather(1, a.unsqueeze(1)).squeeze(1)  # (B,)
     with torch.no_grad():
+      # TODO: pass history to get correct g_bar for next state
       g_next, _ = self.model(sp, {})
       q_val = self.q(sp, g_next)
       noise = torch.rand_like(q_val) * 1e-6
       best_actions = (q_val + noise).argmax(dim=1, keepdim=True)
       q_next = self.q_tgt(sp, g_next).gather(1, best_actions).squeeze(1)
 
-      n_step_gamma = self.args.gamma ** self.args.horizon_H
-      target = r + (1.0 - done) * n_step_gamma * q_next
-      # target = r + (1.0 - done) * self.args.gamma * q_next
+      target = r + (1.0 - done) * self.args.gamma * q_next
       target = torch.clamp(target, min=-5.0, max=5.0)
     return q_sa, target
 
@@ -359,35 +352,17 @@ class QLearningAgent:
       return (None, None)  # only train every few steps
 
     batch_list = self.replay.sample(self.args.batch_size)
-    # batch_list, is_weights, tree_indices = self.replay.sample(
-    #   self.args.batch_size)
-
-    # is_weights = torch.tensor(
-    #   is_weights, dtype=torch.float32, device=self.args.device)
-    # is_weights /= is_weights.max() # normalize for stability
 
     # --- 1. Update the Q-Network ---
     q_sa, target = self._compute_targets(batch_list)
-    # with torch.no_grad():
-    #   td_errors = (q_sa - target).detach().cpu().numpy()
-    # MSE loss
-    # loss_per_element = (q_sa - target) ** 2
-    # loss = (loss_per_element * is_weights).mean()
 
     # Huber loss
     loss = F.smooth_l1_loss(q_sa, target, reduction='mean')
-    # loss_per_element = F.smooth_l1_loss(q_sa, target, reduction='none')
-    # loss = (loss_per_element * is_weights).mean()
-
-    # Auxiliary cross-entropy loss for opponent action prediction
 
     self.opt.zero_grad(set_to_none=True)
     loss.backward()
     nn.utils.clip_grad_norm_(self.q.parameters(), 1.0)
     self.opt.step()
-    self.scheduler.step()
-
-    # self.replay.update_priorities(tree_indices, td_errors)
 
     # --- 2. Update the Opponent Model ---
     # Construct a proper batch dictionary for the OpponentModel
@@ -403,13 +378,10 @@ class QLearningAgent:
     model_loss = self.model.train_step(
       om_batch, self)
 
-    # if self.global_step % self.args.target_update_every == 0:
-    #   self.q_tgt.load_state_dict(self.q.state_dict())
-
     with torch.no_grad():
-        for param, target_param in zip(self.q.parameters(), self.q_tgt.parameters()):
-            target_param.data.mul_(1 - self.args.tau_soft)
-            target_param.data.add_(self.args.tau_soft * param.data)
+      for param, target_param in zip(self.q.parameters(), self.q_tgt.parameters()):
+        target_param.data.mul_(1 - self.args.tau_soft)
+        target_param.data.add_(self.args.tau_soft * param.data)
 
     return loss.item(), model_loss
 
@@ -471,12 +443,8 @@ class QLearningAgent:
     Gathers a trajectory, stores future slices for subgoal selection,
     and trains the Q-network and OpponentModel.
     """
-    # self.opponent_agent = SimpleAgent(1)
-    # if random.random() < self._eps():
-    #   self.opponent_agent = RandomAgent(1)
-
     self.opponent_agent = SimpleAgent(1)
-    if np.random.rand() < 0.2:
+    if np.random.rand() < 0.3:
       obs = self.env.reset_random_spawn(0)
     else:
       obs = self.env.reset()
@@ -519,17 +487,6 @@ class QLearningAgent:
       if len(step_buffer) == self.args.horizon_H + 1:
         transition_to_store = step_buffer[0]
 
-        # Sum rewards from index 0 to N-1 inside the buffer
-        # R = r_0 + g*r_1 + g^2*r_2 ...
-        n_step_reward = 0.0
-        for i in range(self.args.horizon_H):
-           n_step_reward += step_buffer[i]["reward"] * (self.args.gamma ** i)
-        transition_to_store["reward"] = n_step_reward
-
-        transition_to_store["next_state"] = step_buffer[self.args.horizon_H]["state"]
-        any_done = any([step_buffer[i]["done"] for i in range(self.args.horizon_H)])
-        transition_to_store["done"] = any_done
-
         future_states = [s["state"] for s in list(step_buffer)[1:]]
         transition_to_store["future_states"] = future_states
         self.replay.push(transition_to_store)
@@ -537,23 +494,6 @@ class QLearningAgent:
         # If episode ends, fill the future window with remaining states
         while step_buffer:
           transition_to_store = step_buffer.popleft()
-          remaining_steps = len(step_buffer) + 1 # +1 because we just popped the current one
-          current_n = min(self.args.horizon_H, remaining_steps)
-          temp_sequence = [transition_to_store] + list(step_buffer)
-
-          n_step_reward = 0.0
-          for i in range(current_n):
-             n_step_reward += temp_sequence[i]["reward"] * (self.args.gamma ** i)
-          
-          transition_to_store["reward"] = n_step_reward
-          
-          # Next state logic for terminal sequence
-          if current_n < len(temp_sequence):
-             transition_to_store["next_state"] = temp_sequence[current_n]["state"]
-          else:
-             # If we run out of steps, next_state is the terminal state of the last step
-             transition_to_store["next_state"] = temp_sequence[-1]["next_state"]
-
           future_states = [s["state"] for s in list(step_buffer)]
 
           pad_state = transition_to_store["state"]
@@ -620,21 +560,6 @@ class QLearningAgent:
 
       ep_ret += reward[0]
       obs = next_obs
-
-      # if render and not done and (step + 1) % self.args.visualise_every_n_step == 0:
-      # if self.args.oracle == False:
-      #   print("Generating subgoal visualizations...")
-      #   with torch.no_grad():
-      #     self.model.inference_model.eval()
-      #     recon_logits, _, _ = self.model.inference_model(
-      #         torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device),
-      #         current_history
-      #     )
-      # self.model.visualize_subgoal(ghat_mu.unsqueeze(0), f"./diagrams/subgoal_onehot_step{self.global_step + step}.png")
-      # self.model.visualize_selected_subgoal(
-      #   g_bar, obs[0], f"./diagrams_{self.args.folder_id}/selected_subgoal_step{self.global_step + step}.png")
-      # self.model.visualize_subgoal_logits(
-      #   obs[0], recon_logits, f"./diagrams_{self.args.folder_id}/subgoal_logits_step{self.global_step + step}.png")
 
       if done:
         break
