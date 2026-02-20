@@ -59,7 +59,6 @@ class OpponentModelOracle(nn.Module):
       food_indices = (x[b, :, :, 1] == 1).nonzero(as_tuple=False)
       opp_idx = (x[b, :, :, 3] == 1).nonzero(as_tuple=False).float()
 
-      is_top_food = 0.0
       target_coords = torch.tensor([0, 0], device=self.device).int()
       # if we have food and opponent is not at start position
       if len(food_indices) > 1 and not torch.all(opp_idx[0] == opp_start):
@@ -74,22 +73,14 @@ class OpponentModelOracle(nn.Module):
 
           # If the difference is small (e.g., < 0.1), it is ambiguous -> Output 0.0
           if diff < 0.1:
-            is_top_food = 0.0
+            target_coords = torch.tensor([0, 0], device=self.device).int()
           else:
             # Not ambiguous: Snap to the closest
-            target_row = food_indices[min_idx][0]
-            is_top_food = 1.0 if target_row < H / 2 else -1.0
             target_coords = food_indices[min_idx].int()
         target_idx = torch.argmin(dists)
-        target_row = food_indices[target_idx][0]
-        # target_row is food that is closes to opponent
 
-        # If target row is in upper half, it's Top (1.0), else Bottom (-1.0)
-        is_top_food = 1.0 if target_row < H / 2 else -1.0
         target_coords = food_indices[target_idx].int()
       elif len(food_indices) == 1:
-        target_row = food_indices[0][0]
-        is_top_food = 1.0 if target_row < H / 2 else -1.0
         target_coords = food_indices[0].int()
 
       if len(food_indices) > 0:
@@ -318,12 +309,6 @@ class OpponentModelOracle(nn.Module):
 
     loss_collector = np.array(loss_collector)
     epoch_collector = np.array(epoch_collector)
-
-    # plt.plot(epoch_collector, loss_collector)
-    # plt.xlabel('Iteration')
-    # plt.ylabel('Loss')
-    # plt.title('Training Loss over Time')
-    # plt.show()
 
   def loss_function(
           self, reconstructed_x, x, cvae_mu, cvae_log_var,
