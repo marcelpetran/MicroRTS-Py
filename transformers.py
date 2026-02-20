@@ -253,12 +253,6 @@ class TransformerCVAE(nn.Module):
     self.transformer_decoder = nn.TransformerDecoder(
         decoder_layer, args.num_decoder_layers
     )
-    # unconditioned_decoder_layer = nn.TransformerEncoderLayer(
-    #     args.d_model, args.nhead, args.dim_feedforward, batch_first=True
-    # )
-    # self.unconditioned_decoder = nn.TransformerEncoder(
-    #     unconditioned_decoder_layer, args.num_decoder_layers
-    # )
 
     # --- Output Projection ---
     self.output_projectors = nn.ModuleList(
@@ -408,7 +402,6 @@ class TransformerCVAE(nn.Module):
       memory=memory_seq,
       memory_key_padding_mask=~memory_mask
     )
-    # decoder_output = self.unconditioned_decoder(tgt)
 
     reconstructed_features = [
         proj(decoder_output) for proj in self.output_projectors
@@ -544,60 +537,6 @@ class TransformerVAE(nn.Module):
     reconstructed_x = self.decode(z)
     return reconstructed_x, mu, logvar
 
-
-class VAE(nn.Module):
-  def __init__(self, args: OMGArgs):
-    super().__init__()
-    self.args = args
-    input_dim = sum(args.state_feature_splits)
-    hidden_dim = args.dim_feedforward
-    latent_dim = args.latent_dim
-
-    # Encoder
-    self.encoder = nn.Sequential(
-        nn.Flatten(),
-        nn.Linear(input_dim, hidden_dim),
-        nn.ReLU(),
-        nn.Linear(hidden_dim, hidden_dim),
-        nn.ReLU(),
-    )
-    self.fc_mu = nn.Linear(hidden_dim, latent_dim)
-    self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
-
-    # Decoder
-    self.decoder_input = nn.Linear(latent_dim, hidden_dim)
-    self.decoder = nn.Sequential(
-        nn.ReLU(),
-        nn.Linear(hidden_dim, hidden_dim),
-        nn.ReLU(),
-        nn.Linear(hidden_dim, input_dim),
-    )
-
-  def encode(self, x):
-    x = x.to(self.args.device)
-    h = self.encoder(x)
-    mu = self.fc_mu(h)
-    logvar = self.fc_logvar(h)
-    return mu, logvar
-
-  def reparameterize(self, mu, logvar):
-    std = torch.exp(0.5 * logvar)
-    eps = torch.randn_like(std)
-    return mu + eps * std
-
-  def decode(self, z):
-    z = z.to(self.args.device)
-    h = self.decoder_input(z)
-    x_recon = self.decoder(h)
-    return x_recon.view(-1, self.args.H, self.args.W, sum(self.args.state_feature_splits))
-
-  def forward(self, x):
-    mu, logvar = self.encode(x)
-    z = self.reparameterize(mu, logvar)
-    reconstructed_x = self.decode(z)
-    return reconstructed_x, mu, logvar
-
-
 class SpatialOpponentModel(nn.Module):
   def __init__(self, args: OMGArgs):
     super().__init__()
@@ -691,6 +630,7 @@ class SpatialOpponentModel(nn.Module):
     # Assuming batch['future_states'] contains the actual path
     # You can select the LAST state in the horizon as the target
     future_states = batch['future_states']  # (B, Horizon, H, W, F)
+    # TODO: Label all future states with true opponent subgoal
     target_state = future_states[:, -1]    # Take the state at H
 
     # Extract food channel (index 1) or Agent 2 channel (index 3) from target?
