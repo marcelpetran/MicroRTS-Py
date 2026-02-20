@@ -34,6 +34,6 @@
 --selector_tau_start
 2.0
 --selector_tau_end
-0.0005
+0.01
 --horizon
-1
+6
