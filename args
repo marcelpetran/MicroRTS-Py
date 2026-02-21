@@ -1,6 +1,4 @@
 --oracle
---vae_episodes
-1_000
 --episodes
 12_000
 --env_size
@@ -29,11 +27,9 @@
 256
 --dropout
 0.1
---vae_beta
-0.1
---selector_tau_start
+--tau_start
 2.0
---selector_tau_end
+--tau_end
 0.01
 --horizon
 6
