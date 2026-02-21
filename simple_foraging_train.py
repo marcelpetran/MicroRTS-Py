@@ -1,6 +1,6 @@
 from simple_foraging_env import SimpleForagingEnv
-from opponent_model import OpponentModel, SubGoalSelector
-from opponent_model_oracle import OpponentModelOracle, SubGoalSelectorOracle
+from opponent_model import OpponentModel
+from opponent_model_oracle import OpponentModelOracle
 from q_agent import QLearningAgent, ReplayBuffer
 from q_agent_classic import QLearningAgentClassic
 from omg_args import OMGArgs
@@ -11,20 +11,12 @@ import argparse
 import os
 
 parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
-parser.add_argument('--train_vae', action='store_true',
-                    default=False, help='Whether to pre-train the VAE')
-parser.add_argument('--visualize_vae', action='store_true',
-                    default=False, help='Visualize VAE reconstructions logits')
-parser.add_argument('--vae_path', type=str, default='./models_0/vae.pth',
-                    help='Path to pre-trained VAE weights')
 parser.add_argument('--oracle', action='store_true', default=False,
                     help='Use oracle opponent model (ground-truth future states)')
 parser.add_argument('--classic', action='store_true', default=False,
                     help='Use classic Q-learning agent without opponent modeling')
 parser.add_argument('--episodes', type=int, default=50_000,
                     help='Number of training episodes')
-parser.add_argument('--vae_episodes', type=int, default=30_000,
-                    help='Number of episodes for VAE pre-training')
 parser.add_argument('--env_size', type=int, default=11,
                     help='Grid size for SimpleForagingEnv')
 parser.add_argument('--max_steps', type=int, default=50,
@@ -46,23 +38,17 @@ parser.add_argument('--num_decoder_layers', type=int,
 parser.add_argument('--dim_feedforward', type=int,
                     default=1024, help='Dimension of feedforward network')
 parser.add_argument('--dropout', type=float, default=0.12, help='Dropout rate')
-parser.add_argument('--vae_beta', type=float, default=0.1,
-                    help='Beta for KL loss in VAE')
-parser.add_argument('--beta_start', type=float, default=0.0,
-                    help='Starting value of beta for KL loss in CVAE')
-parser.add_argument('--beta_end', type=float, default=2.0,
-                    help='Last value of beta for KL loss in CVAE')
-parser.add_argument('--selector_tau_start', type=float, default=2.0,
-                    help='Starting temperature value in selector module, using Boltzmann distribution')
-parser.add_argument('--selector_tau_end', type=float, default=0.1,
-                    help='Last temperature value in selector module, using Boltzmann distribution')
+parser.add_argument('--tau_start', type=float, default=2.0,
+                    help='Starting temperature value, using Boltzmann distribution')
+parser.add_argument('--tau_end', type=float, default=0.1,
+                    help='Last temperature value, using Boltzmann distribution')
 parser.add_argument('--horizon', type=int, default=3,
-                    help='Future window H for opponent modeling (Selector module)')
+                    help='Future window H for opponent modeling')
 parser.add_argument('--train_every', type=int, default=4,
                     help='Train every N steps')
 parser.add_argument('--target_update_every', type=int,
                     default=1_000, help='Target network update frequency')
-parser.add_argument('--replay_capacity', type=int, default=1_000,
+parser.add_argument('--replay_capacity', type=int, default=150_000,
                     help='Replay buffer capacity')
 parser.add_argument('--seed', type=int, default=0,
                     help='Random seed for reproducibility')
@@ -97,13 +83,8 @@ args = OMGArgs(
     target_update_every=args_parsed.target_update_every,
     visualise_every_n_step=3,
     max_steps=args_parsed.max_steps,
-    selector_mode="conservative",
-    vae_beta=args_parsed.vae_beta,
-    beta_start=args_parsed.beta_start,
-    beta_end=args_parsed.beta_end,
-    selector_tau_start=args_parsed.selector_tau_start,
-    selector_tau_end=args_parsed.selector_tau_end,
-    train_vae=args_parsed.train_vae,
+    tau_start=args_parsed.au_start,
+    tau_end=args_parsed.tau_end,
     state_shape=obs_sample[0].shape,
     H=H, W=W,
     state_feature_splits=(F_dim,),
@@ -117,32 +98,10 @@ args = OMGArgs(
     dropout=args_parsed.dropout,
 )
 if not args_parsed.classic:
-  # VAE (Teacher)
-  vae = t.TransformerVAE(args).to(device)
-
-  # CVAE (Student)
-  cvae = t.TransformerCVAE(args).to(device)
-  if args.oracle == False:
-    selector = SubGoalSelector(args)
-    op_model = OpponentModel(
-      cvae, vae, selector, args=args)
+  if not args_parsed.oracle:
+    op_model = OpponentModel(args=args)
   else:
-    selector = SubGoalSelectorOracle(args)
-    op_model = OpponentModelOracle(
-      cvae, vae, selector, args=args)
-
-  # --- Pre-train the VAE ---
-  if args.train_vae:
-    print("Pre-training VAE...")
-
-    op_model.train_vae(env, num_epochs=args_parsed.vae_episodes,
-                       save_every_n_epochs=args_parsed.vae_episodes, logg=1_000)
-    print("VAE pre-training complete.")
-  else:
-    assert os.path.exists(args_parsed.vae_path), "VAE path does not exist!"
-    # op_model.prior_model.load_state_dict(torch.load(
-    #   args_parsed.vae_path, map_location=device))
-    print("Loaded pre-trained VAE.")
+    op_model = OpponentModelOracle(args=args)
 
   agent = QLearningAgent(env, op_model, args=args)
   if args_parsed.visualize_vae:
