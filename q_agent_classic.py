@@ -193,8 +193,8 @@ class QLearningAgentClassic:
   # ------------- epsilon schedules --------------
 
   def _tau(self) -> float:
-    t = min(self.global_step, self.args.selector_tau_decay_steps)
-    return self.args.selector_tau_end + (self.args.selector_tau_start - self.args.selector_tau_end) * (1 - t / self.args.selector_tau_decay_steps)
+    t = min(self.global_step, self.args.tau_decay_steps)
+    return self.args.tau_end + (self.args.tau_start - self.args.tau_end) * (1 - t / self.args.tau_decay_steps)
 
   def _eps(self) -> float:
     t = min(self.global_step, self.args.eps_decay_steps)

@@ -124,15 +124,10 @@ class ReplayBuffer:
 class QLearningAgent:
   """
   Q(s, g, a) OMG agent that:
-    • infers g_hat from history via OpponentModel.inference_model (CVAE),
-    • gets g_bar from OpponentModel.subgoal_selector over future H states (VAE + value heuristic),
-    • mixes them with Eq.(8), then learns with Eq.(4).
+    • 
 
   Expected OpponentModel API:
-    - inference_model(...): forward(x=current_state[None], history=...) -> (recon, mu, logvar)
-    - subgoal_selector.select(vae, eval_policy, s_t, future_states, tau) -> (mu, logvar)  # uses Eq.(6)/(7)
-    - train_step(batch_dict, eval_policy) -> float  # trains the CVAE part of the OpponentModel
-    - prior_model: pre-trained TransformerVAE (VAE encoder returns (mu, logvar))
+    - 
   """
 
   def __init__(self, env, opponent_model, args: OMGArgs = OMGArgs()):
@@ -176,33 +171,21 @@ class QLearningAgent:
     return self.args.gmix_eps_end + (self.args.gmix_eps_start - self.args.gmix_eps_end) * (1 - t / self.args.gmix_eps_decay_steps)
 
   def _tau(self) -> float:
-    t = min(self.global_step, self.args.selector_tau_decay_steps)
-    return self.args.selector_tau_end + (self.args.selector_tau_start - self.args.selector_tau_end) * (1 - t / self.args.selector_tau_decay_steps)
+    t = min(self.global_step, self.args.tau_decay_steps)
+    return self.args.tau_end + (self.args.tau_start - self.args.tau_end) * (1 - t / self.args.tau_decay_steps)
 
   def _beta(self) -> float:
     t = min(self.global_step, self.args.beta_decay_steps)
     return self.args.beta_end + (self.args.beta_start - self.args.beta_end) * (1 - t / self.args.beta_decay_steps)
-  # ------------- policy API for selector -------------
 
   @torch.no_grad()
   def value(self, s_t: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
     """
     s_t: (1, H, W, F), g: (1, latent_dim) -> Q(1, A)
-    used by subgoal selector to compute V(s,g) = mean_a Q(s,g,a)
+    API to compute V(s,g) = mean_a Q(s,g,a)
     """
     self.q.eval()
     return self.q(s_t, g)  # (1, A)
-
-  # ------------- subgoal inference utilities -------------
-
-  @torch.no_grad()
-  def _select_gbar(self, x: torch.tensor, future_states: torch.tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Uses SubGoalSelector over H future states. Returns (mu, logvar) for g_bar
-    """
-    mu, logvar = self.model.subgoal_selector.select(
-      self.model.prior_model, self, x, future_states, self._tau())
-    return mu, logvar
 
   # ------------- visualization utility -------------
   @torch.no_grad()
@@ -312,7 +295,7 @@ class QLearningAgent:
     future_states = torch.stack([torch.stack([torch.from_numpy(fs).float(
     ) for fs in b["future_states"]]) for b in batch], dim=0).to(self.device)  # (B,K,H,W,F)
 
-    # Prepare g_hat (from stored inference) and g_bar (from selector over future window)
+    # Prepare g_hat (from stored inference) and g_bar
     ghat_mu = torch.stack([b["infer_mu"]
                           for b in batch], dim=0).to(self.device)  # (B,g)
     with torch.no_grad():
@@ -326,7 +309,6 @@ class QLearningAgent:
     # g_mix = use_ghat * ghat_mu + (1 - use_ghat) * gbar_mu         # (B,g)
 
     if self.args.oracle == True:
-      # In oracle mode, always use g_hat, selector gives zeroed tensor
       g_mix = ghat_mu
 
     # Q(s,g,a) and target r + gamma * max_{a'} Q(s',g,a')  (same g)
