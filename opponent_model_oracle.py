@@ -10,45 +10,14 @@ from simple_foraging_env import RandomAgent, SimpleAgent
 from q_agent import ReplayBuffer
 from omg_args import OMGArgs
 
-
-class SubGoalSelectorOracle:
-  def __init__(self, args):
-    self.args = args
-
-  def select(self, vae, eval_policy, s_t_batch: torch.Tensor, future_states: torch.Tensor, tau: float):
-    B, _, _, _ = s_t_batch.shape
-    latent_dim = self.args.latent_dim
-    subgoal = torch.zeros((B, latent_dim), device=s_t_batch.device)
-    vae_log_var = torch.zeros((B, latent_dim), device=s_t_batch.device)
-    return subgoal, vae_log_var
-
-
 class OpponentModelOracle(nn.Module):
-  def __init__(self, cvae: t.TransformerCVAE, vae: t.TransformerVAE, selector: SubGoalSelectorOracle, args: OMGArgs = OMGArgs()):
+  def __init__(self, args: OMGArgs = OMGArgs()):
     super(OpponentModelOracle, self).__init__()
-    self.inference_model = cvae
-    self.prior_model = vae  # pre-trained VAE
-    self.subgoal_selector = selector
-    self.optimizer = torch.optim.Adam(cvae.parameters(), lr=args.cvae_lr)
-    self.vae_optimizer = torch.optim.Adam(vae.parameters(), lr=args.vae_lr)
+    self.inference_model = None #TODO: SpatialOpponentModel
+    self.optimizer = torch.optim.Adam(self.inference_model.parameters(), lr=args.lr)
     self.replay = ReplayBuffer(args.capacity)
     self.device = args.device
     self.args = args
-    # self.projector = torch.randn(
-    #   args.latent_dim, device=self.device, requires_grad=False)
-
-    # Precompute feature weights for reconstruction loss
-    splits = self.args.state_feature_splits
-    weights = []
-    for s in splits:
-      weights.append(torch.full((s,), 1.0 / s))
-    w = torch.cat(weights)
-    w = w / len(splits)
-    # Weights for each one-hot feature
-    self.register_buffer('feature_split_weights', w.to(self.device))
-    # Weights for each feature type
-    self.register_buffer('feature_weights', torch.tensor(
-      [1.0, 20.0, 20.0, 20.0], device=self.device))
 
   def forward(self, x: torch.Tensor, history: Dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     B, H, W, _ = x.shape
@@ -196,124 +165,6 @@ class OpponentModelOracle(nn.Module):
     weight_mask[..., 3][agent2_mask] = self.feature_weights[3]
 
     return weight_mask
-
-  def vae_loss(self, reconstructed_x, x, mu, logvar):
-    """
-    Loss function for VAE combining reconstruction loss and KL divergence.
-    Args:
-        reconstructed_x (Tensor): Reconstructed state of shape (B, H, W, F)
-        x (Tensor): Original input state of shape (B, H, W, F)
-        mu (Tensor): Mean of the latent distribution (B, latent_dim)
-        logvar (Tensor): Log-variance of the latent distribution (B, latent_dim)
-    Returns:
-        Tensor: Computed VAE loss.
-    """
-    recon_loss = 0
-    weight_mask = self.get_weight_mask(x)
-
-    bce = F.binary_cross_entropy_with_logits(
-      reconstructed_x, x, weight=weight_mask, reduction='none')  # (B, H, W, F)
-    recon_loss = bce.mean(dim=(1, 2, 3))
-
-    # KL Divergence Loss
-    # -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-    kld_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-
-    return recon_loss.mean() + self.args.vae_beta * kld_loss
-
-  def train_vae(self,
-                env,
-                num_epochs=10000,
-                save_every_n_epochs=1000,
-                logg=100
-                ):
-    def collect_single_episode():
-      if 1 / 3 < np.random.random():
-        agent1 = RandomAgent(agent_id=0)
-        agent2 = RandomAgent(agent_id=1)
-      else:
-        agent1 = SimpleAgent(agent_id=0)
-        agent2 = SimpleAgent(agent_id=1)
-
-      obs = env.reset()
-      done = False
-      step = 0
-      ep_ret = 0.0
-
-      while not done and (self.args.max_steps is None or step < self.args.max_steps):
-        a = agent1.select_action(obs[0])
-        a_opponent = agent2.select_action(obs[1])
-        actions = {0: a, 1: a_opponent}
-        next_obs, reward, done, info = env.step(actions)
-
-        # store transition
-        self.replay.push(
-            {
-                "state": obs[0].copy(),
-                "action": a,
-                "reward": float(reward[0]),
-                "next_state": next_obs[0].copy(),
-                "done": bool(done),
-            }
-        )
-
-        ep_ret += reward[0]
-        obs = next_obs
-        step += 1
-      return
-
-    loss_collector = []
-    epoch_collector = []
-    avg_loss = 0.0
-    for i in range(num_epochs):
-      # Collect a new episode
-      collect_single_episode()
-
-      # fill the buffer so we can at least sample
-      while self.replay.__len__() < self.args.batch_size:
-        collect_single_episode()
-
-      # Sample a batch from the replay buffer
-      batch = self.replay.sample(self.args.batch_size)
-      state_batch = torch.from_numpy(
-          np.array([b["state"] for b in batch])
-      ).float()  # (B, H, W, F)
-      state_batch = state_batch.to(self.args.device)
-      self.prior_model.train()
-      reconstructed_state, mu, logvar = self.prior_model(state_batch)
-      loss = self.vae_loss(
-          reconstructed_state,
-          state_batch,
-          mu,
-          logvar
-      )
-
-      self.vae_optimizer.zero_grad()
-      loss.backward()
-      self.vae_optimizer.step()
-
-      avg_loss += loss.item()
-
-      if (i + 1) % logg == 0:
-        loss_collector.append(loss.item())
-        epoch_collector.append(i + 1)
-        print(
-            f"Epoch {i + 1}/{num_epochs}, Loss: {loss.item()}, Avg Loss: {avg_loss / logg}"
-        )
-        avg_loss = 0.0
-
-      if (i + 1) % save_every_n_epochs == 0:
-        torch.save(self.prior_model.state_dict(),
-                   f"./models_{self.args.folder_id}/vae_epoch_{i + 1}.pth")
-        print(f"Model saved at epoch {i + 1}")
-
-    loss_collector = np.array(loss_collector)
-    epoch_collector = np.array(epoch_collector)
-
-  def loss_function(
-          self, reconstructed_x, x, cvae_mu, cvae_log_var,
-          vae_mu, vae_log_var, infer_mu, infer_log_var, dones, eta, beta):
-    return 0.0
 
   def train_step(self, batch, eval_policy):
     # not necessary
