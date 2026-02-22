@@ -25,7 +25,6 @@ class SubGoalSelector:
     # gumbel_noise = np.random.gumbel(0, beta, logits.shape)
     # inverse CDF method X = mu - beta * log(-log(U)) -> mu = 0, U ~ Uniform(0,1) -> X = - beta * log(U)
     gumbel_noise = -beta * torch.empty_like(logits).exponential_().log()
-    
 
   def select(self, vae, eval_policy, s_t_batch: torch.Tensor, future_states: torch.Tensor, tau: float):
     """
@@ -70,7 +69,6 @@ class SubGoalSelector:
       probs = F.softmax(values / tau, dim=-1)  # (B, K, A)
       expected_values = (probs * values).sum(dim=-1)  # (B, K)
 
-
       # best_idx is (B,) containing the index (0 to K-1) for each item
       gumbel_noise = -tau * \
           torch.empty_like(expected_values).exponential_().log()
@@ -96,8 +94,9 @@ class SubGoalSelector:
 class OpponentModel(nn.Module):
   def __init__(self, args: OMGArgs = OMGArgs()):
     super(OpponentModel, self).__init__()
-    self.inference_model = None #TODO SpatialOpponentModel
-    self.optimizer = torch.optim.Adam(self.inference_model.parameters(), lr=args.lr)
+    self.inference_model = None  # TODO SpatialOpponentModel
+    self.optimizer = torch.optim.Adam(
+      self.inference_model.parameters(), lr=args.lr)
     self.replay = ReplayBuffer(args.capacity)
     self.device = args.device
     self.args = args
@@ -126,8 +125,7 @@ class OpponentModel(nn.Module):
     return
 
   def loss_function(
-          self, reconstructed_x, x, cvae_mu, cvae_log_var,
-          vae_mu, vae_log_var, infer_mu, infer_log_var, dones, eta, beta):
+          self, reconstructed_x, x, cvae_mu, cvae_log_var, infer_mu, infer_log_var, dones, eta, beta):
     """
     Calculates the full OMG loss for the CVAE.
     """
@@ -141,14 +139,7 @@ class OpponentModel(nn.Module):
       reconstructed_x, x, weight=weight_mask, reduction='none')  # (B, H, W, F)
     recon_loss = bce.mean(dim=[1, 2, 3])
 
-    # --- 2. Inference Loss ---
-    # This forces the CVAE latent vector g_hat to point towards high-probability future
-    if eta < np.random.random():  # eta goes to 0 over time (eq. (8) in the paper)
-      # Use the model's own inference (g_hat) as the target
-      target_mu, target_log_var = infer_mu.detach(), infer_log_var.detach()
-    else:
-      # Use the pre-trained VAE's output (g_bar) as the target
-      target_mu, target_log_var = vae_mu.detach(), vae_log_var.detach()
+    target_mu, target_log_var = infer_mu.detach(), infer_log_var.detach()
 
     # KL Divergence between CVAE's prediction and the target distribution
     kl_div_per_example = -0.5 * torch.sum(1 + cvae_log_var - target_log_var -
@@ -167,46 +158,27 @@ class OpponentModel(nn.Module):
     total_loss = recon_loss.mean() + beta * omg_loss
     return total_loss
 
-  def train_step(self, batch, eval_policy):
-    """
-    Performs a single training step for the opponent model.
-    Args:
-        batch (dict): A batch of data from the replay buffer containing:
-            - 'states': Tensor of shape (B, H, W, F)
-            - 'history': Dict of lists of Tensors for historical data
-            - 'future_states': Tensor of shape (B, K, H, W, F)
-            - 'infer_mu': Tensor of shape (B, latent_dim)
-            - 'infer_log_var': Tensor of shape (B, latent_dim)
-        eval_policy (Policy): The current evaluation policy used for subgoal selection.
-    Returns:
-        float: The computed loss for the batch.
-    """
-    # Unpack the batch from the replay buffer
-    x = batch['states'].to(self.device)  # (B, H, W, F)
-    history = batch['history']  # A dict of state/action/mask lists up to s_t-1
-    future_states = batch['future_states'].to(self.device)  # (B, K, H, W, F)
-    infer_mu = batch['infer_mu'].to(self.device)
-    infer_log_var = batch['infer_log_var'].to(self.device)
-    dones = batch['dones'].to(self.device)
+  def train_step(self, batch, agent):
+    x = batch['states']
+    history = batch['history']
+    # (B, H, W) Ground Truth from Hindsight
+    target_map = batch['true_goal_map']
 
-    assert x.dim(
-    ) == 4, f"Expected states to be 4D (B, H, W, F), got {x.shape}"
-    assert future_states.dim(
-    ) == 5, f"Expected future_states to be 5D (B, K, H, W, F), got {future_states.shape}"
+    pred_logits = self.forward(x, history)  # (B, H, W)
 
-    self.inference_model.train()
-    self.optimizer.zero_grad()
+    # Flatten spatial dimensions for Cross Entropy
+    pred_flat = pred_logits.view(pred_logits.shape[0], -1)  # (B, H*W)
+    target_indices = target_map.view(
+      target_map.shape[0], -1).argmax(dim=1)  # (B,)
 
-    reconstructed_x, cvae_mu, cvae_log_var = self.inference_model(x, history)
+    loss = F.cross_entropy(pred_flat, target_indices)
 
-
-    loss = self.loss_function(reconstructed_x, x, cvae_mu, cvae_log_var,
-                              vae_mu, vae_log_var, infer_mu, infer_log_var, dones, eval_policy._gmix_eps(), eval_policy._beta())
-
+    agent.model_optimizer.zero_grad()
     loss.backward()
-    self.optimizer.step()
+    agent.model_optimizer.step()
 
     return loss.item()
+
 
 def _plot_foraging_grid(grid: np.ndarray, filename: str):
   """
