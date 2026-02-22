@@ -537,6 +537,7 @@ class TransformerVAE(nn.Module):
     reconstructed_x = self.decode(z)
     return reconstructed_x, mu, logvar
 
+
 class SpatialOpponentModel(nn.Module):
   def __init__(self, args: OMGArgs):
     super().__init__()
@@ -552,8 +553,10 @@ class SpatialOpponentModel(nn.Module):
         nn.Linear(16 * H * W, args.d_model)
     )
 
+    self.action_embedder = nn.Embedding(args.action_dim, args.d_model)
+
     self.pos_encoder = PositionalEncoding(
-      args.d_model, max_len=args.max_history_length)
+      args.d_model, max_len=args.max_history_length + 1, dropout=args.dropout)
 
     # Transformer Encoder
     encoder_layer = nn.TransformerEncoderLayer(
@@ -573,80 +576,62 @@ class SpatialOpponentModel(nn.Module):
         nn.Linear(128, H * W)
     )
 
-  def forward(self, history: Dict[str, torch.Tensor]) -> torch.Tensor:
-    states = history['states']  # (B, T, H, W, F)
-    B, T, H, W, F_dim = states.shape
+  def forward(self, x: torch.Tensor, history: Dict[str, torch.Tensor]) -> torch.Tensor:
+    """
+    x: (B, H, W, F) Current state
+    history: Dict containing padded 'states' (B, T, H, W, F) and 'mask' (B, T)
+    """
+    B, H, W, F_dim = x.shape
 
-    # Embed the States
-    # (B*T, F, H, W)
-    x = states.view(B * T, H, W, F_dim).permute(0, 3, 1, 2)
-    feats = self.feature_extractor(x)  # (B*T, d_model)
+    # --- STEP 0 Heuristic (Optional but good for jumpstarting) ---
+    if not history or 'states' not in history or history['states'].numel() == 0:
+      food_channel = x[:, :, :, 1]
+      logits = torch.where(food_channel > 0.5,
+                           torch.tensor(10.0, device=x.device),
+                           torch.tensor(-10.0, device=x.device))
+      return logits
 
-    # Reshape to (B, T, d_model)
-    seq_feats = feats.view(B, T, -1)
+    # --- 1. Embed Current State (The "CLS" Token) ---
+    x_flat = x.permute(0, 3, 1, 2)  # (B, F, H, W)
+    x_feat = self.feature_extractor(x_flat).unsqueeze(1)  # (B, 1, d_model)
 
-    # Add Positional Encoding
+    # --- 2. Embed History ---
+    hist_states = history['states']  # (B, T, H, W, F)
+    hist_actions = history['actions']  # (B, T)
+    hist_mask = history['mask']      # (B, T) True for valid tokens
+    T = hist_states.shape[1]
+
+    hist_flat = hist_states.view(B * T, H, W, F_dim).permute(0, 3, 1, 2)
+    hist_feat = self.feature_extractor(
+      hist_flat).view(B, T, -1)  # (B, T, d_model)
+
+    hist_action_feat = self.action_embedder(hist_actions)  # (B, T, d_model)
+
+    hist_feat = hist_feat + hist_action_feat  # (B, T, d_model)
+
+    # --- 3. Prepend Current State (x always at index 0) ---
+    seq_feats = torch.cat([x_feat, hist_feat], dim=1)  # (B, 1 + T, d_model)
+
+    # Update mask: Index 0 (current state x) is ALWAYS valid (True)
+    x_mask = torch.ones((B, 1), dtype=torch.bool, device=x.device)
+    full_mask = torch.cat([x_mask, hist_mask], dim=1)  # (B, 1 + T)
+
+    # --- 4. Positional Encoding ---
     seq_feats = seq_feats * np.sqrt(self.args.d_model)
     seq_feats = self.pos_encoder(seq_feats)
 
-    # C. Pass through Transformer
-    # We need a mask for padding if history is variable length!
-    # Assuming history['mask'] exists from your collate_fn
-    # mask shape: (B, T), True where valid, False where padding
-    # Transformer expects: key_padding_mask (B, T) where True is PADDING (ignore)
-    # Your collate usually gives True for Valid. Check this!
-    src_key_padding_mask = ~history['mask'] if 'mask' in history else None
-
+    # --- 5. Transformer Pass ---
+    # src_key_padding_mask expects True for PADDING (ignore)
+    src_key_padding_mask = ~full_mask
     memory = self.transformer(
       seq_feats, src_key_padding_mask=src_key_padding_mask)
 
-    # D. Pooling / Summary
-    # If using padding, taking -1 is risky (it might be padding).
-    # Better to take the embedding at the index of the last *valid* token.
-    # For simplicity (assuming batch_first=True):
-    if 'mask' in history:
-      # Find last True index for each batch
-      last_indices = history['mask'].sum(dim=1) - 1  # (B,)
-      # Gather: memory[b, last_indices[b], :]
-      final_memory = memory[torch.arange(B), last_indices.long(), :]
-    else:
-      final_memory = memory[:, -1, :]
+    # --- 6. Extract Summary and Predict ---
+    # Because we prepended x, the "Present" context is ALWAYS at index 0!
+    # No more dynamic searching for the last valid token.
+    final_memory = memory[:, 0, :]
 
-    # E. Predict Map
     logits = self.spatial_head(final_memory)  # (B, H*W)
     heatmap_logits = logits.view(B, H, W)
 
-    # Standardize output for Agent (add channel dim if needed by QNet)
-    # (B, H, W) is fine if your QNet expects it that way.
-
-    return heatmap_logits  # Return logits for Loss, softmax for Agent
-
-  def train_step(self, batch, agent):
-    # 1. Get Prediction
-    pred_heatmap = self.forward(batch['history'])  # (B, H, W)
-
-    # 2. Get Target (Ground Truth Future Location)
-    # We need to create a mask from the future states in the batch
-    # Assuming batch['future_states'] contains the actual path
-    # You can select the LAST state in the horizon as the target
-    future_states = batch['future_states']  # (B, Horizon, H, W, F)
-    # TODO: Label all future states with true opponent subgoal
-    target_state = future_states[:, -1]    # Take the state at H
-
-    # Extract food channel (index 1) or Agent 2 channel (index 3) from target?
-    # Since we want to predict WHERE the opponent ends up:
-    target_mask = target_state[:, :, :, 3]  # Channel 3 is Opponent
-
-    # 3. Compute Loss (Cross Entropy)
-    # Flatten for loss: Pred (B, H*W), Target (B, H*W) indices
-    target_indices = target_mask.view(
-      pred_heatmap.shape[0], -1).argmax(dim=1)
-    loss = F.cross_entropy(pred_heatmap.view(
-      pred_heatmap.shape[0], -1), target_indices)
-
-    # Optimization
-    self.optimizer.zero_grad()
-    loss.backward()
-    self.optimizer.step()
-
-    return loss.item()
+    return heatmap_logits
