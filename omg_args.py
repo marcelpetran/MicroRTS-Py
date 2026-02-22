@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Tuple
 
+from sympy import beta
+
 
 @dataclass
 class OMGArgs:
@@ -25,10 +27,13 @@ class OMGArgs:
 
   # OMG-specific
   oracle: bool = False
-  horizon_H: int = 6
   tau_start: float = 2.0
   tau_end: float = 0.01
   tau_decay_steps: int = 100_000
+  beta_start: float = 1.0
+  beta_end: float = 0.01
+  beta_decay_steps: int = 100_000
+
 
   # Transformer architecture params
   state_shape: Tuple[int, int, int] = None  # (H, W, F)
