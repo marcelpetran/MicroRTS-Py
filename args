@@ -1,4 +1,3 @@
---oracle
 --episodes
 12_000
 --env_size
@@ -13,15 +12,11 @@
 2
 --target_update_every
 1_000
---latent_dim
-32
 --d_model
 64
 --nhead
 4
 --num_encoder_layers
-1
---num_decoder_layers
 1
 --dim_feedforward
 256
