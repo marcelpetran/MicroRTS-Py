@@ -40,7 +40,6 @@ class QNet(nn.Module):
     super().__init__()
     H, W, F_dim = args.state_shape
     self.state_dim = H * W * F_dim
-    self.latent_dim = args.latent_dim
     self.action_dim = args.action_dim
 
     self.flat_dim = 64 * H * W
@@ -262,8 +261,10 @@ class QLearningAgent:
     (interaction phase) Infer g_hat and act eps-greedily on Q(s,g_hat,*)
     """
     x = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
+    collated_history = self._collate_history([history])
     with torch.no_grad():
-      g_map = self.model(x, history)
+      g_logits = self.model(x, collated_history)
+      g_map = F.softmax(g_logits.view(g_logits.shape[0], -1), dim=-1).view_as(g_logits)  # (B, H, W)
     qvals = self.q(x, g_map)
     a = self._choose_action(qvals, self._tau(), eval)
     return a, g_map.squeeze(0)
@@ -288,13 +289,14 @@ class QLearningAgent:
     # The Goal for this trajectory (Hindsight Label)
     # We unsqueeze(1) because the CNN likely expects (B, 1, H, W) to concat with states
     g_map = torch.stack([torch.from_numpy(b["true_goal_map"]).float()
-                        for b in batch], dim=0).to(self.device).unsqueeze(1)
+                        for b in batch], dim=0).to(self.device)
 
     # 1. Q(s, g, a)
     q_sa = self.q(s, g_map).gather(1, a.unsqueeze(1)).squeeze(1)
 
     # 2. Target = r + gamma * max_a' Q_tgt(s', g, a')
     with torch.no_grad():
+      # TODO: We should consider using g_map of the next state, subgoals might change
       q_val = self.q(sp, g_map)
       noise = torch.rand_like(q_val) * 1e-6
       best_actions = (q_val + noise).argmax(dim=1, keepdim=True)
@@ -337,7 +339,7 @@ class QLearningAgent:
           "history": self._collate_history([b["history"] for b in valid_batch]),
           "true_goal_map": torch.stack([torch.from_numpy(b["true_goal_map"]).float() for b in valid_batch], dim=0).to(self.device)
       }
-      model_loss = self.model.train_step(om_batch, self)
+      model_loss = self.model.train_step(om_batch)
     else:
       model_loss = 0.0
 
@@ -367,23 +369,26 @@ class QLearningAgent:
 
     padded_states_list = []
     padded_actions_list = []
-    null_state = torch.zeros(*self.args.state_shape, device=self.device)
-    null_action = torch.tensor(0, device=self.device)
+    # Create null tensors on CPU first
+    null_state_cpu = torch.zeros(*self.args.state_shape)
+    null_action_cpu = torch.tensor(0)
 
     for h in histories:
       num_to_pad = max_len - len(h.get("states", []))
-      # Handle conversion safely whether they are Tensors or Numpy arrays
-      states = [to_tensor(s, self.device) for s in h.get("states", [])]
-      actions = [to_tensor(a, self.device) for a in h.get("actions", [])]
+      
+      states = list(h.get("states", []))
+      actions = list(h.get("actions", []))
+
       if num_to_pad > 0:
-        states.extend([null_state] * num_to_pad)
-        actions.extend([null_action] * num_to_pad)
+        states.extend([null_state_cpu] * num_to_pad)
+        actions.extend([null_action_cpu] * num_to_pad)
 
       padded_states_list.append(torch.stack(states, dim=0))
       padded_actions_list.append(torch.stack(actions, dim=0))
 
-    final_padded_states = torch.stack(padded_states_list, dim=0)
-    final_padded_actions = torch.stack(padded_actions_list, dim=0)
+    # Stack batches and move to device all at once
+    final_padded_states = torch.stack(padded_states_list, dim=0).to(self.device)
+    final_padded_actions = torch.stack(padded_actions_list, dim=0).to(self.device)
 
     return {
         "states": final_padded_states,
@@ -423,12 +428,7 @@ class QLearningAgent:
     for step in range(max_steps or 500):
       current_history = {k: list(v) for k, v in history.items()}
 
-      # 1. Predict the Goal Map (Using Transformer or Oracle)
-      # Note: You should pass the predicted map to select_action now!
-      # For now, let's assume get_goal_map handles the Teacher Forcing mix
-      g_map = self.model(obs[0], current_history)
-
-      a = self.select_action(obs[0], g_map)
+      a, g_map = self.select_action(obs[0], current_history)
       a_opponent = self.opponent_agent.select_action(obs[1])
       actions = {0: a, 1: a_opponent}
 
@@ -443,15 +443,14 @@ class QLearningAgent:
           "opp_reward": float(reward[1]),
           "next_state": next_obs[0].copy(),
           "done": bool(done),
-          # Keep the map used during the episode for Q-learning
           "rollout_goal_map": g_map.cpu().numpy(),
-          "history": {k: [t.clone() for t in v] for k, v in current_history.items()},
+          "history": {k: [t.clone().cpu() for t in v] for k, v in current_history.items()},
       }
       episode_transitions.append(transition)
 
       # 3. Update history
-      history["states"].append(torch.from_numpy(obs[0]).float())
-      history["actions"].append(torch.tensor(a_opponent, dtype=torch.long))
+      history["states"].append(torch.from_numpy(obs[0]).float().to(self.device))
+      history["actions"].append(torch.tensor(a_opponent, dtype=torch.long).to(self.device))
 
       ep_ret += reward[0]
       obs = next_obs
@@ -462,7 +461,7 @@ class QLearningAgent:
 
       if Q_loss is not None and self.global_step % 100 == 0:
         print(f"Step {self.global_step}: Q_loss={Q_loss:.5f}, "
-              f"Tau={self._tau():.2f}, Gmix_eps={self._gmix_eps():.2f}")
+              f"Tau={self._tau():.2f}")
 
       if done:
         break
@@ -520,7 +519,6 @@ class QLearningAgent:
         "actions": deque(maxlen=history_len)
     }
 
-    self.model.eval()
     for step in range(max_steps or 500):
       current_history = {k: list(v) for k, v in history.items()}
 
@@ -536,8 +534,8 @@ class QLearningAgent:
 
       next_obs, reward, done, info = self.env.step(actions)
 
-      history["states"].append(torch.from_numpy(obs[0]).float())
-      history["actions"].append(torch.tensor(a_opponent, dtype=torch.long))
+      history["states"].append(torch.from_numpy(obs[0]).float().to(self.device))
+      history["actions"].append(torch.tensor(a_opponent, dtype=torch.long).to(self.device))
 
       ep_ret += reward[0]
       obs = next_obs
@@ -546,31 +544,3 @@ class QLearningAgent:
         break
 
     return {"return": ep_ret, "steps": step + 1}
-
-  def visualize_prior(self, reset_global_counter: bool = True):
-    """
-    Run 1 episode and visualize subgoals sampled from the prior model.
-    """
-    self.agent1 = SimpleAgent(0)
-    self.agent2 = SimpleAgent(1)
-    obs = self.env.reset()
-    done = False
-    while not done:
-      a1 = self.agent1.select_action(obs[0])
-      a2 = self.agent2.select_action(obs[1])
-      actions = {0: a1, 1: a2}
-      next_obs, reward, done, info = self.env.step(actions)
-
-      with torch.no_grad():
-        self.model.prior_model.eval()
-        recon_logits, _, _ = self.model.prior_model(
-            torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device)
-        )
-        self.model.visualize_subgoal_logits(
-          obs[0], recon_logits, f"./diagrams_{self.args.folder_id}/subgoal_logits_prior_step{self.global_step}.png")
-
-      obs = next_obs
-      self.global_step += 1
-
-    if reset_global_counter:
-      self.global_step = 0
