@@ -5,6 +5,7 @@ from q_agent import QLearningAgent, ReplayBuffer
 from q_agent_classic import QLearningAgentClassic
 from omg_args import OMGArgs
 import transformers as t
+from transformers import SpatialOpponentModel
 import torch
 import matplotlib.pyplot as plt
 import argparse
@@ -25,16 +26,12 @@ parser.add_argument('--batch_size', type=int, default=16,
                     help='Batch size for training')
 parser.add_argument('--qnet_dim', type=int, default=128,
                     help='Hidden dimension for Q-network')
-parser.add_argument('--latent_dim', type=int, default=8,
-                    help='Latent dimension for VAE/CVAE')
 parser.add_argument('--d_model', type=int, default=256,
                     help='Transformer model dimension')
 parser.add_argument('--nhead', type=int, default=4,
                     help='Number of attention heads')
 parser.add_argument('--num_encoder_layers', type=int,
                     default=1, help='Number of encoder layers')
-parser.add_argument('--num_decoder_layers', type=int,
-                    default=1, help='Number of decoder layers')
 parser.add_argument('--dim_feedforward', type=int,
                     default=1024, help='Dimension of feedforward network')
 parser.add_argument('--dropout', type=float, default=0.12, help='Dropout rate')
@@ -61,7 +58,7 @@ os.makedirs(f"./models_{args_parsed.folder_id}", exist_ok=True)
 os.makedirs(f"./diagrams_{args_parsed.folder_id}", exist_ok=True)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-# device = "mps" if torch.backends.mps.is_available() else device
+device = "mps" if torch.backends.mps.is_available() else device
 print(f"Using device: {device}")
 
 env = SimpleForagingEnv(grid_size=args_parsed.env_size,
@@ -77,35 +74,31 @@ args = OMGArgs(
     folder_id=args_parsed.folder_id,
     batch_size=args_parsed.batch_size,
     capacity=args_parsed.replay_capacity,
-    horizon_H=args_parsed.horizon,
     qnet_hidden=args_parsed.qnet_dim,
     train_every=args_parsed.train_every,
     target_update_every=args_parsed.target_update_every,
     visualise_every_n_step=3,
     max_steps=args_parsed.max_steps,
-    tau_start=args_parsed.au_start,
+    tau_start=args_parsed.tau_start,
     tau_end=args_parsed.tau_end,
     state_shape=obs_sample[0].shape,
     H=H, W=W,
-    state_feature_splits=(F_dim,),
     action_dim=NUM_ACTIONS,
-    latent_dim=args_parsed.latent_dim,
     d_model=args_parsed.d_model,
     nhead=args_parsed.nhead,
     num_encoder_layers=args_parsed.num_encoder_layers,
-    num_decoder_layers=args_parsed.num_decoder_layers,
     dim_feedforward=args_parsed.dim_feedforward,
     dropout=args_parsed.dropout,
 )
 if not args_parsed.classic:
   if not args_parsed.oracle:
-    op_model = OpponentModel(args=args)
+    inference_model = SpatialOpponentModel(args=args).to(device)
+    op_model = OpponentModel(inference_model, args=args)
   else:
     op_model = OpponentModelOracle(args=args)
 
   agent = QLearningAgent(env, op_model, args=args)
-  if args_parsed.visualize_vae:
-    agent.visualize_prior()
+
 else:
   agent = QLearningAgentClassic(env, args=args)
 
@@ -135,8 +128,6 @@ for ep in range(args_parsed.episodes):
     print(
       f"Test Episode {ep+1}: Return={stats['return']:.2f} | Avg={return_list[-1]:.2f}, Steps={stats['steps']} | Avg={steps_list[-1]:.1f}")
 
-# Save the trained models
-# torch.save(cvae.state_dict(), f"./models_{args.folder_id}/cvae.pth")
 # Save the Q-network
 torch.save(agent.q.state_dict(), f"./models_{args.folder_id}/qnet.pth")
 # torch.save(agent.q.state_dict(), "./models_{args.folder_id}/qnetclassic.pth")
