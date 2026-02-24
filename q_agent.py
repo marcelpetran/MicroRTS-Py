@@ -356,7 +356,7 @@ class QLearningAgent:
       model_loss = 0.0
 
     # Skip Q-learning updates for the first few steps to let the transformer learn something reasonable
-    if self.global_step < 4000:
+    if self.global_step < 4000 and not self.args.oracle:
       return 0.0, model_loss
 
     # --- Update the Q-Network ---
