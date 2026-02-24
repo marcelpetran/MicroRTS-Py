@@ -336,7 +336,7 @@ class QLearningAgent:
 
     batch_list = self.replay.sample(self.args.batch_size)
 
-    # --- Update the Opponent Model (Transformer) ---
+    # --- Update the Opponent Model Transformer ---
     # We ONLY train the transformer on steps where the opponent succeeded!
     valid_indices = [i for i, b in enumerate(
       batch_list) if b.get("valid_for_transformer", False)]
