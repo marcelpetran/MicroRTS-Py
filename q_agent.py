@@ -2,6 +2,8 @@ from typing import Deque, Dict, List, Tuple, Optional
 import random
 from collections import deque
 
+from wandb import agent
+
 from omg_args import OMGArgs
 
 from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv, ZigZagAgent
@@ -11,19 +13,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
-
-
-# ------ helpers ------
-def to_tensor(x, device):
-  if isinstance(x, torch.Tensor):
-    return x.to(device)
-  return torch.tensor(x, dtype=torch.float32, device=device)
-
-
-def flatten_state(obs: np.ndarray) -> torch.Tensor:
-  # obs: (H, W, F) -> (F, H, W) for Conv, or keep (H*W*F) for MLP.
-  # return torch.from_numpy(obs).float().permute(2, 0, 1)  # (F, H, W) for Conv
-  return torch.from_numpy(obs).float()
 
 
 class QNet(nn.Module):
@@ -247,9 +236,39 @@ class QLearningAgent:
     plt.savefig(filename)
     plt.close()
 
+  def heatmap_subgoal(self, g_map: torch.Tensor, filename: str = "subgoal_heatmap.png"):
+    """
+    Utility to visualize the inferred subgoal heatmap, with marked agent positions and food locations.
+
+    Args:
+        s_t (torch.Tensor): Current state, shape (1, H, W, F).
+        g_map (torch.Tensor): Inferred subgoal heatmap, shape (1, H, W).
+        filename (str): Path to save the heatmap image.
+    """
+    self.q.eval()
+    g_map_np = g_map.squeeze(0).cpu().numpy()  # (H, W)
+    agent_pos = self.env._get_agent_positions()[0]
+    opponent_pos = self.env._get_agent_positions()[1]
+    food_pos = self.env._get_food_positions()
+
+    plt.figure(figsize=(6, 6))
+    plt.imshow(g_map_np, cmap='viridis')
+    plt.colorbar(label='Inferred Subgoal Probability')
+    plt.scatter(agent_pos[1], agent_pos[0], color='blue',
+                marker='X', s=100, label='Agent')
+    plt.scatter(opponent_pos[1], opponent_pos[0],
+                color='red', marker='X', s=100, label='Opponent')
+    for pos in food_pos:
+      plt.scatter(pos[1], pos[0], color='green',
+                  marker='o', s=50, label='Food')
+    plt.title("Inferred Subgoal Heatmap with Agent and Food Positions")
+    plt.legend()
+    plt.savefig(filename)
+    plt.close()
+
   # ------------- acting -------------
 
-  def _choose_action(self, qvals: torch.Tensor, beta: float, eval=False) -> int:
+  def choose_action(self, qvals: torch.Tensor, beta: float, eval=False) -> int:
     gumbel_noise = -beta * torch.empty_like(qvals).exponential_().log()
     if eval == True:
       noise = torch.rand_like(qvals) * 1e-6
@@ -261,17 +280,18 @@ class QLearningAgent:
     (interaction phase) Infer g_hat and act eps-greedily on Q(s,g_hat,*)
     """
     x = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
-    collated_history = self._collate_history([history])
+    collated_history = self.collate_history([history])
     with torch.no_grad():
       g_logits = self.model(x, collated_history)
-      g_map = F.softmax(g_logits.view(g_logits.shape[0], -1), dim=-1).view_as(g_logits)  # (B, H, W)
+      g_map = F.softmax(g_logits.view(
+        g_logits.shape[0], -1), dim=-1).view_as(g_logits)  # (B, H, W)
     qvals = self.q(x, g_map)
-    a = self._choose_action(qvals, self._tau(), eval)
+    a = self.choose_action(qvals, self._tau(), eval)
     return a, g_map.squeeze(0)
 
   # ------------- training -------------
 
-  def _compute_targets(self, batch: List[Dict]) -> Tuple[torch.Tensor, torch.Tensor]:
+  def compute_targets(self, batch: List[Dict]) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Standard DDQN target computation using Hindsight Experience Replay Goal Maps.
     """
@@ -290,18 +310,20 @@ class QLearningAgent:
     # We unsqueeze(1) because the CNN likely expects (B, 1, H, W) to concat with states
     g_map = torch.stack([torch.from_numpy(b["true_goal_map"]).float()
                         for b in batch], dim=0).to(self.device)
+    g_map_next = torch.stack([torch.from_numpy(b["true_goal_map_next"]).float()
+                             for b in batch], dim=0).to(self.device)
+
 
     # 1. Q(s, g, a)
     q_sa = self.q(s, g_map).gather(1, a.unsqueeze(1)).squeeze(1)
 
     # 2. Target = r + gamma * max_a' Q_tgt(s', g, a')
     with torch.no_grad():
-      # TODO: We should consider using g_map of the next state, subgoals might change
-      q_val = self.q(sp, g_map)
+      q_val = self.q(sp, g_map_next)
       noise = torch.rand_like(q_val) * 1e-6
       best_actions = (q_val + noise).argmax(dim=1, keepdim=True)
 
-      q_next = self.q_tgt(sp, g_map).gather(1, best_actions).squeeze(1)
+      q_next = self.q_tgt(sp, g_map_next).gather(1, best_actions).squeeze(1)
 
       target = r + (1.0 - done) * self.args.gamma * q_next
       target = torch.clamp(target, min=-5.0, max=5.0)
@@ -318,7 +340,7 @@ class QLearningAgent:
     batch_list = self.replay.sample(self.args.batch_size)
 
     # --- 1. Update the Q-Network ---
-    q_sa, target = self._compute_targets(batch_list)
+    q_sa, target = self.compute_targets(batch_list)
     loss = F.smooth_l1_loss(q_sa, target, reduction='mean')
 
     self.opt.zero_grad(set_to_none=True)
@@ -336,7 +358,7 @@ class QLearningAgent:
 
       om_batch = {
           "states": torch.stack([torch.from_numpy(b["state"]).float() for b in valid_batch], dim=0).to(self.device),
-          "history": self._collate_history([b["history"] for b in valid_batch]),
+          "history": self.collate_history([b["history"] for b in valid_batch]),
           "true_goal_map": torch.stack([torch.from_numpy(b["true_goal_map"]).float() for b in valid_batch], dim=0).to(self.device)
       }
       model_loss = self.model.train_step(om_batch)
@@ -351,7 +373,7 @@ class QLearningAgent:
 
     return loss.item(), model_loss
 
-  def _collate_history(self, histories: List[Dict]) -> Dict[str, torch.Tensor]:
+  def collate_history(self, histories: List[Dict]) -> Dict[str, torch.Tensor]:
     """
     Pads history sequences to max_len within the batch.
     """
@@ -375,7 +397,7 @@ class QLearningAgent:
 
     for h in histories:
       num_to_pad = max_len - len(h.get("states", []))
-      
+
       states = list(h.get("states", []))
       actions = list(h.get("actions", []))
 
@@ -387,8 +409,10 @@ class QLearningAgent:
       padded_actions_list.append(torch.stack(actions, dim=0))
 
     # Stack batches and move to device all at once
-    final_padded_states = torch.stack(padded_states_list, dim=0).to(self.device)
-    final_padded_actions = torch.stack(padded_actions_list, dim=0).to(self.device)
+    final_padded_states = torch.stack(
+      padded_states_list, dim=0).to(self.device)
+    final_padded_actions = torch.stack(
+      padded_actions_list, dim=0).to(self.device)
 
     return {
         "states": final_padded_states,
@@ -449,8 +473,10 @@ class QLearningAgent:
       episode_transitions.append(transition)
 
       # 3. Update history
-      history["states"].append(torch.from_numpy(obs[0]).float().to(self.device))
-      history["actions"].append(torch.tensor(a_opponent, dtype=torch.long).to(self.device))
+      history["states"].append(
+        torch.from_numpy(obs[0]).float().to(self.device))
+      history["actions"].append(torch.tensor(
+        a_opponent, dtype=torch.long).to(self.device))
 
       ep_ret += reward[0]
       obs = next_obs
@@ -460,47 +486,42 @@ class QLearningAgent:
       Q_loss, model_loss = self.update()
 
       if Q_loss is not None and self.global_step % 100 == 0:
-        print(f"Step {self.global_step}: Q_loss={Q_loss:.5f}, "
+        print(f"Step {self.global_step}: Q_loss={Q_loss:.5f}, Model_loss={model_loss:.5f} "
               f"Tau={self._tau():.2f}")
 
       if done:
         break
 
-
     current_true_goal_pos = None
+    next_map = np.zeros((H, W), dtype=np.float32)
 
-    # Walk backward through the episode
+    # Walk backward through the episode to label goals
     for t in reversed(episode_transitions):
 
       # Did the opponent get a reward this step?
       if t["opp_reward"] > 0:
-        # The opponent just ate a food!
-        # In the 'next_state', the opponent is standing on the food location.
-        # Channel 3 is Agent 2 (Opponent)
         opp_pos_indices = np.argwhere(t["next_state"][:, :, 3] == 1)
         if len(opp_pos_indices) > 0:
           current_true_goal_pos = tuple(opp_pos_indices[0])
 
       # Assign the goal to this step
       if current_true_goal_pos is not None:
-        # Create a 1-hot spatial mask
         true_map = np.zeros((H, W), dtype=np.float32)
         true_map[current_true_goal_pos[0], current_true_goal_pos[1]] = 1.0
 
         t["true_goal_map"] = true_map
-        t["valid_for_transformer"] = True  # We have proof of intent!
+        t["valid_for_transformer"] = True
       else:
-        # Opponent hasn't gotten a reward yet in this backward chain
-        # (e.g. they failed, or this is the end of the episode and they missed)
-        t["true_goal_map"] = np.zeros((H, W), dtype=np.float32)
-        t["valid_for_transformer"] = False  # Do NOT train Transformer on this
+        true_map = np.zeros((H, W), dtype=np.float32)
+        t["true_goal_map"] = true_map
+        t["valid_for_transformer"] = False
 
-      # Remove the temp tracking variables to save memory
+      t["true_goal_map_next"] = next_map
+
+      next_map = true_map.copy()
       del t["opp_reward"]
 
-      # Push to replay buffer
-      # Note: Your ReplayBuffer.push() needs to accept the new keys:
-      # rollout_goal_map, true_goal_map, valid_for_transformer
+    for t in episode_transitions:
       self.replay.push(t)
 
     return {"return": ep_ret, "steps": step + 1}
@@ -530,12 +551,16 @@ class QLearningAgent:
       if render:
         self.heatmap_q_values(
           g_map, f"./diagrams_{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
+        self.heatmap_subgoal(
+          g_map, f"./diagrams_{self.args.folder_id}/gmap_step{self.global_step + step}.png")
         SimpleForagingEnv.render_from_obs(obs[0])
 
       next_obs, reward, done, info = self.env.step(actions)
 
-      history["states"].append(torch.from_numpy(obs[0]).float().to(self.device))
-      history["actions"].append(torch.tensor(a_opponent, dtype=torch.long).to(self.device))
+      history["states"].append(
+        torch.from_numpy(obs[0]).float().to(self.device))
+      history["actions"].append(torch.tensor(
+        a_opponent, dtype=torch.long).to(self.device))
 
       ep_ret += reward[0]
       obs = next_obs
