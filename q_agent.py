@@ -308,10 +308,8 @@ class QLearningAgent:
 
     # The Goal for this trajectory (Hindsight Label)
     # We unsqueeze(1) because the CNN likely expects (B, 1, H, W) to concat with states
-    g_map = torch.stack([torch.from_numpy(b["true_goal_map"]).float()
-                        for b in batch], dim=0).to(self.device)
-    g_map_next = torch.stack([torch.from_numpy(b["true_goal_map_next"]).float()
-                             for b in batch], dim=0).to(self.device)
+    g_map = torch.stack([torch.from_numpy(b["rollout_goal_map"]).float() for b in batch], dim=0).to(self.device)
+    g_map_next = torch.stack([torch.from_numpy(b["rollout_goal_map_next"]).float() for b in batch], dim=0).to(self.device)
 
     # 1. Q(s, g, a)
     q_sa = self.q(s, g_map).gather(1, a.unsqueeze(1)).squeeze(1)
@@ -497,6 +495,7 @@ class QLearningAgent:
 
     current_true_goal_pos = None
     next_map = np.zeros((H, W), dtype=np.float32)
+    next_rollout_map = np.zeros((H, W), dtype=np.float32) # ADD THIS
 
     # Walk backward through the episode to label goals
     for t in reversed(episode_transitions):
@@ -520,9 +519,11 @@ class QLearningAgent:
         t["valid_for_transformer"] = False
 
       t["true_goal_map_next"] = next_map
-
       next_map = true_map.copy()
       del t["opp_reward"]
+
+      t["rollout_goal_map_next"] = next_rollout_map
+      next_rollout_map = t["rollout_goal_map"].copy()
 
     for t in episode_transitions:
       self.replay.push(t)
