@@ -313,7 +313,6 @@ class QLearningAgent:
     g_map_next = torch.stack([torch.from_numpy(b["true_goal_map_next"]).float()
                              for b in batch], dim=0).to(self.device)
 
-
     # 1. Q(s, g, a)
     q_sa = self.q(s, g_map).gather(1, a.unsqueeze(1)).squeeze(1)
 
@@ -339,16 +338,7 @@ class QLearningAgent:
 
     batch_list = self.replay.sample(self.args.batch_size)
 
-    # --- 1. Update the Q-Network ---
-    q_sa, target = self.compute_targets(batch_list)
-    loss = F.smooth_l1_loss(q_sa, target, reduction='mean')
-
-    self.opt.zero_grad(set_to_none=True)
-    loss.backward()
-    nn.utils.clip_grad_norm_(self.q.parameters(), 1.0)
-    self.opt.step()
-
-    # --- 2. Update the Opponent Model (Transformer) ---
+    # --- Update the Opponent Model (Transformer) ---
     # We ONLY train the transformer on steps where the opponent succeeded!
     valid_indices = [i for i, b in enumerate(
       batch_list) if b.get("valid_for_transformer", False)]
@@ -365,7 +355,20 @@ class QLearningAgent:
     else:
       model_loss = 0.0
 
-    # --- 3. Target Update ---
+    # Skip Q-learning updates for the first few steps to let the transformer learn something reasonable
+    if self.global_step < 4000:
+      return 0.0, model_loss
+
+    # --- Update the Q-Network ---
+    q_sa, target = self.compute_targets(batch_list)
+    loss = F.smooth_l1_loss(q_sa, target, reduction='mean')
+
+    self.opt.zero_grad(set_to_none=True)
+    loss.backward()
+    nn.utils.clip_grad_norm_(self.q.parameters(), 1.0)
+    self.opt.step()
+
+    # --- Target Update ---
     with torch.no_grad():
       for param, target_param in zip(self.q.parameters(), self.q_tgt.parameters()):
         target_param.data.mul_(1 - self.args.tau_soft)
@@ -551,8 +554,9 @@ class QLearningAgent:
       if render:
         self.heatmap_q_values(
           g_map, f"./diagrams_{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
-        self.heatmap_subgoal(
-          g_map, f"./diagrams_{self.args.folder_id}/gmap_step{self.global_step + step}.png")
+        if not self.args.oracle:
+          self.heatmap_subgoal(
+            g_map, f"./diagrams_{self.args.folder_id}/gmap_step{self.global_step + step}.png")
         SimpleForagingEnv.render_from_obs(obs[0])
 
       next_obs, reward, done, info = self.env.step(actions)
