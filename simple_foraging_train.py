@@ -39,8 +39,6 @@ parser.add_argument('--tau_start', type=float, default=2.0,
                     help='Starting temperature value, using Boltzmann distribution')
 parser.add_argument('--tau_end', type=float, default=0.1,
                     help='Last temperature value, using Boltzmann distribution')
-parser.add_argument('--horizon', type=int, default=3,
-                    help='Future window H for opponent modeling')
 parser.add_argument('--train_every', type=int, default=4,
                     help='Train every N steps')
 parser.add_argument('--target_update_every', type=int,
