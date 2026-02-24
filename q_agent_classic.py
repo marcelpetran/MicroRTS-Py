@@ -201,7 +201,7 @@ class QLearningAgentClassic:
 
   # ------------- acting -------------
 
-  def _choose_action(self, qvals: torch.Tensor, beta: float, eval) -> int:
+  def choose_action(self, qvals: torch.Tensor, beta: float, eval) -> int:
     gumbel_noise = -beta * torch.empty_like(qvals).exponential_().log()
     if eval == True:
       noise = torch.rand_like(qvals) * 1e-6
@@ -214,11 +214,11 @@ class QLearningAgentClassic:
     """
     s = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
     qvals = self.q(s)
-    return self._choose_action(qvals, self._tau(), eval)
+    return self.choose_action(qvals, self._tau(), eval)
 
   # ------------- training -------------
 
-  def _compute_targets(self, batch: List[Dict]) -> Tuple[torch.Tensor, torch.Tensor]:
+  def compute_targets(self, batch: List[Dict]) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Implements Eq. (4) and (8) mixing between g_hat and g_bar with a decaying switch.
     """
@@ -261,7 +261,7 @@ class QLearningAgentClassic:
     # is_weights = torch.tensor(is_weights, dtype=torch.float32, device=self.args.device)
 
     # --- 1. Update the Q-Network ---
-    q_sa, target = self._compute_targets(batch_list)
+    q_sa, target = self.compute_targets(batch_list)
     with torch.no_grad():
       td_errors = (q_sa - target).cpu().numpy()
     # MSE loss
