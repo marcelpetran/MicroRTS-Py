@@ -4,7 +4,7 @@ from typing import Tuple
 
 @dataclass
 class OMGArgs:
-  device: str = "cpu"  # "cpu" or "cuda"
+  device: str = "cpu"  # cpu, cuda, mps
   gamma: float = 0.955
   lr: float = 1e-4
   batch_size: int = 128
@@ -36,7 +36,6 @@ class OMGArgs:
   state_shape: Tuple[int, int, int] = None  # (H, W, F)
   H: int = 7  # grid height
   W: int = 7  # grid width
-  # for DiscreteActionEmbedder - !at least one mustn't be None!
   action_dim: int = 4
   d_model: int = 256
   nhead: int = 4
