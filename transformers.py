@@ -102,7 +102,7 @@ class SpatialOpponentModel(nn.Module):
                            torch.tensor(-10.0, device=x.device))
       return logits
 
-    # --- 1. Embed Current State (The "CLS" Token) ---
+    # --- 1. Embed Current State ---
     x_flat = x.permute(0, 3, 1, 2)  # (B, F, H, W)
     x_feat = self.feature_extractor(x_flat).unsqueeze(1)  # (B, 1, d_model)
 
@@ -120,10 +120,10 @@ class SpatialOpponentModel(nn.Module):
 
     hist_feat = hist_feat + hist_action_feat  # (B, T, d_model)
 
-    # --- 3. Prepend Current State (x always at index 0) ---
+    # --- 3. Prepend Current State ---
     seq_feats = torch.cat([x_feat, hist_feat], dim=1)  # (B, 1 + T, d_model)
 
-    # Update mask: Index 0 (current state x) is ALWAYS valid (True)
+    # Update mask: Index 0 current state x is ALWAYS valid
     x_mask = torch.ones((B, 1), dtype=torch.bool, device=x.device)
     full_mask = torch.cat([x_mask, hist_mask], dim=1)  # (B, 1 + T)
 
@@ -132,14 +132,13 @@ class SpatialOpponentModel(nn.Module):
     seq_feats = self.pos_encoder(seq_feats)
 
     # --- 5. Transformer Pass ---
-    # src_key_padding_mask expects True for PADDING (ignore)
+    # src_key_padding_mask expects True for PADDING
     src_key_padding_mask = ~full_mask
     memory = self.transformer(
       seq_feats, src_key_padding_mask=src_key_padding_mask)
 
     # --- 6. Extract Summary and Predict ---
     # Because we prepended x, the "Present" context is ALWAYS at index 0!
-    # No more dynamic searching for the last valid token.
     final_memory = memory[:, 0, :]
 
     logits = self.spatial_head(final_memory)  # (B, H*W)
