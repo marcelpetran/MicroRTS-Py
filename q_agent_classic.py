@@ -38,27 +38,30 @@ class QNetClassic(nn.Module):
     super().__init__()
     H, W, F_dim = args.state_shape
     self.state_dim = H * W * F_dim
-    # WARNING: might not work with complex action spaces
     self.action_dim = args.action_dim
-    hidden = args.qnet_hidden
-    cnn_2d_out = 32
-    cnn_hidden = 16
-
+    self.flat_dim = 64 * H * W
     self.cnn = nn.Sequential(
-            nn.Conv2d(F_dim, 32, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(F_dim, 32, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Conv2d(64, cnn_2d_out, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Flatten()
         )
-    cnn_out_dim = cnn_2d_out * H * W
+    
 
-    self.head = nn.Sequential(
-        nn.Linear(cnn_out_dim, hidden),
+    # Heads (Dueling)
+    self.advantage_head = nn.Sequential(
+        nn.Linear(self.flat_dim, args.qnet_hidden),
         nn.ReLU(),
-        nn.Linear(hidden, self.action_dim)
+        nn.Linear(args.qnet_hidden, self.action_dim)
+    )
+
+    self.value_head = nn.Sequential(
+        nn.Linear(self.flat_dim, args.qnet_hidden),
+        nn.ReLU(),
+        nn.Linear(args.qnet_hidden, 1)
     )
     self.apply(self._init_weights)
 
@@ -71,8 +74,14 @@ class QNetClassic(nn.Module):
   def forward(self, batch: torch.Tensor) -> torch.Tensor:
     # Batch shape: (B, H, W, F) -> Permute to (B, F, H, W) for Conv2d
     s = batch.permute(0, 3, 1, 2)
-    x = self.cnn(s)
-    return self.head(x)
+    features = self.cnn(s)
+
+    # Dueling Heads
+    adv = self.advantage_head(features)
+    val = self.value_head(features)
+    q_vals = val + adv - adv.mean(dim=1, keepdim=True)
+
+    return q_vals
 
 
 class ReplayBuffer:
@@ -124,7 +133,6 @@ class QLearningAgentClassic:
 
     # Replay
     self.replay = ReplayBuffer(self.args.capacity)
-    # self.replay = PrioritizedReplayBuffer(self.args.capacity)
 
     # Schedules
     self.global_step = 0
@@ -238,14 +246,17 @@ class QLearningAgentClassic:
                         dtype=torch.float32, device=self.device)  # (B,)
 
     # Q(s,a) and target r + gamma * max_{a'} Q(s',a')
-    q_sa = self.q(s).gather(1, a.view(-1, 1)).squeeze(1)
+    q_sa = self.q(s).gather(1, a.unsqueeze(1)).squeeze(1)
     with torch.no_grad():
       q_val = self.q(sp)
       noise = torch.rand_like(q_val) * 1e-6
       best_actions = (q_val + noise).argmax(dim=1, keepdim=True)
+
       q_next = self.q_tgt(sp).gather(1, best_actions).squeeze(1)
+
       target = r + (1.0 - done) * self.args.gamma * q_next
       target = torch.clamp(target, min=-5.0, max=5.0)
+
     return q_sa, target
 
   def update(self):
@@ -255,33 +266,20 @@ class QLearningAgentClassic:
     if self.global_step % self.args.train_every != 0:
       return None  # only train every few steps
 
-    # batch_list, is_weights, tree_indices = self.replay.sample(self.args.batch_size)
     batch_list = self.replay.sample(self.args.batch_size)
 
-    # is_weights = torch.tensor(is_weights, dtype=torch.float32, device=self.args.device)
-
-    # --- 1. Update the Q-Network ---
     q_sa, target = self.compute_targets(batch_list)
-    with torch.no_grad():
-      td_errors = (q_sa - target).cpu().numpy()
-    # MSE loss
-    # loss_per_element = (q_sa - target) ** 2
-    # loss = (loss_per_element * is_weights).mean()
-
-    # Huber loss
     loss = F.smooth_l1_loss(q_sa, target, reduction='mean')
-    # loss_per_element = F.smooth_l1_loss(q_sa, target, reduction='none')
-    # loss = (loss_per_element * is_weights).mean()
 
     self.opt.zero_grad(set_to_none=True)
     loss.backward()
     nn.utils.clip_grad_norm_(self.q.parameters(), 1.0)
     self.opt.step()
 
-    # self.replay.update_priorities(tree_indices, td_errors)
-
-    if self.global_step % self.args.target_update_every == 0:
-      self.q_tgt.load_state_dict(self.q.state_dict())
+    with torch.no_grad():
+      for param, target_param in zip(self.q.parameters(), self.q_tgt.parameters()):
+        target_param.data.mul_(1 - self.args.tau_soft)
+        target_param.data.add_(self.args.tau_soft * param.data)
 
     return loss.item()
 
@@ -324,7 +322,7 @@ class QLearningAgentClassic:
 
       if Q_loss is not None and self.global_step % 100 == 0:
         print(
-          f"Step {self.global_step}: Q_loss={Q_loss:.4f}, Tau={self._tau():.3f}")
+          f"Step {self.global_step}: Q_loss={Q_loss:.5f}, Tau={self._tau():.3f}")
 
       if done:
         break
