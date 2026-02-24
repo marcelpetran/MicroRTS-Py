@@ -23,6 +23,6 @@
 --dropout
 0.1
 --tau_start
-2.0
+2.1
 --tau_end
 0.01
