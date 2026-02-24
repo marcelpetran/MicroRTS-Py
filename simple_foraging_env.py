@@ -49,6 +49,9 @@ class SimpleForagingEnv:
   def _get_agent_positions(self):
     return list(self.agents.values())
 
+  def _get_food_positions(self):
+    return list(self.food_positions)
+
   def reset_random_spawn(self, agent_id):
     _ = self.reset()
 
@@ -318,7 +321,7 @@ class ZigZagAgent:
       else:
         r_odd = (r % 2) == 0
         c_odd = (c % 2) == 0
-      
+
       # E/O
       if not r_odd and c_odd:
         return 2
@@ -331,7 +334,7 @@ class ZigZagAgent:
       # E/E
       elif not r_odd and not c_odd:
         return 0 if self.going_for_top else 1
-      
+
     else:
       # Only one food left, go straight to it
       target_r, target_c = target_pos
