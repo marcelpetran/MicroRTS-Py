@@ -214,9 +214,17 @@ class QLearningAgent:
 
     # Restore the agent's original position
     self.env._place_agent(0, original_pos)
+    agent_pos = self.env._get_agent_positions()[0]
+    opp_pos = self.env._get_agent_positions()[1]
+    food_pos = self.env._get_food_positions()
+
     # --- Plotting the Heatmap ---
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
-
+    # Mark agent, opponent, and food positions on the heatmap
+    ax1.scatter(agent_pos[1], agent_pos[0], color='blue', marker='X', s=100, label='Agent')
+    ax1.scatter(opp_pos[1], opp_pos[0], color='red', marker='X', s=100, label='Opponent')
+    for pos in food_pos:
+      ax1.scatter(pos[1], pos[0], color='green', marker='o', s=50, label='Food')
     # Plot Q-value heatmap
     im1 = ax1.imshow(q_value_map, cmap='viridis')
     ax1.set_title("Max Q(s, g, a) Heatmap")
