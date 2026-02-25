@@ -1,3 +1,0 @@
-[submodule "gym_microrts/microrts"]
-	path = gym_microrts/microrts
-	url = https://github.com/Farama-Foundation/MicroRTS.git
