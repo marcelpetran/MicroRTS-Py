@@ -41,15 +41,14 @@ class QNetClassic(nn.Module):
     self.action_dim = args.action_dim
     self.flat_dim = 64 * H * W
     self.cnn = nn.Sequential(
-            nn.Conv2d(F_dim, 32, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Flatten()
-        )
-    
+        nn.Conv2d(F_dim, 32, kernel_size=3, padding=1),
+        nn.ReLU(),
+        nn.Conv2d(32, 64, kernel_size=3, padding=1),
+        nn.ReLU(),
+        nn.Conv2d(64, 64, kernel_size=3, padding=1),
+        nn.ReLU(),
+        nn.Flatten()
+    )
 
     # Heads (Dueling)
     self.advantage_head = nn.Sequential(
@@ -216,9 +215,9 @@ class QLearningAgentClassic:
       return int(torch.argmax(qvals + noise))
     return int(torch.argmax(qvals + gumbel_noise))
 
-  def select_action(self, s_t: np.ndarray, eval=False) -> Tuple[int, torch.Tensor]:
+  def select_action(self, s_t: np.ndarray, eval=False) -> int:
     """
-    (interaction phase) Infer g_hat and act eps-greedily on Q(s,g_hat,*)
+    (interaction phase) act eps-greedily on Q(s, *)
     """
     s = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
     qvals = self.q(s)
@@ -285,25 +284,26 @@ class QLearningAgentClassic:
 
   # ------------- rollout -------------
 
-  def run_episode(self, max_steps: Optional[int] = None) -> Dict[str, float]:
+  def run_episode(self, opponent_agent, max_steps: Optional[int] = None) -> Dict[str, float]:
     """
-    Gathers a trajectory, stores future slices for subgoal selection,
-    and trains the Q-network and OpponentModel.
+    Gathers a trajectory and trains the Q-network.
     """
-    self.opponent_agent = SimpleAgent(1)
+    # 1. Fair spawn logic (matches your Transformer agent)
+    if np.random.rand() < 0.3:
+      obs = self.env.reset_random_spawn(0)
+    else:
+      obs = self.env.reset()
 
-    obs = self.env.reset_random_spawn(0)
     done = False
     ep_ret = 0.0
 
     for step in range(max_steps or 500):
-
       a = self.select_action(obs[0])
-      a_opponent = self.opponent_agent.select_action(obs[1])
+      a_opponent = opponent_agent.select_action(obs[1])
+
       actions = {0: a, 1: a_opponent}
       next_obs, reward, done, info = self.env.step(actions)
 
-      # Store the current step's info
       step_info = {
           "state": obs[0].copy(),
           "action": a,
@@ -311,12 +311,10 @@ class QLearningAgentClassic:
           "next_state": next_obs[0].copy(),
           "done": bool(done),
       }
-
       self.replay.push(step_info)
 
       ep_ret += reward[0]
       obs = next_obs
-
       self.global_step += 1
       Q_loss = self.update()
 
@@ -329,18 +327,15 @@ class QLearningAgentClassic:
 
     return {"return": ep_ret, "steps": step + 1}
 
-  def run_test_episode(self, max_steps: Optional[int] = None, render: bool = False, zigzag: bool = False) -> Dict[str, float]:
-    self.opponent_agent = SimpleAgent(1)
-    if zigzag:
-      self.opponent_agent = ZigZagAgent(1)
+  def run_test_episode(self, opponent_agent, max_steps: Optional[int] = None, render: bool = False) -> Dict[str, float]:
     obs = self.env.reset()
     done = False
     ep_ret = 0.0
 
     for step in range(max_steps or 500):
+      a = self.select_action(obs[0], eval=True)
+      a_opponent = opponent_agent.select_action(obs[1])
 
-      a = self.select_action(obs[0], True)
-      a_opponent = self.opponent_agent.select_action(obs[1])
       actions = {0: a, 1: a_opponent}
 
       if render:
