@@ -6,7 +6,7 @@ class SimpleForagingEnv:
   def __init__(self, grid_size=11, max_steps=50):
     self.grid_size = grid_size
     self.num_agents = 2
-    self.num_food = 2
+    self.num_food = 3
     # 0: empty, 1: food, 2: agent1, 3: agent2, 4: wall
     self.features = 5
     self.max_steps = max_steps
@@ -17,35 +17,34 @@ class SimpleForagingEnv:
 
   def reset(self):
     self.agents = {}
+    self.num_food = 3
     self.food_positions = set()
     self.walls = set()
     self.steps = 0
 
-    mid_col = self.grid_size // 2
+    mid = self.grid_size // 2
 
-    # 1. Zoned Agent Placement
-    # Agent 0 (Self) on the Left edge, Agent 1 (Opp) on the Right edge
+    # 1. Zoned Agent Placement (Left and Right edges)
     self.agents[0] = (np.random.randint(0, self.grid_size), 0)
     self.agents[1] = (np.random.randint(0, self.grid_size), self.grid_size - 1)
 
-    # 2. Zoned Food Placement
-    # Foods spawn in the middle 3 columns
-    while len(self.food_positions) < self.num_food:
-      r = np.random.randint(0, self.grid_size)
-      c = np.random.randint(mid_col - 1, mid_col + 2)
-      pos = (r, c)
-      if pos not in self.agents.values():
-        self.food_positions.add(pos)
+    # 2. Strategic Walls (Horizontal barrier with a center gap)
+    # Creates walls at row 5, cols 2,3,4 and 6,7,8. Leaves col 5 open.
+    for c in range(2, self.grid_size - 2):
+      if c != mid:
+        self.walls.add((mid, c))
 
-    # 3. Static Walls (Obstacles)
-    # Create a small bottleneck in the center to test pathing
-    wall_row = self.grid_size // 2
-    for c in range(mid_col - 2, mid_col + 3):
-      pos = (wall_row, c)
-      if pos not in self.food_positions and pos not in self.agents.values():
-        # Leave a gap in the absolute center
-        if c != mid_col:
-          self.walls.add(pos)
+    # 3. Strategic Food Placement
+    # Food 1: Left Safe Food. Ensure it doesn't spawn IN the wall (r=mid)
+    r1 = np.random.choice([r for r in range(self.grid_size) if r != mid])
+    self.food_positions.add((r1, 2))
+
+    # Food 2: Right Safe Food. Ensure it doesn't spawn IN the wall.
+    r2 = np.random.choice([r for r in range(self.grid_size) if r != mid])
+    self.food_positions.add((r2, self.grid_size - 3))
+
+    # Food 3: Central Food spawns exactly in the wall gap
+    self.food_positions.add((mid, mid))
 
     self.rewards = {0: 0, 1: 0}
     self.terminal = False
@@ -70,6 +69,9 @@ class SimpleForagingEnv:
 
   def _get_food_positions(self):
     return list(self.food_positions)
+  
+  def _get_wall_positions(self):
+    return list(self.walls)
 
   def reset_random_spawn(self, agent_id):
     _ = self.reset()
@@ -200,17 +202,12 @@ class RandomAgent:
 
 
 class SimpleAgent:
-  def __init__(self, agent_id, always_go_top=False):
+  def __init__(self, agent_id):
     self.agent_id = agent_id
-    self.going_for_top = True if np.random.rand() > 0.5 else False
-    self.always_go_top = always_go_top
-    if self.always_go_top:
-      self.going_for_top = True
+    self.target_idx = np.random.randint(0, 3)
 
   def reset(self):
-    self.going_for_top = True if np.random.rand() > 0.5 else False
-    if self.always_go_top:
-      self.going_for_top = True
+    self.target_idx = np.random.randint(0, 3)
 
   def select_action(self, observation):
     grid_size = observation.shape[0]
@@ -232,8 +229,11 @@ class SimpleAgent:
     if not food_positions or not agent_pos:
       return np.random.randint(0, 4)
 
-    target_food = min(food_positions, key=lambda x: x[0]) if self.going_for_top else max(
-      food_positions, key=lambda x: x[0])
+    food_positions.sort(key=lambda x: x[1])
+    
+    # Pick the target food based on the agent's assigned role
+    idx = min(self.target_idx, len(food_positions) - 1)
+    target_food = food_positions[idx]
 
     action_seq = bfs_path(agent_pos, target_food, obstacles, grid_size)
     return action_seq[0] if action_seq else np.random.randint(0, 4)
