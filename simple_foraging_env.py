@@ -197,7 +197,7 @@ class RandomAgent:
 
   def reset(self): pass
 
-  def select_action(self, observation):
+  def select_action(self, observation, eval=False):
     return np.random.randint(0, 4)
 
 
@@ -209,7 +209,7 @@ class SimpleAgent:
   def reset(self):
     self.target_idx = np.random.randint(0, 3)
 
-  def select_action(self, observation):
+  def select_action(self, observation, eval=False):
     grid_size = observation.shape[0]
     agent_pos = None
     food_positions = []
@@ -250,7 +250,7 @@ class GreedySwitchAgent:
 
   def reset(self): pass
 
-  def select_action(self, observation):
+  def select_action(self, observation, eval=False):
     grid_size = observation.shape[0]
     my_pos, opp_pos = None, None
     food_positions = []
