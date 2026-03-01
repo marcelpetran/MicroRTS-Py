@@ -3,7 +3,7 @@ import random
 from collections import deque
 from omg_args import OMGArgs
 
-from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv, ZigZagAgent
+from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv
 
 import numpy as np
 import torch
