@@ -341,7 +341,7 @@ class QLearningAgentClassic:
 
     for step in range(max_steps or 500):
       a = self.select_action(obs[0], eval=True)
-      a_opponent = opponent_agent.select_action(obs[1])
+      a_opponent = opponent_agent.select_action(obs[1], eval=True)
 
       actions = {0: a, 1: a_opponent}
 
