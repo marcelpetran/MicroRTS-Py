@@ -431,12 +431,11 @@ class QLearningAgent:
 
   # ------------- rollout -------------
 
-  def run_episode(self, max_steps: Optional[int] = None) -> Dict[str, float]:
+  def run_episode(self, opponent_agent, max_steps: Optional[int] = None) -> Dict[str, float]:
     """
     Gathers a trajectory, predicts subgoals, and uses Hindsight 
     to label the true subgoals at the end of the episode.
     """
-    self.opponent_agent = SimpleAgent(1)
     if np.random.rand() < 0.3:
       obs = self.env.reset_random_spawn(0)
     else:
@@ -462,7 +461,7 @@ class QLearningAgent:
       current_history = {k: list(v) for k, v in history.items()}
 
       a, g_map = self.select_action(obs[0], current_history)
-      a_opponent = self.opponent_agent.select_action(obs[1])
+      a_opponent = opponent_agent.select_action(obs[1])
       actions = {0: a, 1: a_opponent}
 
       next_obs, reward, done, info = self.env.step(actions)
@@ -538,10 +537,7 @@ class QLearningAgent:
 
     return {"return": ep_ret, "steps": step + 1}
 
-  def run_test_episode(self, max_steps: Optional[int] = None, render: bool = False, zigzag: bool = False) -> Dict[str, float]:
-    self.opponent_agent = SimpleAgent(1)
-    if zigzag:
-      self.opponent_agent = ZigZagAgent(1)
+  def run_test_episode(self, opponent_agent, max_steps: Optional[int] = None, render: bool = False, zigzag: bool = False) -> Dict[str, float]:
     obs = self.env.reset()
     done = False
     ep_ret = 0.0
@@ -557,7 +553,7 @@ class QLearningAgent:
 
       a, g_map = self.select_action(
         obs[0], current_history, eval=True)
-      a_opponent = self.opponent_agent.select_action(obs[1])
+      a_opponent = opponent_agent.select_action(obs[1])
       actions = {0: a, 1: a_opponent}
 
       if render:
