@@ -109,9 +109,6 @@ if args_parsed.opponent == 'simple':
 elif args_parsed.opponent == 'greedy':
   opponent_agent = GreedySwitchAgent(agent_id=1)
 elif args_parsed.opponent == 'classic':
-  # Instantiate a second classic agent to act as the opponent.
-  # Note: If you want it to learn concurrently, you'll need to call opponent_agent.update() in the loop!
-  # For now, this just initializes it.
   opponent_agent = QLearningAgentClassic(env, args=args)
 elif args_parsed.opponent == 'selfplay':
   print("Self-play not fully implemented yet. Defaulting to SimpleAgent.")
