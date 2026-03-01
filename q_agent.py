@@ -217,6 +217,7 @@ class QLearningAgent:
     agent_pos = self.env._get_agent_positions()[0]
     opp_pos = self.env._get_agent_positions()[1]
     food_pos = self.env._get_food_positions()
+    wall_pos = self.env._get_wall_positions()
 
     # --- Plotting the Heatmap ---
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
@@ -225,6 +226,8 @@ class QLearningAgent:
     ax1.scatter(opp_pos[1], opp_pos[0], color='red', marker='X', s=100, label='Opponent')
     for pos in food_pos:
       ax1.scatter(pos[1], pos[0], color='green', marker='o', s=50, label='Food')
+    for pos in wall_pos:
+      ax1.scatter(pos[1], pos[0], color='black', marker='W', s=50, label='Wall')
     # Plot Q-value heatmap
     im1 = ax1.imshow(q_value_map, cmap='viridis')
     ax1.set_title("Max Q(s, g, a) Heatmap")
@@ -258,6 +261,7 @@ class QLearningAgent:
     agent_pos = self.env._get_agent_positions()[0]
     opponent_pos = self.env._get_agent_positions()[1]
     food_pos = self.env._get_food_positions()
+    wall_pos = self.env._get_wall_positions()
 
     plt.figure(figsize=(6, 6))
     plt.imshow(g_map_np, cmap='viridis')
@@ -269,6 +273,9 @@ class QLearningAgent:
     for pos in food_pos:
       plt.scatter(pos[1], pos[0], color='green',
                   marker='o', s=50, label='Food')
+    for pos in wall_pos:
+      plt.scatter(pos[1], pos[0], color='black',
+                  marker='W', s=50, label='Wall')
     plt.title("Inferred Subgoal Heatmap with Agent and Food Positions")
     plt.legend()
     plt.savefig(filename)
@@ -436,10 +443,7 @@ class QLearningAgent:
     Gathers a trajectory, predicts subgoals, and uses Hindsight 
     to label the true subgoals at the end of the episode.
     """
-    if np.random.rand() < 0.3:
-      obs = self.env.reset_random_spawn(0)
-    else:
-      obs = self.env.reset()
+    obs = self.env.reset()
 
     done = False
     ep_ret = 0.0
@@ -465,6 +469,18 @@ class QLearningAgent:
       actions = {0: a, 1: a_opponent}
 
       next_obs, reward, done, info = self.env.step(actions)
+
+      if hasattr(opponent_agent, 'replay'):
+          opp_step_info = {
+              "state": obs[1].copy(),
+              "action": a_opponent,
+              "reward": float(reward[1]),
+              "next_state": next_obs[1].copy(),
+              "done": bool(done),
+          }
+          opponent_agent.replay.push(opp_step_info)
+          opponent_agent.global_step += 1
+          opponent_agent.update()
 
       # 2. Store the step without the true label (we don't know it yet)
       transition = {
