@@ -288,11 +288,7 @@ class QLearningAgentClassic:
     """
     Gathers a trajectory and trains the Q-network.
     """
-    # 1. Fair spawn logic (matches your Transformer agent)
-    if np.random.rand() < 0.3:
-      obs = self.env.reset_random_spawn(0)
-    else:
-      obs = self.env.reset()
+    obs = self.env.reset()
 
     done = False
     ep_ret = 0.0
