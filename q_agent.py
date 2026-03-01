@@ -569,7 +569,7 @@ class QLearningAgent:
 
       a, g_map = self.select_action(
         obs[0], current_history, eval=True)
-      a_opponent = opponent_agent.select_action(obs[1])
+      a_opponent = opponent_agent.select_action(obs[1], eval=True)
       actions = {0: a, 1: a_opponent}
 
       if render:
