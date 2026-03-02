@@ -187,7 +187,7 @@ class QLearningAgentClassic:
     for pos in food_pos:
       ax1.scatter(pos[1], pos[0], color='green', marker='o', s=50, label='Food')
     for pos in wall_pos:
-      ax1.scatter(pos[1], pos[0], color='black', marker='W', s=50, label='Wall')
+      ax1.scatter(pos[1], pos[0], color='black', marker='s', s=50, label='Wall')
     # Plot Q-value heatmap
     im1 = ax1.imshow(q_value_map, cmap='viridis')
     ax1.set_title("Max Q(s, g, a) Heatmap")
