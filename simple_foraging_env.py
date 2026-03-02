@@ -31,8 +31,8 @@ class SimpleForagingEnv:
     # 2. Strategic Walls (Horizontal barrier with a center gap)
     # Creates walls at row 5, cols 2,3,4 and 6,7,8. Leaves col 5 open.
     for c in range(2, self.grid_size - 2):
-      if c != mid:
-        self.walls.add((mid, c))
+      if c != mid:  # Leave a gap in the middle
+        self.walls.add((c, mid))
 
     # 3. Strategic Food Placement
     # Food 1: Left Safe Food. Ensure it doesn't spawn IN the wall (r=mid)
