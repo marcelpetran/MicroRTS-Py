@@ -227,7 +227,7 @@ class QLearningAgent:
     for pos in food_pos:
       ax1.scatter(pos[1], pos[0], color='green', marker='o', s=50, label='Food')
     for pos in wall_pos:
-      ax1.scatter(pos[1], pos[0], color='black', marker='W', s=50, label='Wall')
+      ax1.scatter(pos[1], pos[0], color='black', marker='s', s=50, label='Wall')
     # Plot Q-value heatmap
     im1 = ax1.imshow(q_value_map, cmap='viridis')
     ax1.set_title("Max Q(s, g, a) Heatmap")
@@ -275,7 +275,7 @@ class QLearningAgent:
                   marker='o', s=50, label='Food')
     for pos in wall_pos:
       plt.scatter(pos[1], pos[0], color='black',
-                  marker='W', s=50, label='Wall')
+                  marker='s', s=50, label='Wall')
     plt.title("Inferred Subgoal Heatmap with Agent and Food Positions")
     plt.legend()
     plt.savefig(filename)
@@ -480,7 +480,7 @@ class QLearningAgent:
           }
           opponent_agent.replay.push(opp_step_info)
           opponent_agent.global_step += 1
-          opponent_agent.update()
+          opp_loss = opponent_agent.update()
 
       # 2. Store the step without the true label (we don't know it yet)
       transition = {
@@ -511,6 +511,7 @@ class QLearningAgent:
 
       if Q_loss is not None and self.global_step % 100 == 0:
         print(f"Step {self.global_step}: Q_loss={Q_loss:.5f}, Model_loss={model_loss:.5f} "
+              f"Opp_Q_loss={opp_loss:.5f if opp_loss is not None else 'None'} "
               f"Tau={self._tau():.2f}")
 
       if done:
