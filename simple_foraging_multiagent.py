@@ -20,10 +20,9 @@ parser.add_argument('--classic', action='store_true', default=False,
 parser.add_argument('--opponent', type=str, default='simple',
                     choices=['simple', 'greedy', 'classic', 'selfplay'],
                     help='Type of opponent agent to play against')
+parser.add_argument('--map', type=int, default=1, choices=[1, 2, 3, 4], help='Map layout to use for the environment')
 parser.add_argument('--episodes', type=int, default=50_000,
                     help='Number of training episodes')
-parser.add_argument('--env_size', type=int, default=11,
-                    help='Grid size for SimpleForagingEnv')
 parser.add_argument('--max_steps', type=int, default=50,
                     help='Max steps per episode')
 parser.add_argument('--batch_size', type=int, default=16,
@@ -63,7 +62,9 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 device = "mps" if torch.backends.mps.is_available() else device
 print(f"Using device: {device}")
 
-env = SimpleForagingEnv(max_steps=args_parsed.max_steps, map_layout=BASE_MAP_1)
+map_layouts = [MAP_1, MAP_2, MAP_3, MAP_4]
+
+env = SimpleForagingEnv(max_steps=args_parsed.max_steps, map_layout=map_layouts[args_parsed.map - 1])
 
 obs_sample = env.reset()
 H, W, F_dim = obs_sample[0].shape
