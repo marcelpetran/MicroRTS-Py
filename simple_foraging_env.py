@@ -224,20 +224,28 @@ class SimpleAgent:
     if not food_positions:
       return np.random.randint(0, 4)
 
-    opp_pos_arr = np.argwhere(observation[:, :, 2 + (1 - self.agent_id)] == 1)
-    wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
-
-    obstacles = set(tuple(p) for p in wall_pos_arr)
-    if len(opp_pos_arr) > 0:
-      obstacles.add(tuple(opp_pos_arr[0]))
-
     food_positions.sort(key=lambda x: x[1])
     idx = min(self.target_idx, len(food_positions) - 1)
     target_food = food_positions[idx]
 
-    action_seq = bfs_path(agent_pos, target_food,
-                          obstacles, observation.shape[0])
-    return action_seq[0] if action_seq else np.random.randint(0, 4)
+    if self.current_target != target_food or not self.cached_path:
+      self.current_target = target_food
+
+      wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
+      obstacles = set(tuple(p) for p in wall_pos_arr)
+
+      opp_pos_arr = np.argwhere(
+        observation[:, :, 2 + (1 - self.agent_id)] == 1)
+      if len(opp_pos_arr) > 0:
+        obstacles.add(tuple(opp_pos_arr[0]))
+
+      self.cached_path = bfs_path(
+        agent_pos, target_food, obstacles, observation.shape[0])
+
+    if self.cached_path:
+      return self.cached_path.pop(0)
+    else:
+      return np.random.randint(0, 4)
 
 
 class GreedySwitchAgent:
@@ -276,7 +284,7 @@ class GreedySwitchAgent:
       dists.append((my_dist, opp_dist, f))
 
     dists.sort(key=lambda x: x[0])
-    target_food = dists[0][2]
+    target_food = dists[0][2]  # Default: closest food
 
     if len(dists) > 1:
       primary = dists[0]
@@ -284,5 +292,18 @@ class GreedySwitchAgent:
       if primary[1] < primary[0]:
         target_food = backup[2]
 
-    action_seq = bfs_path(my_pos, target_food, obstacles, observation.shape[0])
-    return action_seq[0] if action_seq else np.random.randint(0, 4)
+    # recompute path to the chosen target food
+    if self.current_target != target_food or not self.cached_path:
+      self.current_target = target_food
+
+      wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
+      obstacles = set(tuple(p) for p in wall_pos_arr)
+      obstacles.add(opp_pos)
+
+      self.cached_path = bfs_path(
+        my_pos, target_food, obstacles, observation.shape[0])
+
+    if self.cached_path:
+      return self.cached_path.pop(0)
+    else:
+      return np.random.randint(0, 4)
