@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from simple_foraging_env import RandomAgent, SimpleAgent
 from omg_args import OMGArgs
 
+
 class OpponentModel(nn.Module):
   def __init__(self, model, args: OMGArgs = OMGArgs()):
     super(OpponentModel, self).__init__()
@@ -46,9 +47,10 @@ class OpponentModel(nn.Module):
 
     loss = F.cross_entropy(pred_flat, target_indices)
 
-    self.optimizer.zero_grad()
-    loss.backward()
-    self.optimizer.step()
+    # Only backprop if loss is significant to save time
+    if loss.item() > 1e-5:
+      self.optimizer.zero_grad()
+      loss.backward()
+      self.optimizer.step()
 
     return loss.item()
-
