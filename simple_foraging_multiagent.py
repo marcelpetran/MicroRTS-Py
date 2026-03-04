@@ -1,5 +1,5 @@
-from simple_foraging_env import SimpleForagingEnv
 from simple_foraging_env import SimpleForagingEnv, SimpleAgent, GreedySwitchAgent
+from maps import *
 from opponent_model import OpponentModel
 from opponent_model_oracle import OpponentModelOracle
 from q_agent import QLearningAgent, ReplayBuffer
@@ -63,8 +63,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 device = "mps" if torch.backends.mps.is_available() else device
 print(f"Using device: {device}")
 
-env = SimpleForagingEnv(grid_size=args_parsed.env_size,
-                        max_steps=args_parsed.max_steps)
+env = SimpleForagingEnv(max_steps=args_parsed.max_steps, map_layout=BASE_MAP_1)
 
 obs_sample = env.reset()
 H, W, F_dim = obs_sample[0].shape
@@ -97,7 +96,7 @@ if not args_parsed.classic:
     inference_model = SpatialOpponentModel(args=args).to(device)
     op_model = OpponentModel(inference_model, args=args)
   else:
-    op_model = OpponentModelOracle(args=args)
+    op_model = OpponentModelOracle(args=args, opp_start=env._get_agent_positions()[1])
 
   agent = QLearningAgent(env, op_model, args=args)
 
