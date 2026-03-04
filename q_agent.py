@@ -443,6 +443,7 @@ class QLearningAgent:
     Gathers a trajectory, predicts subgoals, and uses Hindsight 
     to label the true subgoals at the end of the episode.
     """
+    opp_loss = 0.0
     obs = self.env.reset()
 
     done = False
@@ -511,7 +512,7 @@ class QLearningAgent:
 
       if Q_loss is not None and self.global_step % 100 == 0:
         print(f"Step {self.global_step}: Q_loss={Q_loss:.5f}, Model_loss={model_loss:.5f} "
-              f"Opp_Q_loss={opp_loss:.5f if opp_loss is not None else 'None'} "
+              f"Opp_Q_loss={opp_loss:.5f} "
               f"Tau={self._tau():.2f}")
 
       if done:
