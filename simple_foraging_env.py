@@ -30,6 +30,14 @@ class SimpleForagingEnv:
           self._initial_agents[1] = pos
 
     self.num_food = len(self._initial_food)
+
+    self.base_obs = np.zeros(
+      (self.grid_size, self.grid_size, self.features), dtype=int)
+
+    self.base_obs[:, :, 0] = 1
+    for r, c in self.walls:
+      self.base_obs[r, c, 0] = 0
+      self.base_obs[r, c, 4] = 1
     self.reset()
 
   def reset(self):
@@ -83,22 +91,22 @@ class SimpleForagingEnv:
 
   def _get_observations(self):
     observations = {}
-    for agent_id, pos in self.agents.items():
-      obs_grid = np.zeros(
-        (self.grid_size, self.grid_size, self.features), dtype=int)
-      for i in range(self.grid_size):
-        for j in range(self.grid_size):
-          if (i, j) in self.walls:
-            obs_grid[i, j, 4] = 1  # wall
-          elif (i, j) in self.food_positions:
-            obs_grid[i, j, 1] = 1  # food
-          elif (i, j) == self.agents[0]:
-            obs_grid[i, j, 2] = 1  # agent1
-          elif (i, j) == self.agents[1]:
-            obs_grid[i, j, 3] = 1  # agent2
-          else:
-            obs_grid[i, j, 0] = 1  # empty
-      observations[agent_id] = obs_grid
+    for agent_id in self.agents:
+      obs = self.base_obs.copy()
+
+      for r, c in self.food_positions:
+        obs[r, c, 0] = 0
+        obs[r, c, 1] = 1
+
+      r0, c0 = self.agents[0]
+      obs[r0, c0, 0] = 0
+      obs[r0, c0, 2] = 1
+
+      r1, c1 = self.agents[1]
+      obs[r1, c1, 0] = 0
+      obs[r1, c1, 3] = 1
+
+      observations[agent_id] = obs
     return observations
 
   def _check_terminal(self):
@@ -107,43 +115,44 @@ class SimpleForagingEnv:
     return self.terminal
 
   def step(self, actions):
-    rewards = {agent_id: 0 for agent_id in range(self.num_agents)}
+    rewards = {0: -0.01, 1: -0.01}
     new_positions = {}
 
     for agent_id, action in actions.items():
-      current_pos = self.agents[agent_id]
-      new_pos = list(current_pos)
+      r, c = self.agents[agent_id]
 
       if action == 0:  # Up
-        new_pos[0] = max(0, new_pos[0] - 1)
+        r = max(0, r - 1)
       elif action == 1:  # Down
-        new_pos[0] = min(self.grid_size - 1, new_pos[0] + 1)
+        r = min(self.grid_size - 1, r + 1)
       elif action == 2:  # Left
-        new_pos[1] = max(0, new_pos[1] - 1)
+        c = max(0, c - 1)
       elif action == 3:  # Right
-        new_pos[1] = min(self.grid_size - 1, new_pos[1] + 1)
+        c = min(self.grid_size - 1, c + 1)
 
-      new_pos_tuple = tuple(new_pos)
-      # Check wall collision
+      new_pos_tuple = (r, c)
       if new_pos_tuple in self.walls:
-        new_positions[agent_id] = current_pos  # Stay still if hit wall
+        new_positions[agent_id] = self.agents[agent_id]
       else:
         new_positions[agent_id] = new_pos_tuple
 
     self.agents = new_positions
     self.steps += 1
 
-    food_claims = {pos: [] for pos in self.food_positions}
-    for agent_id, pos in self.agents.items():
-      if pos in self.food_positions:
-        food_claims[pos].append(agent_id)
+    pos0 = self.agents[0]
+    pos1 = self.agents[1]
 
-    for pos, claiming_agents in food_claims.items():
-      if len(claiming_agents) > 0:
-        split_reward = 1.0 / len(claiming_agents) 
-        for agent_id in claiming_agents:
-          rewards[agent_id] += split_reward
-        self.food_positions.remove(pos)
+    if pos0 == pos1 and pos0 in self.food_positions:
+      rewards[0] += 0.5
+      rewards[1] += 0.5
+      self.food_positions.remove(pos0)
+    else:
+      if pos0 in self.food_positions:
+        rewards[0] += 1.0
+        self.food_positions.remove(pos0)
+      if pos1 in self.food_positions:
+        rewards[1] += 1.0
+        self.food_positions.remove(pos1)
 
     return self._get_observations(), rewards, self._check_terminal(), {}
 
@@ -206,32 +215,28 @@ class SimpleAgent:
     self.target_idx = np.random.randint(0, 3)
 
   def select_action(self, observation, eval=False):
-    grid_size = observation.shape[0]
-    agent_pos = None
-    food_positions = []
-    obstacles = set()
+    agent_pos_arr = np.argwhere(observation[:, :, 2 + self.agent_id] == 1)
+    if len(agent_pos_arr) == 0:
+      return np.random.randint(0, 4)
+    agent_pos = tuple(agent_pos_arr[0])
 
-    for i in range(grid_size):
-      for j in range(grid_size):
-        if observation[i, j, 2 + self.agent_id] == 1:
-          agent_pos = (i, j)
-        if observation[i, j, 2 + (1 - self.agent_id)] == 1:
-          obstacles.add((i, j))  # Avoid other agent
-        if observation[i, j, 4] == 1:
-          obstacles.add((i, j))  # Avoid walls
-        if observation[i, j, 1] == 1:
-          food_positions.append((i, j))
-
-    if not food_positions or not agent_pos:
+    food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
+    if not food_positions:
       return np.random.randint(0, 4)
 
-    food_positions.sort(key=lambda x: x[1])
+    opp_pos_arr = np.argwhere(observation[:, :, 2 + (1 - self.agent_id)] == 1)
+    wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
 
-    # Pick the target food based on the agent's assigned role
+    obstacles = set(tuple(p) for p in wall_pos_arr)
+    if len(opp_pos_arr) > 0:
+      obstacles.add(tuple(opp_pos_arr[0]))
+
+    food_positions.sort(key=lambda x: x[1])
     idx = min(self.target_idx, len(food_positions) - 1)
     target_food = food_positions[idx]
 
-    action_seq = bfs_path(agent_pos, target_food, obstacles, grid_size)
+    action_seq = bfs_path(agent_pos, target_food,
+                          obstacles, observation.shape[0])
     return action_seq[0] if action_seq else np.random.randint(0, 4)
 
 
@@ -247,45 +252,37 @@ class GreedySwitchAgent:
   def reset(self): pass
 
   def select_action(self, observation, eval=False):
-    grid_size = observation.shape[0]
-    my_pos, opp_pos = None, None
-    food_positions = []
-    obstacles = set()
+    agent_pos_arr = np.argwhere(observation[:, :, 2 + self.agent_id] == 1)
+    opp_pos_arr = np.argwhere(observation[:, :, 2 + (1 - self.agent_id)] == 1)
 
-    for i in range(grid_size):
-      for j in range(grid_size):
-        if observation[i, j, 2 + self.agent_id] == 1:
-          my_pos = (i, j)
-        if observation[i, j, 2 + (1 - self.agent_id)] == 1:
-          opp_pos = (i, j)
-          obstacles.add((i, j))
-        if observation[i, j, 4] == 1:
-          obstacles.add((i, j))
-        if observation[i, j, 1] == 1:
-          food_positions.append((i, j))
-
-    if not food_positions or not my_pos or not opp_pos:
+    if len(agent_pos_arr) == 0 or len(opp_pos_arr) == 0:
       return np.random.randint(0, 4)
 
-    # Calculate Manhattan distances
+    my_pos = tuple(agent_pos_arr[0])
+    opp_pos = tuple(opp_pos_arr[0])
+
+    food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
+    if not food_positions:
+      return np.random.randint(0, 4)
+
+    wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
+    obstacles = set(tuple(p) for p in wall_pos_arr)
+    obstacles.add(opp_pos)
+
     dists = []
     for f in food_positions:
       my_dist = abs(my_pos[0] - f[0]) + abs(my_pos[1] - f[1])
       opp_dist = abs(opp_pos[0] - f[0]) + abs(opp_pos[1] - f[1])
       dists.append((my_dist, opp_dist, f))
 
-    # Sort by my distance
     dists.sort(key=lambda x: x[0])
+    target_food = dists[0][2]
 
-    target_food = dists[0][2]  # Default: closest food
-
-    # Switch logic: If opponent is strictly closer to my target, and there's another food, switch!
     if len(dists) > 1:
       primary = dists[0]
       backup = dists[1]
-      # If opponent is closer to primary, but I am closer to backup (or at least it's safer)
       if primary[1] < primary[0]:
         target_food = backup[2]
 
-    action_seq = bfs_path(my_pos, target_food, obstacles, grid_size)
+    action_seq = bfs_path(my_pos, target_food, obstacles, observation.shape[0])
     return action_seq[0] if action_seq else np.random.randint(0, 4)
