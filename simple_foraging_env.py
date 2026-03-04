@@ -1,10 +1,10 @@
 import numpy as np
 from collections import deque
-from maps import BASE_MAP_1
+from maps import *
 
 
 class SimpleForagingEnv:
-  def __init__(self, max_steps=50, map_layout=BASE_MAP_1):
+  def __init__(self, max_steps=50, map_layout=MAP_1):
     self.map_layout = map_layout
     self.grid_size = len(map_layout)
     self.num_agents = 2
@@ -210,9 +210,13 @@ class SimpleAgent:
   def __init__(self, agent_id):
     self.agent_id = agent_id
     self.target_idx = np.random.randint(0, 3)
+    self.cached_path = []
+    self.current_target = None
 
   def reset(self):
     self.target_idx = np.random.randint(0, 3)
+    self.cached_path = []
+    self.current_target = None
 
   def select_action(self, observation, eval=False):
     agent_pos_arr = np.argwhere(observation[:, :, 2 + self.agent_id] == 1)
@@ -256,8 +260,12 @@ class GreedySwitchAgent:
 
   def __init__(self, agent_id):
     self.agent_id = agent_id
+    self.cached_path = []
+    self.current_target = None
 
-  def reset(self): pass
+  def reset(self):
+    self.cached_path = []
+    self.current_target = None
 
   def select_action(self, observation, eval=False):
     agent_pos_arr = np.argwhere(observation[:, :, 2 + self.agent_id] == 1)
