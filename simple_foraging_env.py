@@ -1,51 +1,41 @@
 import numpy as np
 from collections import deque
+from maps import BASE_MAP_1
 
 
 class SimpleForagingEnv:
-  def __init__(self, grid_size=11, max_steps=50):
-    self.grid_size = grid_size
+  def __init__(self, max_steps=50, map_layout=BASE_MAP_1):
+    self.map_layout = map_layout
+    self.grid_size = len(map_layout)
     self.num_agents = 2
-    self.num_food = 3
     # 0: empty, 1: food, 2: agent1, 3: agent2, 4: wall
     self.features = 5
     self.max_steps = max_steps
-    self.rewards = {0: 0, 1: 0}
-    self.terminal = False
     self.action_space = self._get_action_space()
+
+    self._initial_agents = {}
+    self._initial_food = set()
+    self.walls = set()
+
+    for i, row in enumerate(self.map_layout):
+      for j, char in enumerate(row):
+        pos = (i, j)
+        if char == '#':
+          self.walls.add(pos)
+        elif char == 'o':
+          self._initial_food.add(pos)
+        elif char == 'A':
+          self._initial_agents[0] = pos
+        elif char == 'B':
+          self._initial_agents[1] = pos
+
+    self.num_food = len(self._initial_food)
     self.reset()
 
   def reset(self):
-    self.agents = {}
-    self.num_food = 3
-    self.food_positions = set()
-    self.walls = set()
+    self.agents = self._initial_agents.copy()
+    self.food_positions = self._initial_food.copy()
     self.steps = 0
-
-    mid = self.grid_size // 2
-
-    # 1. Zoned Agent Placement (Left and Right edges)
-    self.agents[0] = (np.random.randint(0, self.grid_size), 0)
-    self.agents[1] = (np.random.randint(0, self.grid_size), self.grid_size - 1)
-
-    # 2. Strategic Walls (Horizontal barrier with a center gap)
-    # Creates walls at row 5, cols 2,3,4 and 6,7,8. Leaves col 5 open.
-    for c in range(2, self.grid_size - 2):
-      if c != mid:  # Leave a gap in the middle
-        self.walls.add((c, mid))
-
-    # 3. Strategic Food Placement
-    # Food 1: Left Safe Food. Ensure it doesn't spawn IN the wall (r=mid)
-    r1 = np.random.choice([r for r in range(self.grid_size) if r != mid])
-    self.food_positions.add((r1, 2))
-
-    # Food 2: Right Safe Food. Ensure it doesn't spawn IN the wall.
-    r2 = np.random.choice([r for r in range(self.grid_size) if r != mid])
-    self.food_positions.add((r2, self.grid_size - 3))
-
-    # Food 3: Central Food spawns exactly in the wall gap
-    self.food_positions.add((mid, mid))
-
     self.rewards = {0: 0, 1: 0}
     self.terminal = False
 
@@ -69,7 +59,7 @@ class SimpleForagingEnv:
 
   def _get_food_positions(self):
     return list(self.food_positions)
-  
+
   def _get_wall_positions(self):
     return list(self.walls)
 
@@ -143,10 +133,16 @@ class SimpleForagingEnv:
     self.agents = new_positions
     self.steps += 1
 
-    # Check for food collection
+    food_claims = {pos: [] for pos in self.food_positions}
     for agent_id, pos in self.agents.items():
       if pos in self.food_positions:
-        rewards[agent_id] += 1
+        food_claims[pos].append(agent_id)
+
+    for pos, claiming_agents in food_claims.items():
+      if len(claiming_agents) > 0:
+        split_reward = 1.0 / len(claiming_agents) 
+        for agent_id in claiming_agents:
+          rewards[agent_id] += split_reward
         self.food_positions.remove(pos)
 
     return self._get_observations(), rewards, self._check_terminal(), {}
@@ -230,7 +226,7 @@ class SimpleAgent:
       return np.random.randint(0, 4)
 
     food_positions.sort(key=lambda x: x[1])
-    
+
     # Pick the target food based on the agent's assigned role
     idx = min(self.target_idx, len(food_positions) - 1)
     target_food = food_positions[idx]
