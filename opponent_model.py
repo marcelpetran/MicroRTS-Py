@@ -48,7 +48,7 @@ class OpponentModel(nn.Module):
     loss = F.cross_entropy(pred_flat, target_indices)
 
     # Only backprop if loss is significant to save time
-    if loss.item() > 1e-5:
+    if loss.item() > self.args.aux_loss_threshold:
       self.optimizer.zero_grad()
       loss.backward()
       self.optimizer.step()
