@@ -305,6 +305,7 @@ class QLearningAgentClassic:
     Gathers a trajectory and trains the Q-network.
     """
     obs = self.env.reset()
+    opponent_agent.reset()
 
     done = False
     ep_ret = 0.0
