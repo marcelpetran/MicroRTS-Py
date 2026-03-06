@@ -135,6 +135,11 @@ class QLearningAgentClassic:
 
     # Schedules
     self.global_step = 0
+  
+  def reset(self):
+    pass
+
+   # ------------- env interaction helpers -------------
 
   @torch.no_grad()
   def heatmap_q_values(self, filename: str = "q_heatmap.png"):
