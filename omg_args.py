@@ -12,6 +12,8 @@ class OMGArgs:
   min_replay: int = 1_000
   train_every: int = 4
   target_update_every: int = 1_000
+  # Train Qnet after this many steps to let the transformer learn
+  update_after: int = 2_000
   visualise_every_n_step: int = 3
   qnet_hidden: int = 256
   max_history_length: int = 31
@@ -30,7 +32,8 @@ class OMGArgs:
   eps_start: float = 1.0
   eps_end: float = 0.05
   eps_decay_steps: int = 50_000
-
+  # Only backprop OM if loss is above this threshold
+  aux_loss_threshold: float = 1e-5
 
   # Transformer architecture params
   state_shape: Tuple[int, int, int] = None  # (H, W, F)
