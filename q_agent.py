@@ -148,6 +148,9 @@ class QLearningAgent:
     # Schedules
     self.global_step = 0
 
+  def reset(self):
+    pass
+
   # ------------- epsilon schedules --------------
 
   def _eps(self) -> float:
@@ -224,14 +227,19 @@ class QLearningAgent:
     # Mark agent, opponent, and food positions on the heatmap
     ax1.scatter(agent_pos[1], agent_pos[0], color='blue', marker='X', s=100, label='Agent')
     ax1.scatter(opp_pos[1], opp_pos[0], color='red', marker='X', s=100, label='Opponent')
-    for pos in food_pos:
-      ax1.scatter(pos[1], pos[0], color='green', marker='o', s=50, label='Food')
-    for pos in wall_pos:
-      ax1.scatter(pos[1], pos[0], color='black', marker='s', s=50, label='Wall')
+    if food_pos:
+        food_x = [pos[1] for pos in food_pos]
+        food_y = [pos[0] for pos in food_pos]
+        ax1.scatter(food_x, food_y, color='green', marker='o', s=50, label='Food')
+    if wall_pos:
+        wall_x = [pos[1] for pos in wall_pos]
+        wall_y = [pos[0] for pos in wall_pos]
+        ax1.scatter(wall_x, wall_y, color='black', marker='s', s=50, label='Wall')
     # Plot Q-value heatmap
     im1 = ax1.imshow(q_value_map, cmap='viridis')
     ax1.set_title("Max Q(s, g, a) Heatmap")
     fig.colorbar(im1, ax=ax1)
+    ax1.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=4)
 
     # Plot Policy map with arrows
     ax2.imshow(q_value_map, cmap='gray')  # Show background values
@@ -243,7 +251,7 @@ class QLearningAgent:
         ax2.text(c, r, action_arrows[action], ha='center',
                  va='center', color='red', fontsize=12)
 
-    plt.suptitle("Agent's Learned Policy for a Given Subgoal")
+    plt.suptitle("Policy and Q-value Heatmap")
     plt.savefig(filename)
     plt.close()
 
@@ -270,14 +278,16 @@ class QLearningAgent:
                 marker='X', s=100, label='Agent')
     plt.scatter(opponent_pos[1], opponent_pos[0],
                 color='red', marker='X', s=100, label='Opponent')
-    for pos in food_pos:
-      plt.scatter(pos[1], pos[0], color='green',
-                  marker='o', s=50, label='Food')
-    for pos in wall_pos:
-      plt.scatter(pos[1], pos[0], color='black',
-                  marker='s', s=50, label='Wall')
-    plt.title("Inferred Subgoal Heatmap with Agent and Food Positions")
-    plt.legend()
+    if food_pos:
+        food_x = [pos[1] for pos in food_pos]
+        food_y = [pos[0] for pos in food_pos]
+        plt.scatter(food_x, food_y, color='green', marker='o', s=50, label='Food')
+    if wall_pos:
+        wall_x = [pos[1] for pos in wall_pos]
+        wall_y = [pos[0] for pos in wall_pos]
+        plt.scatter(wall_x, wall_y, color='black', marker='s', s=50, label='Wall')
+    plt.title("Inferred Subgoal Heatmap")
+    plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=4)
     plt.savefig(filename)
     plt.close()
 
@@ -369,7 +379,7 @@ class QLearningAgent:
       model_loss = 0.0
 
     # Skip Q-learning updates for the first few steps to let the transformer learn something reasonable
-    if self.global_step < 4000 and not self.args.oracle:
+    if self.global_step < self.args.update_after and not self.args.oracle:
       return 0.0, model_loss
 
     # --- Update the Q-Network ---
@@ -445,6 +455,7 @@ class QLearningAgent:
     """
     opp_loss = 0.0
     obs = self.env.reset()
+    opponent_agent.reset()
 
     done = False
     ep_ret = 0.0
