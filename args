@@ -1,7 +1,9 @@
+--opponent
+simple
+--map
+4
 --episodes
 12_000
---env_size
-7
 --max_steps
 30
 --batch_size
