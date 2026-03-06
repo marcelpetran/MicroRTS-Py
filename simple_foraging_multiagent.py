@@ -126,7 +126,7 @@ for ep in range(args_parsed.episodes):
       f"Episode {ep+1}: Return={stats['return']:.2f}, Steps={stats['steps']}")
 
   # Run test episodes
-  if (ep + 1) % 500 == 0:
+  if (ep + 1) % 250 == 0:
     avg_ret, avg_steps = [], []
     stats = agent.run_test_episode(
       opponent_agent, max_steps=args.max_steps, render=True)
