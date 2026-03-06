@@ -13,7 +13,7 @@ class SimpleForagingEnv:
     self.max_steps = max_steps
     self.action_space = self._get_action_space()
 
-    self._initial_agents = {}
+    self._initial_agents = {0: None, 1: None}
     self._initial_food = set()
     self.walls = set()
 
@@ -63,7 +63,7 @@ class SimpleForagingEnv:
     return freed
 
   def _get_agent_positions(self):
-    return list(self.agents.values())
+    return [self.agents[0], self.agents[1]]
 
   def _get_food_positions(self):
     return list(self.food_positions)
@@ -115,7 +115,7 @@ class SimpleForagingEnv:
     return self.terminal
 
   def step(self, actions):
-    rewards = {0: -0.01, 1: -0.01}
+    rewards = {0: 0.0, 1: 0.0}
     new_positions = {}
 
     for agent_id, action in actions.items():
@@ -209,12 +209,10 @@ class RandomAgent:
 class SimpleAgent:
   def __init__(self, agent_id):
     self.agent_id = agent_id
-    self.target_idx = np.random.randint(0, 3)
     self.cached_path = []
     self.current_target = None
 
   def reset(self):
-    self.target_idx = np.random.randint(0, 3)
     self.cached_path = []
     self.current_target = None
 
@@ -228,20 +226,16 @@ class SimpleAgent:
     if not food_positions:
       return np.random.randint(0, 4)
 
-    food_positions.sort(key=lambda x: x[1])
-    idx = min(self.target_idx, len(food_positions) - 1)
-    target_food = food_positions[idx]
+    if self.current_target not in food_positions:
+      random_index = np.random.randint(0, len(food_positions))
+      self.current_target = food_positions[random_index]
+      self.cached_path = []
 
-    if self.current_target != target_food or not self.cached_path:
-      self.current_target = target_food
+    target_food = self.current_target
 
+    if not self.cached_path:
       wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
       obstacles = set(tuple(p) for p in wall_pos_arr)
-
-      opp_pos_arr = np.argwhere(
-        observation[:, :, 2 + (1 - self.agent_id)] == 1)
-      if len(opp_pos_arr) > 0:
-        obstacles.add(tuple(opp_pos_arr[0]))
 
       self.cached_path = bfs_path(
         agent_pos, target_food, obstacles, observation.shape[0])
@@ -283,7 +277,6 @@ class GreedySwitchAgent:
 
     wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
     obstacles = set(tuple(p) for p in wall_pos_arr)
-    obstacles.add(opp_pos)
 
     dists = []
     for f in food_positions:
