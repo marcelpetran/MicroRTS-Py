@@ -3,13 +3,15 @@ simple
 --map
 4
 --episodes
-12_000
+24_000
 --max_steps
-30
+50
 --batch_size
 128
 --qnet_dim
 256
+--cnn_hidden
+64
 --train_every
 2
 --target_update_every
