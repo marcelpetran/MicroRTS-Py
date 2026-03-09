@@ -1,3 +1,5 @@
+from ast import parse
+
 from simple_foraging_env import SimpleForagingEnv, SimpleAgent, GreedySwitchAgent
 from maps import *
 from opponent_model import OpponentModel
@@ -21,28 +23,30 @@ parser.add_argument('--opponent', type=str, default='simple',
                     choices=['simple', 'greedy', 'classic', 'selfplay'],
                     help='Type of opponent agent to play against')
 parser.add_argument('--map', type=int, default=1, choices=[1, 2, 3, 4], help='Map layout to use for the environment')
-parser.add_argument('--episodes', type=int, default=50_000,
+parser.add_argument('--episodes', type=int, default=12_000,
                     help='Number of training episodes')
 parser.add_argument('--max_steps', type=int, default=50,
                     help='Max steps per episode')
-parser.add_argument('--batch_size', type=int, default=16,
+parser.add_argument('--batch_size', type=int, default=128,
                     help='Batch size for training')
-parser.add_argument('--qnet_dim', type=int, default=128,
+parser.add_argument('--qnet_dim', type=int, default=256,
                     help='Hidden dimension for Q-network')
-parser.add_argument('--d_model', type=int, default=256,
+parser.add_argument('--cnn_hidden', type=int, default=64,
+                    help='Hidden dimension for CNN in Q-network')
+parser.add_argument('--d_model', type=int, default=64,
                     help='Transformer model dimension')
 parser.add_argument('--nhead', type=int, default=4,
                     help='Number of attention heads')
 parser.add_argument('--num_encoder_layers', type=int,
                     default=1, help='Number of encoder layers')
 parser.add_argument('--dim_feedforward', type=int,
-                    default=1024, help='Dimension of feedforward network')
-parser.add_argument('--dropout', type=float, default=0.12, help='Dropout rate')
-parser.add_argument('--tau_start', type=float, default=2.0,
+                    default=256, help='Dimension of feedforward network')
+parser.add_argument('--dropout', type=float, default=0.1, help='Dropout rate')
+parser.add_argument('--tau_start', type=float, default=2.1,
                     help='Starting temperature value, using Boltzmann distribution')
 parser.add_argument('--tau_end', type=float, default=0.1,
                     help='Last temperature value, using Boltzmann distribution')
-parser.add_argument('--train_every', type=int, default=4,
+parser.add_argument('--train_every', type=int, default=2,
                     help='Train every N steps')
 parser.add_argument('--target_update_every', type=int,
                     default=1_000, help='Target network update frequency')
