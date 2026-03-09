@@ -63,7 +63,6 @@ os.makedirs(f"./models_{args_parsed.folder_id}", exist_ok=True)
 os.makedirs(f"./diagrams_{args_parsed.folder_id}", exist_ok=True)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-device = "mps" if torch.backends.mps.is_available() else device
 print(f"Using device: {device}")
 
 map_layouts = [MAP_1, MAP_2, MAP_3, MAP_4]
