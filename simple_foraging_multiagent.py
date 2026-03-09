@@ -150,7 +150,7 @@ for ep in range(args_parsed.episodes):
 
 # Save the Q-network
 torch.save(agent.q.state_dict(), f"./models_{args.folder_id}/qnet.pth")
-if not args_parsed.classic:
+if not args_parsed.classic and not args_parsed.oracle:
   torch.save(agent.model.inference_model.state_dict(),
              f"./models_{args.folder_id}/opponent_model.pth")
 print("Training complete and models saved.")
