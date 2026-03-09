@@ -283,12 +283,14 @@ class GreedySwitchAgent:
       dists.append((my_dist, opp_dist, f))
 
     dists.sort(key=lambda x: x[0])
+    idx = 1
     # pick random food if tie in distances
     for i in range(1, len(dists)):
       if dists[i][0] != dists[0][0]:
+        idx = i
         break
-    if i > 1:
-      tie_foods = dists[:i]
+    if idx > 1:
+      tie_foods = dists[:idx]
       target_food = tie_foods[np.random.randint(len(tie_foods))][2]
     else:
       target_food = dists[0][2]
