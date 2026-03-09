@@ -1,3 +1,5 @@
+from turtle import back
+
 import numpy as np
 from collections import deque
 from maps import *
@@ -220,7 +222,7 @@ class SimpleAgent:
     agent_pos_arr = np.argwhere(observation[:, :, 2 + self.agent_id] == 1)
     if len(agent_pos_arr) == 0:
       return np.random.randint(0, 4)
-    agent_pos = tuple(agent_pos_arr[0])
+    my_pos = tuple(agent_pos_arr[0])
 
     food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
     if not food_positions:
@@ -231,14 +233,12 @@ class SimpleAgent:
       self.current_target = food_positions[random_index]
       self.cached_path = []
 
-    target_food = self.current_target
-
     if not self.cached_path:
       wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
       obstacles = set(tuple(p) for p in wall_pos_arr)
 
       self.cached_path = bfs_path(
-        agent_pos, target_food, obstacles, observation.shape[0])
+        my_pos, self.current_target, obstacles, observation.shape[0])
 
     if self.cached_path:
       return self.cached_path.pop(0)
@@ -275,9 +275,7 @@ class GreedySwitchAgent:
     if not food_positions:
       return np.random.randint(0, 4)
 
-    wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
-    obstacles = set(tuple(p) for p in wall_pos_arr)
-
+    # Compute distances to all food and sort by my distance
     dists = []
     for f in food_positions:
       my_dist = abs(my_pos[0] - f[0]) + abs(my_pos[1] - f[1])
@@ -285,21 +283,36 @@ class GreedySwitchAgent:
       dists.append((my_dist, opp_dist, f))
 
     dists.sort(key=lambda x: x[0])
-    target_food = dists[0][2]  # Default: closest food
+    # pick random food if tie in distances
+    for i in range(1, len(dists)):
+      if dists[i][0] != dists[0][0]:
+        break
+    if i > 1:
+      tie_foods = dists[:i]
+      target_food = tie_foods[np.random.randint(len(tie_foods))][2]
+    else:
+      target_food = dists[0][2]
 
     if len(dists) > 1:
       primary = dists[0]
       backup = dists[1]
       if primary[1] < primary[0]:
+        # Opponent is closer to the primary target food
+        # Check tie foods to see if there's a better alternative
+        for d in tie_foods:
+          if d[1] >= d[0]:
+            # Found a tie food that is closer
+            backup = d
+            break
+        # If no tie food is better, backup will just be the second closest food
         target_food = backup[2]
 
-    # recompute path to the chosen target food
+    # recompute path to the chosen target food only when needed
     if self.current_target != target_food or not self.cached_path:
       self.current_target = target_food
 
       wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
       obstacles = set(tuple(p) for p in wall_pos_arr)
-      obstacles.add(opp_pos)
 
       self.cached_path = bfs_path(
         my_pos, target_food, obstacles, observation.shape[0])
