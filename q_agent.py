@@ -30,16 +30,17 @@ class QNet(nn.Module):
     H, W, F_dim = args.state_shape
     self.state_dim = H * W * F_dim
     self.action_dim = args.action_dim
+    cnn_hidden = args.cnn_hidden
 
-    self.flat_dim = 64 * H * W
+    self.flat_dim = cnn_hidden * H * W
     input_channels = F_dim + 1
 
     self.cnn = nn.Sequential(
         nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
         nn.ReLU(),
-        nn.Conv2d(32, 64, kernel_size=3, padding=1),
+        nn.Conv2d(32, cnn_hidden, kernel_size=3, padding=1),
         nn.ReLU(),
-        nn.Conv2d(64, 64, kernel_size=3, padding=1),
+        nn.Conv2d(cnn_hidden, cnn_hidden, kernel_size=3, padding=1),
         nn.ReLU(),
         nn.Flatten()
     )
@@ -385,6 +386,9 @@ class QLearningAgent:
     # --- Update the Q-Network ---
     q_sa, target = self.compute_targets(batch_list)
     loss = F.smooth_l1_loss(q_sa, target, reduction='mean')
+
+    if loss.item() < self.args.aux_loss_threshold:
+      return 0.0, model_loss
 
     self.opt.zero_grad(set_to_none=True)
     loss.backward()
