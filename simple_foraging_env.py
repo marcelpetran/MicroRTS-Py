@@ -284,6 +284,7 @@ class GreedySwitchAgent:
 
     dists.sort(key=lambda x: x[0])
     idx = 1
+    tie_foods = []
     # pick random food if tie in distances
     for i in range(1, len(dists)):
       if dists[i][0] != dists[0][0]:
