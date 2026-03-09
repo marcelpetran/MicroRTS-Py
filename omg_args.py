@@ -16,19 +16,20 @@ class OMGArgs:
   update_after: int = 2_000
   visualise_every_n_step: int = 3
   qnet_hidden: int = 256
-  max_history_length: int = 31
-  max_steps: int = 30
+  cnn_hidden: int = 64
+  max_history_length: int = 51
+  max_steps: int = 50
   seed: int = 0
   folder_id: int = 0
 
   oracle: bool = False
   tau_soft: float = 0.005
-  tau_start: float = 2.0
+  tau_start: float = 2.1
   tau_end: float = 0.01
-  tau_decay_steps: int = 100_000
+  tau_decay_steps: int = 150_000
   beta_start: float = 1.0
   beta_end: float = 0.01
-  beta_decay_steps: int = 100_000
+  beta_decay_steps: int = 150_000
   eps_start: float = 1.0
   eps_end: float = 0.05
   eps_decay_steps: int = 50_000
@@ -40,8 +41,8 @@ class OMGArgs:
   H: int = 7  # grid height
   W: int = 7  # grid width
   action_dim: int = 4
-  d_model: int = 256
+  d_model: int = 64
   nhead: int = 4
   num_encoder_layers: int = 1
-  dim_feedforward: int = 1024
+  dim_feedforward: int = 256
   dropout: float = 0.1
