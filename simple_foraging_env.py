@@ -34,7 +34,7 @@ class SimpleForagingEnv:
     self.num_food = len(self._initial_food)
 
     self.base_obs = np.zeros(
-      (self.grid_size, self.grid_size, self.features), dtype=int)
+      (self.grid_size, self.grid_size, self.features), dtype=np.int8)
 
     self.base_obs[:, :, 0] = 1
     for r, c in self.walls:
@@ -283,32 +283,25 @@ class GreedySwitchAgent:
       dists.append((my_dist, opp_dist, f))
 
     dists.sort(key=lambda x: x[0])
-    idx = 1
-    tie_foods = []
-    # pick random food if tie in distances
-    for i in range(1, len(dists)):
-      if dists[i][0] != dists[0][0]:
-        idx = i
-        break
-    if idx > 1:
-      tie_foods = dists[:idx]
-      target_food = tie_foods[np.random.randint(len(tie_foods))][2]
-    else:
-      target_food = dists[0][2]
+    min_my_dist = min(d[0] for d in dists)
+    tie_foods = [d for d in dists if d[0] == min_my_dist]
 
-    if len(dists) > 1:
-      primary = dists[0]
-      backup = dists[1]
-      if primary[1] < primary[0]:
-        # Opponent is closer to the primary target food
-        # Check tie foods to see if there's a better alternative
-        for d in tie_foods:
-          if d[1] >= d[0]:
-            # Found a tie food that is closer
-            backup = d
+    
+    target_food = None
+    for d in tie_foods:
+        if self.current_target == d[2]:
+            target_food = d[2]
             break
-        # If no tie food is better, backup will just be the second closest food
-        target_food = backup[2]
+    
+    if target_food is None:
+        target_food = tie_foods[np.random.randint(len(tie_foods))][2]
+
+    chosen_dist = next(d for d in dists if d[2] == target_food)
+    if chosen_dist[1] < chosen_dist[0]: 
+        safer_foods = [d for d in dists if d[0] <= d[1]]
+        if safer_foods:
+            safer_foods.sort(key=lambda x: x[0])
+            target_food = safer_foods[0][2]
 
     # recompute path to the chosen target food only when needed
     if self.current_target != target_food or not self.cached_path:
