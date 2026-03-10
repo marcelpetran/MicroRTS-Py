@@ -10,6 +10,8 @@ from omg_args import OMGArgs
 import transformers as t
 from transformers import SpatialOpponentModel
 import torch
+import matplotlib
+matplotlib.use('Agg')  # Prevents memory leak on headless clusters
 import matplotlib.pyplot as plt
 import argparse
 import os
@@ -171,6 +173,7 @@ plt.legend()
 plt.tight_layout()
 plt.savefig(f"./diagrams_{args.folder_id}/training_progress.png")
 plt.show()
+plt.close('all')
 
 # python -m cProfile -o run.prof simple_foraging_train.py @args.txt
 # snakeviz run.prof
