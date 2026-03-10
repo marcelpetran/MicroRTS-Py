@@ -1,7 +1,7 @@
+import heapq
 from turtle import back
 
 import numpy as np
-from collections import deque
 from maps import *
 
 
@@ -179,23 +179,40 @@ class SimpleForagingEnv:
     print()
 
 
-def bfs_path(start, goal, obstacles, grid_size):
-  queue = deque([(start, [])])
-  visited = set([start])
+def a_star_path(start, goal, obstacles, grid_size):
+  # queue stores: (f_score, tie_breaker, (r, c), path)
+  queue = []
+  heapq.heappush(queue, (0, 0, start, []))
+
+  g_costs = {start: 0}
+  counter = 1  # Tie-breaker so heapq doesn't crash comparing tuples
 
   while queue:
-    (r, c), path = queue.popleft()
+    _, _, (r, c), path = heapq.heappop(queue)
+
     if (r, c) == goal:
       return path
 
     # 0: Up, 1: Down, 2: Left, 3: Right
     for dr, dc, action in [(-1, 0, 0), (1, 0, 1), (0, -1, 2), (0, 1, 3)]:
       nr, nc = r + dr, c + dc
+
       if 0 <= nr < grid_size and 0 <= nc < grid_size:
-        if (nr, nc) not in obstacles and (nr, nc) not in visited:
-          visited.add((nr, nc))
-          queue.append(((nr, nc), path + [action]))
-  return []  # No path found
+        if (nr, nc) not in obstacles:
+          new_cost = g_costs[(r, c)] + 1
+
+          # If we found a shorter path, or haven't visited this neighbor yet
+          if (nr, nc) not in g_costs or new_cost < g_costs[(nr, nc)]:
+            g_costs[(nr, nc)] = new_cost
+
+            # Manhattan distance heuristic
+            h_cost = abs(nr - goal[0]) + abs(nc - goal[1])
+            f_cost = new_cost + h_cost  # f = g + h
+
+            heapq.heappush(queue, (f_cost, counter, (nr, nc), path + [action]))
+            counter += 1
+
+  return [] # No path found
 
 
 class RandomAgent:
@@ -237,7 +254,7 @@ class SimpleAgent:
       wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
       obstacles = set(tuple(p) for p in wall_pos_arr)
 
-      self.cached_path = bfs_path(
+      self.cached_path = a_star_path(
         my_pos, self.current_target, obstacles, observation.shape[0])
 
     if self.cached_path:
@@ -286,22 +303,21 @@ class GreedySwitchAgent:
     min_my_dist = min(d[0] for d in dists)
     tie_foods = [d for d in dists if d[0] == min_my_dist]
 
-    
     target_food = None
     for d in tie_foods:
-        if self.current_target == d[2]:
-            target_food = d[2]
-            break
-    
+      if self.current_target == d[2]:
+        target_food = d[2]
+        break
+
     if target_food is None:
-        target_food = tie_foods[np.random.randint(len(tie_foods))][2]
+      target_food = tie_foods[np.random.randint(len(tie_foods))][2]
 
     chosen_dist = next(d for d in dists if d[2] == target_food)
-    if chosen_dist[1] < chosen_dist[0]: 
-        safer_foods = [d for d in dists if d[0] <= d[1]]
-        if safer_foods:
-            safer_foods.sort(key=lambda x: x[0])
-            target_food = safer_foods[0][2]
+    if chosen_dist[1] < chosen_dist[0]:
+      safer_foods = [d for d in dists if d[0] <= d[1]]
+      if safer_foods:
+        safer_foods.sort(key=lambda x: x[0])
+        target_food = safer_foods[0][2]
 
     # recompute path to the chosen target food only when needed
     if self.current_target != target_food or not self.cached_path:
@@ -310,7 +326,7 @@ class GreedySwitchAgent:
       wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
       obstacles = set(tuple(p) for p in wall_pos_arr)
 
-      self.cached_path = bfs_path(
+      self.cached_path = a_star_path(
         my_pos, target_food, obstacles, observation.shape[0])
 
     if self.cached_path:
