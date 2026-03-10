@@ -254,7 +254,7 @@ class QLearningAgent:
 
     plt.suptitle("Policy and Q-value Heatmap")
     plt.savefig(filename)
-    plt.close()
+    plt.close('all')
 
   def heatmap_subgoal(self, g_map: torch.Tensor, filename: str = "subgoal_heatmap.png"):
     """
@@ -290,7 +290,7 @@ class QLearningAgent:
     plt.title("Inferred Subgoal Heatmap")
     plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=4)
     plt.savefig(filename)
-    plt.close()
+    plt.close('all')
 
   # ------------- acting -------------
 
