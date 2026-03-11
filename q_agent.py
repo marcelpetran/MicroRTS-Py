@@ -226,16 +226,20 @@ class QLearningAgent:
     # --- Plotting the Heatmap ---
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
     # Mark agent, opponent, and food positions on the heatmap
-    ax1.scatter(agent_pos[1], agent_pos[0], color='blue', marker='X', s=100, label='Agent')
-    ax1.scatter(opp_pos[1], opp_pos[0], color='red', marker='X', s=100, label='Opponent')
+    ax1.scatter(agent_pos[1], agent_pos[0], color='blue',
+                marker='X', s=100, label='Agent')
+    ax1.scatter(opp_pos[1], opp_pos[0], color='red',
+                marker='X', s=100, label='Opponent')
     if food_pos:
-        food_x = [pos[1] for pos in food_pos]
-        food_y = [pos[0] for pos in food_pos]
-        ax1.scatter(food_x, food_y, color='green', marker='o', s=50, label='Food')
+      food_x = [pos[1] for pos in food_pos]
+      food_y = [pos[0] for pos in food_pos]
+      ax1.scatter(food_x, food_y, color='green',
+                  marker='o', s=50, label='Food')
     if wall_pos:
-        wall_x = [pos[1] for pos in wall_pos]
-        wall_y = [pos[0] for pos in wall_pos]
-        ax1.scatter(wall_x, wall_y, color='black', marker='s', s=50, label='Wall')
+      wall_x = [pos[1] for pos in wall_pos]
+      wall_y = [pos[0] for pos in wall_pos]
+      ax1.scatter(wall_x, wall_y, color='black',
+                  marker='s', s=50, label='Wall')
     # Plot Q-value heatmap
     im1 = ax1.imshow(q_value_map, cmap='viridis')
     ax1.set_title("Max Q(s, g, a) Heatmap")
@@ -280,13 +284,15 @@ class QLearningAgent:
     plt.scatter(opponent_pos[1], opponent_pos[0],
                 color='red', marker='X', s=100, label='Opponent')
     if food_pos:
-        food_x = [pos[1] for pos in food_pos]
-        food_y = [pos[0] for pos in food_pos]
-        plt.scatter(food_x, food_y, color='green', marker='o', s=50, label='Food')
+      food_x = [pos[1] for pos in food_pos]
+      food_y = [pos[0] for pos in food_pos]
+      plt.scatter(food_x, food_y, color='green',
+                  marker='o', s=50, label='Food')
     if wall_pos:
-        wall_x = [pos[1] for pos in wall_pos]
-        wall_y = [pos[0] for pos in wall_pos]
-        plt.scatter(wall_x, wall_y, color='black', marker='s', s=50, label='Wall')
+      wall_x = [pos[1] for pos in wall_pos]
+      wall_y = [pos[0] for pos in wall_pos]
+      plt.scatter(wall_x, wall_y, color='black',
+                  marker='s', s=50, label='Wall')
     plt.title("Inferred Subgoal Heatmap")
     plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=4)
     plt.savefig(filename)
@@ -305,7 +311,7 @@ class QLearningAgent:
     """
     (interaction phase) Infer g_hat and act eps-greedily on Q(s,g_hat,*)
     """
-    x = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
+    x = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device, non_blocking=True)
     collated_history = self.collate_history([history])
     with torch.no_grad():
       g_logits = self.model(x, collated_history)
@@ -321,21 +327,23 @@ class QLearningAgent:
     """
     Standard DDQN target computation using Hindsight Experience Replay Goal Maps.
     """
-    s = torch.stack([torch.from_numpy(b["state"]).float()
-                    for b in batch], dim=0).to(self.device)
-    sp = torch.stack([torch.from_numpy(b["next_state"]).float()
-                     for b in batch], dim=0).to(self.device)
-    a = torch.tensor([b["action"] for b in batch],
-                     dtype=torch.long, device=self.device)
-    r = torch.tensor([b["reward"] for b in batch],
-                     dtype=torch.float32, device=self.device)
-    done = torch.tensor([b["done"] for b in batch],
-                        dtype=torch.float32, device=self.device)
+    s = torch.from_numpy(
+      np.array([b["state"] for b in batch], dtype=np.float32)).to(self.device, non_blocking=True)
+    sp = torch.from_numpy(
+      np.array([b["next_state"] for b in batch], dtype=np.float32)).to(self.device, non_blocking=True)
+    a = torch.from_numpy(
+      np.array([b["action"] for b in batch], dtype=np.int64)).to(self.device, non_blocking=True)
+    r = torch.from_numpy(
+      np.array([b["reward"] for b in batch], dtype=np.float32)).to(self.device, non_blocking=True)
+    done = torch.from_numpy(
+      np.array([b["done"] for b in batch], dtype=np.float32)).to(self.device, non_blocking=True)
 
     # The Goal for this trajectory (Hindsight Label)
-    # We unsqueeze(1) because the CNN likely expects (B, 1, H, W) to concat with states
-    g_map = torch.stack([torch.from_numpy(b["rollout_goal_map"]).float() for b in batch], dim=0).to(self.device)
-    g_map_next = torch.stack([torch.from_numpy(b["rollout_goal_map_next"]).float() for b in batch], dim=0).to(self.device)
+    # We unsqueeze(1) because the CNN expects (B, 1, H, W) to concat with states
+    g_map = torch.from_numpy(
+      np.array([b["rollout_goal_map"] for b in batch], dtype=np.float32)).to(self.device, non_blocking=True)
+    g_map_next = torch.from_numpy(
+      np.array([b["rollout_goal_map_next"] for b in batch], dtype=np.float32)).to(self.device, non_blocking=True)
 
     # 1. Q(s, g, a)
     q_sa = self.q(s, g_map).gather(1, a.unsqueeze(1)).squeeze(1)
@@ -371,9 +379,9 @@ class QLearningAgent:
       valid_batch = [batch_list[i] for i in valid_indices]
 
       om_batch = {
-          "states": torch.stack([torch.from_numpy(b["state"]).float() for b in valid_batch], dim=0).to(self.device),
+          "states": torch.from_numpy(np.array([b["state"] for b in valid_batch], dtype=np.float32)).to(self.device, non_blocking=True),
           "history": self.collate_history([b["history"] for b in valid_batch]),
-          "true_goal_map": torch.stack([torch.from_numpy(b["true_goal_map"]).float() for b in valid_batch], dim=0).to(self.device)
+          "true_goal_map": torch.from_numpy(np.array([b["true_goal_map"] for b in valid_batch], dtype=np.float32)).to(self.device, non_blocking=True)
       }
       model_loss = self.model.train_step(om_batch)
     else:
@@ -386,8 +394,8 @@ class QLearningAgent:
     # --- Update the Q-Network ---
     q_sa, target = self.compute_targets(batch_list)
     loss = F.smooth_l1_loss(q_sa, target, reduction='mean')
-
-    if loss.item() < self.args.aux_loss_threshold:
+    loss_val = loss.item()
+    if loss_val < self.args.aux_loss_threshold:
       return 0.0, model_loss
 
     self.opt.zero_grad(set_to_none=True)
@@ -401,7 +409,7 @@ class QLearningAgent:
         target_param.data.mul_(1 - self.args.tau_soft)
         target_param.data.add_(self.args.tau_soft * param.data)
 
-    return loss.item(), model_loss
+    return loss_val, model_loss
 
   def collate_history(self, histories: List[Dict]) -> Dict[str, torch.Tensor]:
     """
@@ -416,34 +424,25 @@ class QLearningAgent:
     if max_len == 0:
       return {"states": torch.empty(0).to(self.device), "actions": torch.empty(0).to(self.device), "mask": torch.empty(0).to(self.device)}
 
-    mask = torch.arange(max_len, device=self.device)[None, :] < torch.tensor(
-      true_lengths, device=self.device)[:, None]
+    B = len(histories)
+    H, W, F_dim = self.args.state_shape
 
-    padded_states_list = []
-    padded_actions_list = []
-    # Create null tensors on CPU first
-    null_state_cpu = torch.zeros(*self.args.state_shape)
-    null_action_cpu = torch.tensor(0)
+    padded_states_np = np.zeros((B, max_len, H, W, F_dim), dtype=np.float32)
+    padded_actions_np = np.zeros((B, max_len), dtype=np.int64)
 
-    for h in histories:
-      num_to_pad = max_len - len(h.get("states", []))
+    for i, h in enumerate(histories):
+      seq_len = true_lengths[i]
+      if seq_len > 0:
+        padded_states_np[i, :seq_len] = h["states"]
+        padded_actions_np[i, :seq_len] = h["actions"]
 
-      states = list(h.get("states", []))
-      actions = list(h.get("actions", []))
+    final_padded_states = torch.from_numpy(padded_states_np).to(self.device, non_blocking=True)
+    final_padded_actions = torch.from_numpy(padded_actions_np).to(self.device, non_blocking=True)
 
-      if num_to_pad > 0:
-        states.extend([null_state_cpu] * num_to_pad)
-        actions.extend([null_action_cpu] * num_to_pad)
-
-      padded_states_list.append(torch.stack(states, dim=0))
-      padded_actions_list.append(torch.stack(actions, dim=0))
-
-    # Stack batches and move to device all at once
-    final_padded_states = torch.stack(
-      padded_states_list, dim=0).to(self.device)
-    final_padded_actions = torch.stack(
-      padded_actions_list, dim=0).to(self.device)
-
+    # Fast mask generation
+    true_lengths_np = np.array(true_lengths, dtype=np.int64)
+    mask = torch.arange(max_len, device=self.device).expand(
+      B, max_len) < torch.from_numpy(true_lengths_np).to(self.device, non_blocking=True).unsqueeze(1)
     return {
         "states": final_padded_states,
         "actions": final_padded_actions,
@@ -487,16 +486,16 @@ class QLearningAgent:
       next_obs, reward, done, info = self.env.step(actions)
 
       if hasattr(opponent_agent, 'replay'):
-          opp_step_info = {
-              "state": obs[1].copy(),
-              "action": a_opponent,
-              "reward": float(reward[1]),
-              "next_state": next_obs[1].copy(),
-              "done": bool(done),
-          }
-          opponent_agent.replay.push(opp_step_info)
-          opponent_agent.global_step += 1
-          opp_loss = opponent_agent.update()
+        opp_step_info = {
+            "state": obs[1].copy(),
+            "action": a_opponent,
+            "reward": float(reward[1]),
+            "next_state": next_obs[1].copy(),
+            "done": bool(done),
+        }
+        opponent_agent.replay.push(opp_step_info)
+        opponent_agent.global_step += 1
+        opp_loss = opponent_agent.update()
 
       # 2. Store the step without the true label (we don't know it yet)
       transition = {
@@ -508,15 +507,13 @@ class QLearningAgent:
           "next_state": next_obs[0].copy(),
           "done": bool(done),
           "rollout_goal_map": g_map.cpu().numpy(),
-          "history": {k: [t.clone().cpu() for t in v] for k, v in current_history.items()},
+          "history": {k: [np.copy(item) if isinstance(item, np.ndarray) else item for item in v] for k, v in current_history.items()},
       }
       episode_transitions.append(transition)
 
       # 3. Update history
-      history["states"].append(
-        torch.from_numpy(obs[0]).float().to(self.device))
-      history["actions"].append(torch.tensor(
-        a_opponent, dtype=torch.long).to(self.device))
+      history["states"].append(obs[0].copy())
+      history["actions"].append(a_opponent)
 
       ep_ret += reward[0]
       obs = next_obs
@@ -535,7 +532,7 @@ class QLearningAgent:
 
     current_true_goal_pos = None
     next_map = np.zeros((H, W), dtype=np.float32)
-    next_rollout_map = np.zeros((H, W), dtype=np.float32) # ADD THIS
+    next_rollout_map = np.zeros((H, W), dtype=np.float32)  # ADD THIS
 
     # Walk backward through the episode to label goals
     for t in reversed(episode_transitions):
@@ -600,10 +597,8 @@ class QLearningAgent:
 
       next_obs, reward, done, info = self.env.step(actions)
 
-      history["states"].append(
-        torch.from_numpy(obs[0]).float().to(self.device))
-      history["actions"].append(torch.tensor(
-        a_opponent, dtype=torch.long).to(self.device))
+      history["states"].append(obs[0].copy())
+      history["actions"].append(a_opponent)
 
       ep_ret += reward[0]
       obs = next_obs
