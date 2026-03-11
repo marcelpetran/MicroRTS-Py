@@ -16,6 +16,8 @@ import matplotlib.pyplot as plt
 import argparse
 import os
 
+torch.set_float32_matmul_precision('high')
+
 parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
 parser.add_argument('--oracle', action='store_true', default=False,
                     help='Use oracle opponent model (ground-truth future states)')
