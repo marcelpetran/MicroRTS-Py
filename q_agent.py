@@ -572,6 +572,7 @@ class QLearningAgent:
 
   def run_test_episode(self, opponent_agent, max_steps: Optional[int] = None, render: bool = False, zigzag: bool = False) -> Dict[str, float]:
     obs = self.env.reset()
+    opponent_agent.reset()
     done = False
     ep_ret = 0.0
 
