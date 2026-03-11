@@ -46,11 +46,11 @@ class OpponentModel(nn.Module):
       target_map.shape[0], -1).argmax(dim=1)  # (B,)
 
     loss = F.cross_entropy(pred_flat, target_indices)
-
+    loss_val = loss.item()
     # Only backprop if loss is significant to save time
-    if loss.item() > self.args.aux_loss_threshold:
+    if loss_val > self.args.aux_loss_threshold:
       self.optimizer.zero_grad()
       loss.backward()
       self.optimizer.step()
 
-    return loss.item()
+    return loss_val
