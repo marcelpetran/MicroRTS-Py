@@ -311,7 +311,7 @@ class QLearningAgent:
     """
     (interaction phase) Infer g_hat and act eps-greedily on Q(s,g_hat,*)
     """
-    x = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device, non_blocking=True)
+    x = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
     collated_history = self.collate_history([history])
     with torch.no_grad():
       g_logits = self.model(x, collated_history)
@@ -328,22 +328,22 @@ class QLearningAgent:
     Standard DDQN target computation using Hindsight Experience Replay Goal Maps.
     """
     s = torch.from_numpy(
-      np.array([b["state"] for b in batch], dtype=np.float32)).to(self.device, non_blocking=True)
+      np.array([b["state"] for b in batch], dtype=np.float32)).to(self.device)
     sp = torch.from_numpy(
-      np.array([b["next_state"] for b in batch], dtype=np.float32)).to(self.device, non_blocking=True)
+      np.array([b["next_state"] for b in batch], dtype=np.float32)).to(self.device)
     a = torch.from_numpy(
-      np.array([b["action"] for b in batch], dtype=np.int64)).to(self.device, non_blocking=True)
+      np.array([b["action"] for b in batch], dtype=np.int64)).to(self.device)
     r = torch.from_numpy(
-      np.array([b["reward"] for b in batch], dtype=np.float32)).to(self.device, non_blocking=True)
+      np.array([b["reward"] for b in batch], dtype=np.float32)).to(self.device)
     done = torch.from_numpy(
-      np.array([b["done"] for b in batch], dtype=np.float32)).to(self.device, non_blocking=True)
+      np.array([b["done"] for b in batch], dtype=np.float32)).to(self.device)
 
     # The Goal for this trajectory (Hindsight Label)
     # We unsqueeze(1) because the CNN expects (B, 1, H, W) to concat with states
     g_map = torch.from_numpy(
-      np.array([b["rollout_goal_map"] for b in batch], dtype=np.float32)).to(self.device, non_blocking=True)
+      np.array([b["rollout_goal_map"] for b in batch], dtype=np.float32)).to(self.device)
     g_map_next = torch.from_numpy(
-      np.array([b["rollout_goal_map_next"] for b in batch], dtype=np.float32)).to(self.device, non_blocking=True)
+      np.array([b["rollout_goal_map_next"] for b in batch], dtype=np.float32)).to(self.device)
 
     # 1. Q(s, g, a)
     q_sa = self.q(s, g_map).gather(1, a.unsqueeze(1)).squeeze(1)
@@ -379,9 +379,9 @@ class QLearningAgent:
       valid_batch = [batch_list[i] for i in valid_indices]
 
       om_batch = {
-          "states": torch.from_numpy(np.array([b["state"] for b in valid_batch], dtype=np.float32)).to(self.device, non_blocking=True),
+          "states": torch.from_numpy(np.array([b["state"] for b in valid_batch], dtype=np.float32)).to(self.device),
           "history": self.collate_history([b["history"] for b in valid_batch]),
-          "true_goal_map": torch.from_numpy(np.array([b["true_goal_map"] for b in valid_batch], dtype=np.float32)).to(self.device, non_blocking=True)
+          "true_goal_map": torch.from_numpy(np.array([b["true_goal_map"] for b in valid_batch], dtype=np.float32)).to(self.device)
       }
       model_loss = self.model.train_step(om_batch)
     else:
@@ -419,7 +419,7 @@ class QLearningAgent:
       return {}
 
     true_lengths = [len(h.get("states", [])) for h in histories]
-    max_len = max(true_lengths) if true_lengths else 0
+    max_len = self.args.max_history_length
 
     if max_len == 0:
       return {"states": torch.empty(0).to(self.device), "actions": torch.empty(0).to(self.device), "mask": torch.empty(0).to(self.device)}
@@ -436,13 +436,13 @@ class QLearningAgent:
         padded_states_np[i, :seq_len] = h["states"]
         padded_actions_np[i, :seq_len] = h["actions"]
 
-    final_padded_states = torch.from_numpy(padded_states_np).to(self.device, non_blocking=True)
-    final_padded_actions = torch.from_numpy(padded_actions_np).to(self.device, non_blocking=True)
+    final_padded_states = torch.from_numpy(padded_states_np).to(self.device)
+    final_padded_actions = torch.from_numpy(padded_actions_np).to(self.device)
 
     # Fast mask generation
     true_lengths_np = np.array(true_lengths, dtype=np.int64)
     mask = torch.arange(max_len, device=self.device).expand(
-      B, max_len) < torch.from_numpy(true_lengths_np).to(self.device, non_blocking=True).unsqueeze(1)
+      B, max_len) < torch.from_numpy(true_lengths_np).to(self.device).unsqueeze(1)
     return {
         "states": final_padded_states,
         "actions": final_padded_actions,
