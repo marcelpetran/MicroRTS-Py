@@ -143,7 +143,7 @@ class QLearningAgentClassic:
    # ------------- env interaction helpers -------------
 
   @torch.no_grad()
-  def heatmap_q_values(self, filename: str = "q_heatmap.png"):
+  def heatmap_q_values(self, filename: str = "q_heatmap.png", save: bool = True):
     """
     Utility to visualize Q-values as a heatmap over the grid for a given state and subgoal.
 
@@ -210,7 +210,10 @@ class QLearningAgentClassic:
                  va='center', color='red', fontsize=12)
 
     plt.suptitle("Agent's Learned Policy for a Given Subgoal")
-    plt.savefig(filename)
+    if save:
+      plt.savefig(filename)
+    else:
+      plt.show()
     plt.close()
 
   # ------------- epsilon schedules --------------

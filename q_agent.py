@@ -177,7 +177,7 @@ class QLearningAgent:
 
   # ------------- visualization utility -------------
   @torch.no_grad()
-  def heatmap_q_values(self, g: torch.Tensor, filename: str = "q_heatmap.png"):
+  def heatmap_q_values(self, g: torch.Tensor, filename: str = "q_heatmap.png", save: bool = True):
     """
     Utility to visualize Q-values as a heatmap over the grid for a given state and subgoal.
 
@@ -257,10 +257,13 @@ class QLearningAgent:
                  va='center', color='red', fontsize=12)
 
     plt.suptitle("Policy and Q-value Heatmap")
-    plt.savefig(filename)
+    if save:
+      plt.savefig(filename)
+    else:
+      plt.show()
     plt.close('all')
 
-  def heatmap_subgoal(self, g_map: torch.Tensor, filename: str = "subgoal_heatmap.png"):
+  def heatmap_subgoal(self, g_map: torch.Tensor, filename: str = "subgoal_heatmap.png", save: bool = True):
     """
     Utility to visualize the inferred subgoal heatmap, with marked agent positions and food locations.
 
@@ -295,7 +298,10 @@ class QLearningAgent:
                   marker='s', s=50, label='Wall')
     plt.title("Inferred Subgoal Heatmap")
     plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=4)
-    plt.savefig(filename)
+    if save:
+      plt.savefig(filename)
+    else:
+      plt.show()
     plt.close('all')
 
   # ------------- acting -------------
@@ -592,7 +598,7 @@ class QLearningAgent:
 
     return {"return": ep_ret, "steps": step + 1}
 
-  def run_test_episode(self, opponent_agent, max_steps: Optional[int] = None, render: bool = False, zigzag: bool = False) -> Dict[str, float]:
+  def run_test_episode(self, opponent_agent, max_steps: Optional[int] = None, render: bool = False) -> Dict[str, float]:
     obs = self.env.reset()
     opponent_agent.reset()
     done = False
