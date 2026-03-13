@@ -292,7 +292,7 @@ class QLearningAgentClassic:
 
     self.opt.zero_grad(set_to_none=True)
     loss.backward()
-    nn.utils.clip_grad_norm_(self.q.parameters(), 1.0)
+    nn.utils.clip_grad_norm_(self.q.parameters(), 5.0)
     self.opt.step()
 
     with torch.no_grad():
