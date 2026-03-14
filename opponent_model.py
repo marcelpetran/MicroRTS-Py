@@ -1,4 +1,4 @@
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 import transformers as t
 import torch
 import torch.nn as nn
@@ -18,6 +18,44 @@ class OpponentModel(nn.Module):
       self.inference_model.parameters(), lr=args.lr)
     self.device = args.device
     self.args = args
+  
+  def collate_history(self, histories: List[Dict]) -> Dict[str, torch.Tensor]:
+    """
+    Pads history sequences to max_len within the batch.
+    """
+    if not histories:
+      return {}
+
+    true_lengths = [len(h.get("states", [])) for h in histories]
+    max_len = self.args.max_history_length
+
+    if max_len == 0:
+      return {"states": torch.empty(0).to(self.device), "actions": torch.empty(0).to(self.device), "mask": torch.empty(0).to(self.device)}
+
+    B = len(histories)
+    H, W, F_dim = self.args.state_shape
+
+    padded_states_np = np.zeros((B, max_len, H, W, F_dim), dtype=np.float32)
+    padded_actions_np = np.zeros((B, max_len), dtype=np.int64)
+
+    for i, h in enumerate(histories):
+      seq_len = true_lengths[i]
+      if seq_len > 0:
+        padded_states_np[i, :seq_len] = h["states"]
+        padded_actions_np[i, :seq_len] = h["actions"]
+
+    final_padded_states = torch.from_numpy(padded_states_np).to(self.device)
+    final_padded_actions = torch.from_numpy(padded_actions_np).to(self.device)
+
+    # Fast mask generation
+    true_lengths_np = np.array(true_lengths, dtype=np.int64)
+    mask = torch.arange(max_len, device=self.device).expand(
+      B, max_len) < torch.from_numpy(true_lengths_np).to(self.device).unsqueeze(1)
+    return {
+        "states": final_padded_states,
+        "actions": final_padded_actions,
+        "mask": mask
+    }
 
   def forward(self, x: torch.Tensor, history: Dict) -> torch.Tensor:
     """
