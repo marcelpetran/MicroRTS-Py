@@ -1,5 +1,5 @@
 from typing import Dict, Tuple, List
-import transformers as t
+import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -18,7 +18,7 @@ class OpponentModel(nn.Module):
       self.inference_model.parameters(), lr=args.lr)
     self.device = args.device
     self.args = args
-  
+
   def collate_history(self, histories: List[Dict]) -> Dict[str, torch.Tensor]:
     """
     Pads history sequences to max_len within the batch.
@@ -56,6 +56,27 @@ class OpponentModel(nn.Module):
         "actions": final_padded_actions,
         "mask": mask
     }
+
+  def pretrain(self, dataset, epochs=10, batch_size=128):
+    for epoch in range(epochs):
+      random.shuffle(dataset)
+
+      epoch_losses = []
+
+      for i in range(0, len(dataset), batch_size):
+        batch_data = dataset[i: i + batch_size]
+        om_batch = {
+            "states": torch.from_numpy(np.stack([b["state"] for b in batch_data], dtype=np.float32)).to(self.args.device, non_blocking=True),
+            "history": self.collate_history([b["history"] for b in batch_data]),
+            "true_goal_map": torch.from_numpy(np.stack([b["true_goal_map"] for b in batch_data], dtype=np.float32)).to(self.args.device, non_blocking=True)
+        }
+
+        loss = self.train_step(om_batch)
+        epoch_losses.append(loss)
+
+      avg_loss = sum(epoch_losses) / len(epoch_losses)
+      print(
+        f"Pretrain Epoch {epoch+1}/{epochs}, Opponent Model Loss: {avg_loss:.6f}")
 
   def forward(self, x: torch.Tensor, history: Dict) -> torch.Tensor:
     """
