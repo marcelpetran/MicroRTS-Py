@@ -8,7 +8,8 @@ from maps import *
 class SimpleForagingEnv:
   def __init__(self, max_steps=50, map_layout=MAP_1):
     self.map_layout = map_layout
-    self.grid_size = len(map_layout)
+    self.height = len(map_layout)
+    self.width = len(map_layout[0])
     self.num_agents = 2
     # 0: empty, 1: food, 2: agent1, 3: agent2, 4: wall
     self.features = 5
@@ -34,7 +35,7 @@ class SimpleForagingEnv:
     self.num_food = len(self._initial_food)
 
     self.base_obs = np.zeros(
-      (self.grid_size, self.grid_size, self.features), dtype=np.int8)
+      (self.height, self.width, self.features), dtype=np.int8)
 
     self.base_obs[:, :, 0] = 1
     for r, c in self.walls:
@@ -58,8 +59,8 @@ class SimpleForagingEnv:
     occupied = set(self.agents.values()).union(
       self.food_positions).union(self.walls)
     freed = []
-    for i in range(self.grid_size):
-      for j in range(self.grid_size):
+    for i in range(self.height):
+      for j in range(self.width):
         if (i, j) not in occupied:
           freed.append((i, j))
     return freed
@@ -126,11 +127,11 @@ class SimpleForagingEnv:
       if action == 0:  # Up
         r = max(0, r - 1)
       elif action == 1:  # Down
-        r = min(self.grid_size - 1, r + 1)
+        r = min(self.height - 1, r + 1)
       elif action == 2:  # Left
         c = max(0, c - 1)
       elif action == 3:  # Right
-        c = min(self.grid_size - 1, c + 1)
+        c = min(self.width - 1, c + 1)
 
       new_pos_tuple = (r, c)
       if new_pos_tuple in self.walls:
@@ -160,10 +161,10 @@ class SimpleForagingEnv:
 
   @staticmethod
   def render_from_obs(obs):
-    grid_size = obs.shape[0]
-    render_grid = np.full((grid_size, grid_size), '.', dtype=str)
-    for i in range(grid_size):
-      for j in range(grid_size):
+    h, w = obs.shape[0], obs.shape[1]
+    render_grid = np.full((h, w), '.', dtype=str)
+    for i in range(h):
+      for j in range(w):
         if obs[i, j, 4] == 1:
           render_grid[i, j] = '#'  # Wall
         elif obs[i, j, 1] == 1:
@@ -179,7 +180,7 @@ class SimpleForagingEnv:
     print()
 
 
-def a_star_path(start, goal, obstacles, grid_size):
+def a_star_path(start, goal, obstacles, h, w):
   # queue stores: (f_score, tie_breaker, (r, c), path)
   queue = []
   heapq.heappush(queue, (0, 0, start, []))
@@ -197,7 +198,7 @@ def a_star_path(start, goal, obstacles, grid_size):
     for dr, dc, action in [(-1, 0, 0), (1, 0, 1), (0, -1, 2), (0, 1, 3)]:
       nr, nc = r + dr, c + dc
 
-      if 0 <= nr < grid_size and 0 <= nc < grid_size:
+      if 0 <= nr < h and 0 <= nc < w:
         if (nr, nc) not in obstacles:
           new_cost = g_costs[(r, c)] + 1
 
@@ -255,7 +256,7 @@ class SimpleAgent:
       obstacles = set(tuple(p) for p in wall_pos_arr)
 
       self.cached_path = a_star_path(
-        my_pos, self.current_target, obstacles, observation.shape[0])
+        my_pos, self.current_target, obstacles, observation.shape[0], observation.shape[1])
 
     if self.cached_path:
       return self.cached_path.pop(0)
@@ -327,7 +328,7 @@ class GreedySwitchAgent:
       obstacles = set(tuple(p) for p in wall_pos_arr)
 
       self.cached_path = a_star_path(
-        my_pos, target_food, obstacles, observation.shape[0])
+        my_pos, target_food, obstacles, observation.shape[0], observation.shape[1])
 
     if self.cached_path:
       return self.cached_path.pop(0)
