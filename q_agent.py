@@ -393,10 +393,6 @@ class QLearningAgent:
     else:
       model_loss = 0.0
 
-    # Skip Q-learning updates for the first few steps to let the transformer learn something reasonable
-    if self.global_step < self.args.update_after and not self.args.oracle:
-      return 0.0, model_loss
-
     # --- Update the Q-Network ---
     q_sa, target = self.compute_targets(batch_list)
     loss = F.smooth_l1_loss(q_sa, target, reduction='mean')
