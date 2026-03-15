@@ -55,7 +55,7 @@ class SpatialOpponentModel(nn.Module):
     self.args = args
     H, W, F_dim = args.state_shape
 
-    # 1. Feature Extractor to embed each (H, W, F) state into a d_model vector
+    # CNN feature extractor to embed each (H, W, F) state into a d_model vector
     # Projects (H, W, F) -> d_model
     self.feature_extractor = nn.Sequential(
         nn.Conv2d(F_dim, 16, kernel_size=3, padding=1),
@@ -94,7 +94,7 @@ class SpatialOpponentModel(nn.Module):
     """
     B, H, W, F_dim = x.shape
 
-    # --- STEP 0 Heuristic (Optional but good for jumpstarting) ---
+    # Heuristic fallback if no history is available: predict opponent on food tiles
     if not history or 'states' not in history or history['states'].numel() == 0:
       food_channel = x[:, :, :, 1]
       logits = torch.where(food_channel > 0.5,
@@ -102,11 +102,11 @@ class SpatialOpponentModel(nn.Module):
                            torch.tensor(-10.0, device=x.device))
       return logits
 
-    # --- 1. Embed Current State ---
+    # Embed current state
     x_flat = x.permute(0, 3, 1, 2)  # (B, F, H, W)
     x_feat = self.feature_extractor(x_flat).unsqueeze(1)  # (B, 1, d_model)
 
-    # --- 2. Embed History ---
+    # Embed History
     hist_states = history['states']  # (B, T, H, W, F)
     hist_actions = history['actions']  # (B, T)
     hist_mask = history['mask']      # (B, T) True for valid tokens
@@ -120,25 +120,24 @@ class SpatialOpponentModel(nn.Module):
 
     hist_feat = hist_feat + hist_action_feat  # (B, T, d_model)
 
-    # --- 3. Prepend Current State ---
+    # Prepend current state
     seq_feats = torch.cat([x_feat, hist_feat], dim=1)  # (B, 1 + T, d_model)
 
-    # Update mask: Index 0 current state x is ALWAYS valid
+    # Index 0 current state x is always valid
     x_mask = torch.ones((B, 1), dtype=torch.bool, device=x.device)
     full_mask = torch.cat([x_mask, hist_mask], dim=1)  # (B, 1 + T)
 
-    # --- 4. Positional Encoding ---
+    # Positional encoding
     seq_feats = seq_feats * np.sqrt(self.args.d_model)
     seq_feats = self.pos_encoder(seq_feats)
 
-    # --- 5. Transformer Pass ---
+    # Transformer pass
     # src_key_padding_mask expects True for PADDING
     src_key_padding_mask = ~full_mask
     memory = self.transformer(
       seq_feats, src_key_padding_mask=src_key_padding_mask)
 
-    # --- 6. Extract Summary and Predict ---
-    # Because we prepended x, the "Present" context is ALWAYS at index 0!
+    # Extract summary and predict
     final_memory = memory[:, 0, :]
 
     logits = self.spatial_head(final_memory)  # (B, H*W)
