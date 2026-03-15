@@ -1,22 +1,24 @@
-from ast import parse
-
+import os
+import argparse
+import matplotlib.pyplot as plt
 from simple_foraging_env import SimpleForagingEnv, SimpleAgent, GreedySwitchAgent
+import maps
 from maps import *
 from opponent_model import OpponentModel
 from opponent_model_oracle import OpponentModelOracle
 from q_agent import QLearningAgent, ReplayBuffer
 from q_agent_classic import QLearningAgentClassic
 from omg_args import OMGArgs
-import transformers as t
 from transformers import SpatialOpponentModel
+from collect_data import collect_offline_data
 import torch
 import matplotlib
 matplotlib.use('Agg')  # Prevents memory leak on headless clusters
-import matplotlib.pyplot as plt
-import argparse
-import os
 
 torch.set_float32_matmul_precision('high')
+
+# !KEEP IN MIND, dir(maps) will give all attributes in alphabetical order!
+map_layouts = [getattr(maps, m) for m in dir(maps) if m.startswith("MAP_")]
 
 parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
 parser.add_argument('--oracle', action='store_true', default=False,
@@ -26,7 +28,8 @@ parser.add_argument('--classic', action='store_true', default=False,
 parser.add_argument('--opponent', type=str, default='simple',
                     choices=['simple', 'greedy', 'classic', 'selfplay'],
                     help='Type of opponent agent to play against')
-parser.add_argument('--map', type=int, default=1, choices=[1, 2, 3, 4], help='Map layout to use for the environment')
+parser.add_argument('--map', type=int, default=1,
+                    choices=[i for i in range(1, len(map_layouts)+1)], help='Map layout to use for the environment')
 parser.add_argument('--episodes', type=int, default=12_000,
                     help='Number of training episodes')
 parser.add_argument('--max_steps', type=int, default=50,
@@ -71,9 +74,10 @@ os.makedirs(f"./diagrams_{args_parsed.folder_id}", exist_ok=True)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 
-map_layouts = [MAP_1, MAP_2, MAP_3, MAP_4]
+map_name = f"map_{args_parsed.map}"
 
-env = SimpleForagingEnv(max_steps=args_parsed.max_steps, map_layout=map_layouts[args_parsed.map - 1])
+env = SimpleForagingEnv(max_steps=args_parsed.max_steps,
+                        map_layout=map_layouts[args_parsed.map - 1])
 
 obs_sample = env.reset()
 H, W, F_dim = obs_sample[0].shape
@@ -106,7 +110,8 @@ if not args_parsed.classic:
     inference_model = SpatialOpponentModel(args=args).to(device)
     op_model = OpponentModel(inference_model, args=args)
   else:
-    op_model = OpponentModelOracle(args=args, opp_start=env._get_agent_positions()[1])
+    op_model = OpponentModelOracle(
+      args=args, opp_start=env._get_agent_positions()[1])
 
   agent = QLearningAgent(env, op_model, args=args)
 
@@ -123,6 +128,19 @@ elif args_parsed.opponent == 'selfplay':
   print("Self-play not fully implemented yet. Defaulting to SimpleAgent.")
   opponent_agent = SimpleAgent(agent_id=1)
 
+if not args_parsed.classic and not args_parsed.oracle:
+  os.makedirs(f"./dataset", exist_ok=True)
+  dataset_path = f"./dataset/dataset_{map_name}.pt"
+
+  if not os.path.exists(dataset_path):
+    collect_offline_data(num_episodes=2000, save_path=dataset_path,
+                         map_layout=map_layouts[args_parsed.map - 1])
+
+  print("Loading offline dataset and pretraining opponent model...")
+  dataset = torch.load(dataset_path, weights_only=False)
+  agent.model.pretrain(dataset, epochs=15, batch_size=args_parsed.batch_size)
+  print("Opponent Model pretraining complete! Starting RL episodes...")
+
 return_list = []
 steps_list = []
 episode_list = []
@@ -136,7 +154,8 @@ for ep in range(args_parsed.episodes):
 
   # Run test episodes
   if (ep + 1) % args_parsed.save_models_every == 0:
-    torch.save(agent.q.state_dict(), f"./models_{args.folder_id}/qnet_ep{ep+1}.pth")
+    torch.save(agent.q.state_dict(),
+               f"./models_{args.folder_id}/qnet_ep{ep+1}.pth")
     if not args_parsed.classic and not args_parsed.oracle:
       torch.save(agent.model.inference_model.state_dict(),
                  f"./models_{args.folder_id}/opponent_model_ep{ep+1}.pth")
