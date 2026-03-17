@@ -134,11 +134,12 @@ if not args_parsed.classic and not args_parsed.oracle:
   dataset_path = f"./dataset/dataset_{map_name}.pt"
 
   if not os.path.exists(dataset_path):
-    collect_offline_data(num_episodes=2000, save_path=dataset_path,
+    collect_offline_data(num_episodes=500, save_path=dataset_path,
                          map_layout=map_layouts[args_parsed.map - 1])
 
   print("Loading offline dataset and pretraining opponent model...")
   dataset = torch.load(dataset_path, weights_only=False)
+  print(f"Dataset loaded with {len(dataset)} samples. Starting pretraining...")
   agent.model.pretrain(dataset, epochs=15, batch_size=args_parsed.batch_size)
   print("Opponent Model pretraining complete! Starting RL episodes...")
 
