@@ -261,6 +261,7 @@ class QLearningAgent:
       plt.show()
     plt.close('all')
 
+  @torch.no_grad()
   def heatmap_subgoal(self, g_map: torch.Tensor, filename: str = "subgoal_heatmap.png", save: bool = True):
     """
     Utility to visualize the inferred subgoal heatmap, with marked agent positions and food locations.
@@ -311,6 +312,7 @@ class QLearningAgent:
       return int(torch.argmax(qvals + noise))
     return int(torch.argmax(qvals + gumbel_noise))
 
+  @torch.no_grad()
   def select_action(self, s_t: np.ndarray, history: Dict[str, List[torch.Tensor]], eval=False) -> Tuple[int, torch.Tensor]:
     """
     (interaction phase) Infer g_hat and act eps-greedily on Q(s,g_hat,*)
@@ -406,8 +408,7 @@ class QLearningAgent:
     # --- Target Update ---
     with torch.no_grad():
       for param, target_param in zip(self.q.parameters(), self.q_tgt.parameters()):
-        target_param.data.mul_(1 - self.args.tau_soft)
-        target_param.data.add_(self.args.tau_soft * param.data)
+        target_param.lerp_(param, self.args.tau_soft)
 
     return loss_val, model_loss
 

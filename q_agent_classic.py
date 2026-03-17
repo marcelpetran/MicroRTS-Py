@@ -234,7 +234,8 @@ class QLearningAgentClassic:
       noise = torch.rand_like(qvals) * 1e-6
       return int(torch.argmax(qvals + noise))
     return int(torch.argmax(qvals + gumbel_noise))
-
+  
+  @torch.no_grad()
   def select_action(self, s_t: np.ndarray, eval=False) -> int:
     """
     (interaction phase) act eps-greedily on Q(s, *)
@@ -252,20 +253,16 @@ class QLearningAgentClassic:
     B = len(batch)
     H, W, F_dim = self.args.state_shape
 
-    # Stack current/next states
-    s = torch.stack([torch.from_numpy(b["state"]).float()
-                    for b in batch], dim=0).to(self.device)         # (B,H,W,F)
-    sp = torch.stack([torch.from_numpy(b["next_state"]).float()
-                     for b in batch], dim=0).to(self.device)   # (B,H,W,F)
-    a = torch.tensor([b["action"] for b in batch], dtype=torch.long,
-                     device=self.device)                  # (B,)
-    r = torch.tensor([b["reward"] for b in batch],
-                     dtype=torch.float32, device=self.device)  # (B,)
-    done = torch.tensor([b["done"] for b in batch],
-                        dtype=torch.float32, device=self.device)  # (B,)
+    s = torch.from_numpy(np.stack([b["state"] for b in batch])).float().to(self.device)
+    sp = torch.from_numpy(np.stack([b["next_state"] for b in batch])).float().to(self.device)
+    
+    a = torch.from_numpy(np.array([b["action"] for b in batch], dtype=np.int64)).to(self.device)
+    r = torch.from_numpy(np.array([b["reward"] for b in batch], dtype=np.float32)).to(self.device)
+    done = torch.from_numpy(np.array([b["done"] for b in batch], dtype=np.float32)).to(self.device)
 
     # Q(s,a) and target r + gamma * max_{a'} Q(s',a')
     q_sa = self.q(s).gather(1, a.unsqueeze(1)).squeeze(1)
+    
     with torch.no_grad():
       q_val = self.q(sp)
       noise = torch.rand_like(q_val) * 1e-6
@@ -300,8 +297,7 @@ class QLearningAgentClassic:
 
     with torch.no_grad():
       for param, target_param in zip(self.q.parameters(), self.q_tgt.parameters()):
-        target_param.data.mul_(1 - self.args.tau_soft)
-        target_param.data.add_(self.args.tau_soft * param.data)
+        target_param.lerp_(param, self.args.tau_soft)
 
     return loss.item()
 
