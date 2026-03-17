@@ -576,10 +576,10 @@ class QLearningAgent:
 
       if render:
         self.heatmap_q_values(
-          g_map, f"./diagrams_{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
+          g_map, f"./diagrams/{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
         if not self.args.oracle:
           self.heatmap_subgoal(
-            g_map, f"./diagrams_{self.args.folder_id}/gmap_step{self.global_step + step}.png")
+            g_map, f"./diagrams/{self.args.folder_id}/gmap_step{self.global_step + step}.png")
         SimpleForagingEnv.render_from_obs(obs[0])
 
       next_obs, reward, done, info = self.env.step(actions)

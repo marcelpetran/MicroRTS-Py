@@ -67,9 +67,9 @@ parser.add_argument('--save_models_every', type=int, default=500,
                     help='Frequency of saving model checkpoints (in episodes)')
 args_parsed = parser.parse_args()
 
-# Necessary directories
-os.makedirs(f"./models_{args_parsed.folder_id}", exist_ok=True)
-os.makedirs(f"./diagrams_{args_parsed.folder_id}", exist_ok=True)
+# Necessary directoriess
+os.makedirs(f"./models/{args_parsed.folder_id}", exist_ok=True)
+os.makedirs(f"./diagrams/{args_parsed.folder_id}", exist_ok=True)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
@@ -157,10 +157,10 @@ for ep in range(args_parsed.episodes):
   # Run test episodes
   if (ep + 1) % args_parsed.save_models_every == 0:
     torch.save(agent.q.state_dict(),
-               f"./models_{args.folder_id}/qnet_ep{ep+1}.pth")
+               f"./models/{args.folder_id}/qnet_ep{ep+1}.pth")
     if not args_parsed.classic and not args_parsed.oracle:
       torch.save(agent.model.inference_model.state_dict(),
-                 f"./models_{args.folder_id}/opponent_model_ep{ep+1}.pth")
+                 f"./models/{args.folder_id}/opponent_model_ep{ep+1}.pth")
     avg_ret, avg_steps = [], []
     stats = agent.run_test_episode(
       opponent_agent, max_steps=args.max_steps, render=True)
@@ -179,10 +179,10 @@ for ep in range(args_parsed.episodes):
       f"Test Episode {ep+1}: Return={stats['return']:.2f} | Avg={return_list[-1]:.2f}, Steps={stats['steps']} | Avg={steps_list[-1]:.1f}")
 
 # Save final models
-torch.save(agent.q.state_dict(), f"./models_{args.folder_id}/qnet.pth")
+torch.save(agent.q.state_dict(), f"./models/{args.folder_id}/qnet.pth")
 if not args_parsed.classic and not args_parsed.oracle:
   torch.save(agent.model.inference_model.state_dict(),
-             f"./models_{args.folder_id}/opponent_model.pth")
+             f"./models/{args.folder_id}/opponent_model.pth")
 print("Training complete and models saved.")
 
 # Plotting
@@ -200,7 +200,7 @@ plt.ylabel('Steps')
 plt.title('Steps over Episodes')
 plt.legend()
 plt.tight_layout()
-plt.savefig(f"./diagrams_{args.folder_id}/training_progress.png")
+plt.savefig(f"./diagrams/{args.folder_id}/training_progress.png")
 plt.show()
 plt.close('all')
 

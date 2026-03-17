@@ -140,7 +140,7 @@ dmypy.json
 
 # Images inside diagrams folder
 diagrams/*
-diagrams_*/*
+models/*
 dataset/*
 
 # ignored folder:

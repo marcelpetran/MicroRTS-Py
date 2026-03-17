@@ -362,7 +362,7 @@ class QLearningAgentClassic:
       if render:
         SimpleForagingEnv.render_from_obs(obs[0])
         self.heatmap_q_values(
-          f"./diagrams_{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
+          f"./diagrams/{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
 
       next_obs, reward, done, info = self.env.step(actions)
       ep_ret += reward[0]
