@@ -366,3 +366,22 @@ class GreedySwitchAgent:
       return self.cached_path.pop(0)
     else:
       return np.random.randint(0, 4)
+
+class ChameleonAgent:
+  """
+  Opponent that can switch between SimpleAgent and GreedySwitchAgent with some probability each turn, making it less predictable.
+  """
+  def __init__(self, agent_id, precomputed_paths=None):
+    self.agent_id = agent_id
+    self.simple_agent = SimpleAgent(agent_id, precomputed_paths)
+    self.greedy_agent = GreedySwitchAgent(agent_id, precomputed_paths)
+
+  def reset(self):
+    self.simple_agent.reset()
+    self.greedy_agent.reset()
+
+  def select_action(self, observation, eval=False):
+    if np.random.rand() < 0.3: # #30% SimpleAgent, 70% GreedySwitchAgent
+      return self.simple_agent.select_action(observation, eval)
+    else:
+      return self.greedy_agent.select_action(observation, eval)
