@@ -128,6 +128,7 @@ elif args_parsed.opponent == 'selfplay':
   print("Self-play not fully implemented yet. Defaulting to SimpleAgent.")
   opponent_agent = SimpleAgent(agent_id=1)
 
+# Pretraining opponent model with offline dataset
 if not args_parsed.classic and not args_parsed.oracle:
   os.makedirs(f"./dataset", exist_ok=True)
   dataset_path = f"./dataset/dataset_{map_name}.pt"
