@@ -142,6 +142,8 @@ if not args_parsed.classic and not args_parsed.oracle:
   print(f"Dataset loaded with {len(dataset)} samples. Starting pretraining...")
   agent.model.pretrain(dataset, epochs=15, batch_size=args_parsed.batch_size)
   print("Opponent Model pretraining complete! Starting RL episodes...")
+  # once pretraining is done, we can free up memory by deleting the dataset variable
+  del dataset
 
 return_list = []
 steps_list = []
