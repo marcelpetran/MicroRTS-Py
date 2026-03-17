@@ -216,6 +216,7 @@ def a_star_path(start, goal, obstacles, h, w):
 
 def precompute_paths(obstacles: set, h: int, w: int):
   all_paths = {}
+  inv_action = {0: 1, 1: 0, 2: 3, 3: 2}
   for r1 in range(h):
     for c1 in range(w):
       for r2 in range(h):
@@ -225,7 +226,7 @@ def precompute_paths(obstacles: set, h: int, w: int):
           if start not in obstacles and goal not in obstacles and (start, goal) not in all_paths:
             path = a_star_path(start, goal, obstacles, h, w)
             all_paths[(start, goal)] = path
-            all_paths[(goal, start)] = [ (a + 1) % 4 for a in reversed(path) ]  # Reverse path and invert actions
+            all_paths[(goal, start)] = [ inv_action[a] for a in reversed(path)]  # Reverse path and invert actions
   print(f"Precomputed paths for all pairs of positions. Total pairs: {len(all_paths) // 2}")
   return all_paths
 
@@ -369,19 +370,28 @@ class GreedySwitchAgent:
 
 class ChameleonAgent:
   """
-  Opponent that can switch between SimpleAgent and GreedySwitchAgent with some probability each turn, making it less predictable.
+  Opponent that switches between Simple and Greedy.
   """
   def __init__(self, agent_id, precomputed_paths=None):
     self.agent_id = agent_id
     self.simple_agent = SimpleAgent(agent_id, precomputed_paths)
     self.greedy_agent = GreedySwitchAgent(agent_id, precomputed_paths)
+    self.current_persona = "greedy"
 
   def reset(self):
     self.simple_agent.reset()
     self.greedy_agent.reset()
 
   def select_action(self, observation, eval=False):
-    if np.random.rand() < 0.3: # #30% SimpleAgent, 70% GreedySwitchAgent
+    # 30% chance to be Simple, 70% to be Greedy
+    new_persona = "simple" if np.random.rand() < 0.3 else "greedy"
+
+    if new_persona != self.current_persona:
+      self.simple_agent.reset()
+      self.greedy_agent.reset()
+      self.current_persona = new_persona
+
+    if self.current_persona == "simple":
       return self.simple_agent.select_action(observation, eval)
     else:
       return self.greedy_agent.select_action(observation, eval)
