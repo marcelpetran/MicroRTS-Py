@@ -215,6 +215,20 @@ def a_star_path(start, goal, obstacles, h, w):
 
   return [] # No path found
 
+def precompute_paths(obstacles: set, h: int, w: int):
+  all_paths = {}
+  for r1 in range(h):
+    for c1 in range(w):
+      for r2 in range(h):
+        for c2 in range(w):
+          start = (r1, c1)
+          goal = (r2, c2)
+          if start not in obstacles and goal not in obstacles and (start, goal) not in all_paths:
+            path = a_star_path(start, goal, obstacles, h, w)
+            all_paths[(start, goal)] = path
+            all_paths[(goal, start)] = [ (a + 1) % 4 for a in reversed(path) ]  # Reverse path and invert actions
+  print(f"Precomputed paths for all pairs of positions. Total pairs: {len(all_paths) // 2}")
+  return all_paths
 
 class RandomAgent:
   def __init__(self, agent_id):
@@ -227,10 +241,11 @@ class RandomAgent:
 
 
 class SimpleAgent:
-  def __init__(self, agent_id):
+  def __init__(self, agent_id, precomputed_paths=None):
     self.agent_id = agent_id
     self.cached_path = []
     self.current_target = None
+    self.precomputed_paths = precomputed_paths
 
   def reset(self):
     self.cached_path = []
@@ -245,6 +260,11 @@ class SimpleAgent:
     food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
     if not food_positions:
       return np.random.randint(0, 4)
+    
+    if self.precomputed_paths is None:
+      wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
+      obstacles = set(tuple(p) for p in wall_pos_arr)
+      self.precomputed_paths = precompute_paths(obstacles, observation.shape[0], observation.shape[1])
 
     if self.current_target not in food_positions:
       random_index = np.random.randint(0, len(food_positions))
@@ -252,11 +272,15 @@ class SimpleAgent:
       self.cached_path = []
 
     if not self.cached_path:
-      wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
-      obstacles = set(tuple(p) for p in wall_pos_arr)
-
-      self.cached_path = a_star_path(
-        my_pos, self.current_target, obstacles, observation.shape[0], observation.shape[1])
+      
+      if (my_pos, self.current_target) in self.precomputed_paths:
+        self.cached_path = self.precomputed_paths[(my_pos, self.current_target)].copy()
+      else:
+        # Fallback to on-the-fly A*
+        wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
+        obstacles = set(tuple(p) for p in wall_pos_arr)
+        self.cached_path = a_star_path(
+          my_pos, self.current_target, obstacles, observation.shape[0], observation.shape[1])
 
     if self.cached_path:
       return self.cached_path.pop(0)
@@ -270,10 +294,12 @@ class GreedySwitchAgent:
   If it realizes the other agent is closer to that food, it abandons it and switches to another.
   """
 
-  def __init__(self, agent_id):
+  def __init__(self, agent_id, precomputed_paths=None):
     self.agent_id = agent_id
     self.cached_path = []
     self.current_target = None
+    self.precomputed_paths = precomputed_paths
+
 
   def reset(self):
     self.cached_path = []
@@ -292,12 +318,17 @@ class GreedySwitchAgent:
     food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
     if not food_positions:
       return np.random.randint(0, 4)
+    
+    if self.precomputed_paths is None:
+      wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
+      obstacles = set(tuple(p) for p in wall_pos_arr)
+      self.precomputed_paths = precompute_paths(obstacles, observation.shape[0], observation.shape[1])
 
     # Compute distances to all food and sort by my distance
     dists = []
     for f in food_positions:
-      my_dist = abs(my_pos[0] - f[0]) + abs(my_pos[1] - f[1])
-      opp_dist = abs(opp_pos[0] - f[0]) + abs(opp_pos[1] - f[1])
+      my_dist = len(self.precomputed_paths.get((my_pos, f), []))
+      opp_dist = len(self.precomputed_paths.get((opp_pos, f), []))
       dists.append((my_dist, opp_dist, f))
 
     dists.sort(key=lambda x: x[0])
@@ -323,12 +354,14 @@ class GreedySwitchAgent:
     # recompute path to the chosen target food only when needed
     if self.current_target != target_food or not self.cached_path:
       self.current_target = target_food
-
-      wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
-      obstacles = set(tuple(p) for p in wall_pos_arr)
-
-      self.cached_path = a_star_path(
-        my_pos, target_food, obstacles, observation.shape[0], observation.shape[1])
+      if (my_pos, target_food) in self.precomputed_paths:
+        self.cached_path = self.precomputed_paths[(my_pos, target_food)].copy()
+      else:
+        # Fallback to on-the-fly A*
+        wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
+        obstacles = set(tuple(p) for p in wall_pos_arr)
+        self.cached_path = a_star_path(
+          my_pos, target_food, obstacles, observation.shape[0], observation.shape[1])
 
     if self.cached_path:
       return self.cached_path.pop(0)
