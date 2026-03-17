@@ -2,8 +2,6 @@ from typing import Deque, Dict, List, Tuple, Optional
 import random
 from collections import deque
 
-from wandb import agent
-
 from omg_args import OMGArgs
 
 from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv
