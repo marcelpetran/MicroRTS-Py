@@ -178,6 +178,10 @@ class SimpleForagingEnv:
       print(' '.join(row))
     print()
 
+  def render(self):
+    obs = self._get_observations()[0]
+    self.render_from_obs(obs)
+
 
 def a_star_path(start, goal, obstacles, h, w):
   # queue stores: (f_score, tie_breaker, (r, c), path)
@@ -377,9 +381,9 @@ class GreedySwitchAgent:
 
 class StalkerAgent:
   """
-  A dual-profile adversarial opponent.
-  Profile 1 (Stalk & Collect): Shadows the opponent (distance <= 3), then eats safe foods near them.
-  Profile 2 (Steal): 20% chance to ruthlessly target a food that is closer to the opponent to punish mistakes.
+  A Hyper-Reactive Interceptor. It never chases lost races. It identifies the nearest 
+  food where it has a positional advantage over the opponent, races there, and loiters 
+  1 tile away to steal it at the last second.
   """
 
   def __init__(self, agent_id, precomputed_paths=None):
@@ -387,15 +391,8 @@ class StalkerAgent:
     self.enemy_id = 1 - agent_id
     self.precomputed_paths = precomputed_paths
 
-    # State Machine Memory
-    self.active_profile = None  # "STALK", "COLLECT", or "STEAL"
-    self.current_target = None  # Tuple (r, c) or "OPPONENT"
-    self.cached_path = []
-
   def reset(self):
-    self.active_profile = None
-    self.current_target = None
-    self.cached_path = []
+    pass
 
   def select_action(self, observation, eval=False):
     my_pos_arr = np.argwhere(observation[:, :, 2 + self.agent_id] == 1)
@@ -417,103 +414,70 @@ class StalkerAgent:
       self.precomputed_paths = precompute_paths(
         obstacles, observation.shape[0], observation.shape[1])
 
-    # --- 1. Compute Distances ---
-    if my_pos == opp_pos:
-      dist_to_opp = 0
-    else:
-      path_to_opp = self.precomputed_paths.get((my_pos, opp_pos), [])
-      dist_to_opp = len(path_to_opp) if len(path_to_opp) > 0 else float('inf')
-
+    # --- 1. Filter Unwinnable Races & Find Advantage ---
     winnable_foods = []
-    risky_foods = []
-
     for f in food_positions:
-      m_path = self.precomputed_paths.get((my_pos, f), [])
-      o_path = self.precomputed_paths.get((opp_pos, f), [])
-      my_dist = len(m_path) if len(m_path) > 0 else float('inf')
-      opp_dist = len(o_path) if len(o_path) > 0 else float('inf')
+      e_path = self.precomputed_paths.get((opp_pos, f), [])
+      s_path = self.precomputed_paths.get((my_pos, f), [])
+      e_dist = len(e_path) if len(e_path) > 0 else float('inf')
+      s_dist = len(s_path) if len(s_path) > 0 else float('inf')
 
-      if my_dist == float('inf'):
-        continue
+      # Only target foods where we can beat or tie the opponent
+      if s_dist <= e_dist and s_dist != float('inf'):
+        winnable_foods.append((e_dist, s_dist, f))
 
-      if my_dist <= opp_dist:
-        winnable_foods.append((my_dist, opp_dist, f))
+    # --- 2. Select Target ---
+    if winnable_foods:
+      # Sort by Enemy Distance ascending. We want to intercept them as soon as possible.
+      winnable_foods.sort(key=lambda x: x[0])
+      min_e_dist = winnable_foods[0][0]
+
+      # Stochastic tie-breaking
+      tie_foods = [f for ed, sd, f in winnable_foods if ed == min_e_dist]
+      target_food = tie_foods[np.random.randint(len(tie_foods))]
+
+      # --- 3. AMBUSH / LOITER CHECK ---
+      s_path = self.precomputed_paths.get((my_pos, target_food), [])
+      s_dist = len(s_path)
+
+      if s_dist == 1 and min_e_dist > 2:
+        # We are exactly 1 tile away, and the enemy is not close enough yet.
+        # LOITER: Intentionally bump a wall to skip our turn and wait.
+        wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
+        obstacles = set(tuple(p) for p in wall_pos_arr)
+
+        # 0: Up, 1: Down, 2: Left, 3: Right
+        for action, (dr, dc) in enumerate([(-1, 0), (1, 0), (0, -1), (0, 1)]):
+          nr, nc = my_pos[0] + dr, my_pos[1] + dc
+          if (nr, nc) in obstacles:
+            return action
+        return np.random.randint(0, 4)  # Fallback
+
+    else:
+      # We are losing ALL races. The enemy has cleared their side.
+      # Fallback to pure greedy to secure whatever points are left.
+      greedy_foods = []
+      for f in food_positions:
+        s_path = self.precomputed_paths.get((my_pos, f), [])
+        s_dist = len(s_path) if len(s_path) > 0 else float('inf')
+        if s_dist != float('inf'):
+          greedy_foods.append((s_dist, f))
+
+      if greedy_foods:
+        greedy_foods.sort(key=lambda x: x[0])
+        min_s_dist = greedy_foods[0][0]
+        tie_foods = [f for sd, f in greedy_foods if sd == min_s_dist]
+        target_food = tie_foods[np.random.randint(len(tie_foods))]
       else:
-        risky_foods.append((my_dist, opp_dist, f))
-
-    winnable_foods.sort(key=lambda x: x[0])
-    risky_foods.sort(key=lambda x: x[0])
-
-    # --- 2. State Machine Interrupts ---
-    # If our food target was eaten by the opponent, wipe memory
-    if self.current_target != "OPPONENT" and self.current_target not in food_positions:
-      self.active_profile = None
-      self.current_target = None
-      self.cached_path = []
-
-    # If Stalking and we reached proximity, drop stalk to collect food
-    if self.active_profile == "STALK" and dist_to_opp <= 3:
-      self.active_profile = None
-      self.current_target = None
-
-    # If Collecting but opponent ran away, drop food to resume stalk
-    if self.active_profile == "COLLECT" and dist_to_opp > 3:
-      self.active_profile = None
-      self.current_target = None
-      self.cached_path = []
-
-    # --- 3. Profile Selection ---
-    if self.active_profile is None:
-      # Profile 2: The Steal (20% chance to punish)
-      if np.random.rand() < 0.20 and risky_foods:
-        self.active_profile = "STEAL"
-        min_risky_dist = risky_foods[0][0]
-        tie_risky = [f for f in risky_foods if f[0] == min_risky_dist]
-        self.current_target = tie_risky[np.random.randint(len(tie_risky))][2]
-      else:
-        # Profile 1: Stalk & Safe Collect
-        if dist_to_opp > 3:
-          self.active_profile = "STALK"
-          self.current_target = "OPPONENT"
-        else:
-          if winnable_foods:
-            self.active_profile = "COLLECT"
-            min_win_dist = winnable_foods[0][0]
-            tie_win = [f for f in winnable_foods if f[0] == min_win_dist]
-            self.current_target = tie_win[np.random.randint(len(tie_win))][2]
-          else:
-            # No winnable foods, just keep stalking them
-            self.active_profile = "STALK"
-            self.current_target = "OPPONENT"
+        return np.random.randint(0, 4)
 
     # --- 4. Execution ---
-    if self.active_profile == "STALK":
-      # Opponent moves every turn, so we MUST fetch the path dynamically. No caching.
-      if my_pos == opp_pos:
-        return np.random.randint(0, 4)
-      p_path = self.precomputed_paths.get((my_pos, opp_pos), [])
-      if p_path:
-        return p_path[0]
-      else:
-        return np.random.randint(0, 4)
-
+    # Take a single step towards the target_food. We re-evaluate next frame.
+    p_path = self.precomputed_paths.get((my_pos, target_food), [])
+    if p_path:
+      return p_path[0]
     else:
-      # We are targeting a static food (STEAL or COLLECT), we can use the cache
-      if not self.cached_path:
-        if (my_pos, self.current_target) in self.precomputed_paths:
-          self.cached_path = self.precomputed_paths[(
-            my_pos, self.current_target)].copy()
-        else:
-          wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
-          obstacles = set(tuple(p) for p in wall_pos_arr)
-          self.cached_path = a_star_path(
-            my_pos, self.current_target, obstacles, observation.shape[0], observation.shape[1])
-
-      if self.cached_path:
-        return self.cached_path.pop(0)
-      else:
-        self.active_profile = None  # Path failed, reset next turn
-        return np.random.randint(0, 4)
+      return np.random.randint(0, 4)
 
 
 class ChameleonAgent:
