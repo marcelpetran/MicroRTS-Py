@@ -1,7 +1,7 @@
 import os
 import argparse
 import matplotlib.pyplot as plt
-from simple_foraging_env import SimpleForagingEnv, SimpleAgent, GreedySwitchAgent
+from simple_foraging_env import SimpleForagingEnv, SimpleAgent, GreedySwitchAgent, StalkerAgent, ChameleonAgent
 import maps
 from maps import *
 from opponent_model import OpponentModel
@@ -26,7 +26,7 @@ parser.add_argument('--oracle', action='store_true', default=False,
 parser.add_argument('--classic', action='store_true', default=False,
                     help='Use classic Q-learning agent without opponent modeling')
 parser.add_argument('--opponent', type=str, default='simple',
-                    choices=['simple', 'greedy', 'classic', 'selfplay'],
+                    choices=['simple', 'greedy', 'stalker', 'chameleon', 'classic', 'selfplay'],
                     help='Type of opponent agent to play against')
 parser.add_argument('--map', type=int, default=1,
                     choices=[i for i in range(1, len(map_layouts)+1)], help='Map layout to use for the environment')
@@ -122,6 +122,10 @@ if args_parsed.opponent == 'simple':
   opponent_agent = SimpleAgent(agent_id=1)
 elif args_parsed.opponent == 'greedy':
   opponent_agent = GreedySwitchAgent(agent_id=1)
+elif args_parsed.opponent == 'stalker':
+  opponent_agent = StalkerAgent(agent_id=1)
+elif args_parsed.opponent == 'chameleon':
+  opponent_agent = ChameleonAgent(agent_id=1)
 elif args_parsed.opponent == 'classic':
   opponent_agent = QLearningAgentClassic(env, args=args)
 elif args_parsed.opponent == 'selfplay':
