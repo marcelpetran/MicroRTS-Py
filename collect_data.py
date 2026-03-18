@@ -2,8 +2,7 @@ import torch
 import numpy as np
 from collections import deque
 
-from wandb import agent
-from simple_foraging_env import SimpleForagingEnv, SimpleAgent, GreedySwitchAgent
+from simple_foraging_env import SimpleForagingEnv, SimpleAgent, GreedySwitchAgent, StalkerAgent, ChameleonAgent
 from maps import *
 from omg_args import OMGArgs
 
@@ -14,11 +13,14 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
   obs = env.reset()
   agent_0 = SimpleAgent(0)
   # precompute paths for other agents to use during data collection
-  _ = agent_0.select_action(obs[0])  # Dummy action to trigger path precomputation in the environment
+  # Dummy action to trigger path precomputation in the environment
+  _ = agent_0.select_action(obs[0])
   precomputed_paths = agent_0.precomputed_paths
   agent_1 = SimpleAgent(1, precomputed_paths=precomputed_paths)
   agent_2 = GreedySwitchAgent(0, precomputed_paths=precomputed_paths)
   agent_3 = GreedySwitchAgent(1, precomputed_paths=precomputed_paths)
+  agent_4 = StalkerAgent(0, precomputed_paths=precomputed_paths)
+  agent_5 = StalkerAgent(1, precomputed_paths=precomputed_paths)
   agent_combinations = [
     (agent_0, agent_1),
     (agent_0, agent_3),
@@ -30,7 +32,8 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
 
   print(f"Starting offline data collection for {num_episodes} episodes...")
   for (agent0, agent1) in agent_combinations:
-    print(f"Collecting data for agent combination: {agent0.__class__.__name__} vs {agent1.__class__.__name__}")
+    print(
+      f"Collecting data for agent combination: {agent0.__class__.__name__} vs {agent1.__class__.__name__}")
     for ep in range(num_episodes):
       obs = env.reset()
       agent0.reset()
@@ -124,6 +127,49 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
   torch.save(master_dataset, save_path)
   print("Done!")
 
+# To test heurisctic agents, no collection, only run episodes and render gameplay
+def run_episode(agent0, agent1, env, args, render=False):
+  obs = env.reset()
+  agent0.reset()
+  agent1.reset()
+  total_reward_0 = 0
+  total_reward_1 = 0
+
+  for step in range(100):
+    if render:
+      env.render()
+
+    a_0 = agent0.select_action(obs[0])
+    a_1 = agent1.select_action(obs[1])
+    actions = {0: a_0, 1: a_1}
+
+    next_obs, reward, done, info = env.step(actions)
+
+    total_reward_0 += reward[0]
+    total_reward_1 += reward[1]
+
+    obs = next_obs
+    if done:
+      if render:
+        env.render()
+      break
+
+
 
 if __name__ == "__main__":
-  collect_offline_data(num_episodes=2000)
+  # collect_offline_data(num_episodes=10)
+  args = OMGArgs()
+  env = SimpleForagingEnv(max_steps=args.max_steps, map_layout=MAP_5)
+  obs = env.reset()
+  agent_0 = SimpleAgent(0)
+  _ = agent_0.select_action(obs[0])
+  precomputed_paths = agent_0.precomputed_paths
+  agent_1 = SimpleAgent(1, precomputed_paths=precomputed_paths)
+  agent_2 = GreedySwitchAgent(0, precomputed_paths=precomputed_paths)
+  agent_3 = GreedySwitchAgent(1, precomputed_paths=precomputed_paths)
+  agent_4 = StalkerAgent(0, precomputed_paths=precomputed_paths)
+  agent_5 = StalkerAgent(1, precomputed_paths=precomputed_paths)
+
+  for ep in range(2):
+    print(f"Episode {ep+1}")
+    run_episode(agent_0, agent_5, env, args, render=True)

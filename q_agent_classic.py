@@ -356,7 +356,7 @@ class QLearningAgentClassic:
       actions = {0: a, 1: a_opponent}
 
       if render:
-        SimpleForagingEnv.render_from_obs(obs[0])
+        self.env.render()
         self.heatmap_q_values(
           f"./diagrams/{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
 
