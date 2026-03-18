@@ -212,7 +212,8 @@ def a_star_path(start, goal, obstacles, h, w):
             heapq.heappush(queue, (f_cost, counter, (nr, nc), path + [action]))
             counter += 1
 
-  return [] # No path found
+  return []  # No path found
+
 
 def precompute_paths(obstacles: set, h: int, w: int):
   all_paths = {}
@@ -226,9 +227,12 @@ def precompute_paths(obstacles: set, h: int, w: int):
           if start not in obstacles and goal not in obstacles and (start, goal) not in all_paths:
             path = a_star_path(start, goal, obstacles, h, w)
             all_paths[(start, goal)] = path
-            all_paths[(goal, start)] = [ inv_action[a] for a in reversed(path)]  # Reverse path and invert actions
-  print(f"Precomputed paths for all pairs of positions. Total pairs: {len(all_paths) // 2}")
+            all_paths[(goal, start)] = [inv_action[a]
+                                        for a in reversed(path)]  # Reverse path and invert actions
+  print(
+    f"Precomputed paths for all pairs of positions. Total pairs: {len(all_paths) // 2}")
   return all_paths
+
 
 class RandomAgent:
   def __init__(self, agent_id):
@@ -260,11 +264,12 @@ class SimpleAgent:
     food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
     if not food_positions:
       return np.random.randint(0, 4)
-    
+
     if self.precomputed_paths is None:
       wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
       obstacles = set(tuple(p) for p in wall_pos_arr)
-      self.precomputed_paths = precompute_paths(obstacles, observation.shape[0], observation.shape[1])
+      self.precomputed_paths = precompute_paths(
+        obstacles, observation.shape[0], observation.shape[1])
 
     if self.current_target not in food_positions:
       random_index = np.random.randint(0, len(food_positions))
@@ -272,9 +277,10 @@ class SimpleAgent:
       self.cached_path = []
 
     if not self.cached_path:
-      
+
       if (my_pos, self.current_target) in self.precomputed_paths:
-        self.cached_path = self.precomputed_paths[(my_pos, self.current_target)].copy()
+        self.cached_path = self.precomputed_paths[(
+          my_pos, self.current_target)].copy()
       else:
         # Fallback to on-the-fly A*
         wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
@@ -300,7 +306,6 @@ class GreedySwitchAgent:
     self.current_target = None
     self.precomputed_paths = precomputed_paths
 
-
   def reset(self):
     self.cached_path = []
     self.current_target = None
@@ -318,11 +323,12 @@ class GreedySwitchAgent:
     food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
     if not food_positions:
       return np.random.randint(0, 4)
-    
+
     if self.precomputed_paths is None:
       wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
       obstacles = set(tuple(p) for p in wall_pos_arr)
-      self.precomputed_paths = precompute_paths(obstacles, observation.shape[0], observation.shape[1])
+      self.precomputed_paths = precompute_paths(
+        obstacles, observation.shape[0], observation.shape[1])
 
     # Compute distances to all food and sort by my distance
     dists = []
@@ -368,10 +374,153 @@ class GreedySwitchAgent:
     else:
       return np.random.randint(0, 4)
 
+
+class StalkerAgent:
+  """
+  A dual-profile adversarial opponent.
+  Profile 1 (Stalk & Collect): Shadows the opponent (distance <= 3), then eats safe foods near them.
+  Profile 2 (Steal): 20% chance to ruthlessly target a food that is closer to the opponent to punish mistakes.
+  """
+
+  def __init__(self, agent_id, precomputed_paths=None):
+    self.agent_id = agent_id
+    self.enemy_id = 1 - agent_id
+    self.precomputed_paths = precomputed_paths
+
+    # State Machine Memory
+    self.active_profile = None  # "STALK", "COLLECT", or "STEAL"
+    self.current_target = None  # Tuple (r, c) or "OPPONENT"
+    self.cached_path = []
+
+  def reset(self):
+    self.active_profile = None
+    self.current_target = None
+    self.cached_path = []
+
+  def select_action(self, observation, eval=False):
+    my_pos_arr = np.argwhere(observation[:, :, 2 + self.agent_id] == 1)
+    enemy_pos_arr = np.argwhere(observation[:, :, 2 + self.enemy_id] == 1)
+
+    if len(my_pos_arr) == 0 or len(enemy_pos_arr) == 0:
+      return np.random.randint(0, 4)
+
+    my_pos = tuple(my_pos_arr[0])
+    opp_pos = tuple(enemy_pos_arr[0])
+
+    food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
+    if not food_positions:
+      return np.random.randint(0, 4)
+
+    if self.precomputed_paths is None:
+      wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
+      obstacles = set(tuple(p) for p in wall_pos_arr)
+      self.precomputed_paths = precompute_paths(
+        obstacles, observation.shape[0], observation.shape[1])
+
+    # --- 1. Compute Distances ---
+    if my_pos == opp_pos:
+      dist_to_opp = 0
+    else:
+      path_to_opp = self.precomputed_paths.get((my_pos, opp_pos), [])
+      dist_to_opp = len(path_to_opp) if len(path_to_opp) > 0 else float('inf')
+
+    winnable_foods = []
+    risky_foods = []
+
+    for f in food_positions:
+      m_path = self.precomputed_paths.get((my_pos, f), [])
+      o_path = self.precomputed_paths.get((opp_pos, f), [])
+      my_dist = len(m_path) if len(m_path) > 0 else float('inf')
+      opp_dist = len(o_path) if len(o_path) > 0 else float('inf')
+
+      if my_dist == float('inf'):
+        continue
+
+      if my_dist <= opp_dist:
+        winnable_foods.append((my_dist, opp_dist, f))
+      else:
+        risky_foods.append((my_dist, opp_dist, f))
+
+    winnable_foods.sort(key=lambda x: x[0])
+    risky_foods.sort(key=lambda x: x[0])
+
+    # --- 2. State Machine Interrupts ---
+    # If our food target was eaten by the opponent, wipe memory
+    if self.current_target != "OPPONENT" and self.current_target not in food_positions:
+      self.active_profile = None
+      self.current_target = None
+      self.cached_path = []
+
+    # If Stalking and we reached proximity, drop stalk to collect food
+    if self.active_profile == "STALK" and dist_to_opp <= 3:
+      self.active_profile = None
+      self.current_target = None
+
+    # If Collecting but opponent ran away, drop food to resume stalk
+    if self.active_profile == "COLLECT" and dist_to_opp > 3:
+      self.active_profile = None
+      self.current_target = None
+      self.cached_path = []
+
+    # --- 3. Profile Selection ---
+    if self.active_profile is None:
+      # Profile 2: The Steal (20% chance to punish)
+      if np.random.rand() < 0.20 and risky_foods:
+        self.active_profile = "STEAL"
+        min_risky_dist = risky_foods[0][0]
+        tie_risky = [f for f in risky_foods if f[0] == min_risky_dist]
+        self.current_target = tie_risky[np.random.randint(len(tie_risky))][2]
+      else:
+        # Profile 1: Stalk & Safe Collect
+        if dist_to_opp > 3:
+          self.active_profile = "STALK"
+          self.current_target = "OPPONENT"
+        else:
+          if winnable_foods:
+            self.active_profile = "COLLECT"
+            min_win_dist = winnable_foods[0][0]
+            tie_win = [f for f in winnable_foods if f[0] == min_win_dist]
+            self.current_target = tie_win[np.random.randint(len(tie_win))][2]
+          else:
+            # No winnable foods, just keep stalking them
+            self.active_profile = "STALK"
+            self.current_target = "OPPONENT"
+
+    # --- 4. Execution ---
+    if self.active_profile == "STALK":
+      # Opponent moves every turn, so we MUST fetch the path dynamically. No caching.
+      if my_pos == opp_pos:
+        return np.random.randint(0, 4)
+      p_path = self.precomputed_paths.get((my_pos, opp_pos), [])
+      if p_path:
+        return p_path[0]
+      else:
+        return np.random.randint(0, 4)
+
+    else:
+      # We are targeting a static food (STEAL or COLLECT), we can use the cache
+      if not self.cached_path:
+        if (my_pos, self.current_target) in self.precomputed_paths:
+          self.cached_path = self.precomputed_paths[(
+            my_pos, self.current_target)].copy()
+        else:
+          wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
+          obstacles = set(tuple(p) for p in wall_pos_arr)
+          self.cached_path = a_star_path(
+            my_pos, self.current_target, obstacles, observation.shape[0], observation.shape[1])
+
+      if self.cached_path:
+        return self.cached_path.pop(0)
+      else:
+        self.active_profile = None  # Path failed, reset next turn
+        return np.random.randint(0, 4)
+
+
 class ChameleonAgent:
   """
   Opponent that switches between Simple and Greedy.
   """
+
   def __init__(self, agent_id, precomputed_paths=None):
     self.agent_id = agent_id
     self.simple_agent = SimpleAgent(agent_id, precomputed_paths)
