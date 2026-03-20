@@ -6,14 +6,12 @@ from typing import Tuple
 class OMGArgs:
   device: str = "cpu"  # cpu, cuda, mps
   gamma: float = 0.955
-  lr: float = 1e-4
+  lr: float = 5e-5
   batch_size: int = 128
-  capacity: int = 150_000
+  capacity: int = 5_000
   min_replay: int = 1_000
   train_every: int = 4
   target_update_every: int = 1_000
-  # Train Qnet after this many steps to let the transformer learn
-  update_after: int = 2_000
   visualise_every_n_step: int = 3
   qnet_hidden: int = 256
   cnn_hidden: int = 64
@@ -26,15 +24,15 @@ class OMGArgs:
   tau_soft: float = 0.005
   tau_start: float = 2.1
   tau_end: float = 0.01
-  tau_decay_steps: int = 150_000
+  tau_decay_steps: int = 300_000
   beta_start: float = 1.0
   beta_end: float = 0.01
-  beta_decay_steps: int = 150_000
+  beta_decay_steps: int = 300_000
   eps_start: float = 1.0
   eps_end: float = 0.05
   eps_decay_steps: int = 50_000
   # Only backprop OM if loss is above this threshold
-  aux_loss_threshold: float = 1e-5
+  aux_loss_threshold: float = 1e-6
 
   # Transformer architecture params
   state_shape: Tuple[int, int, int] = None  # (H, W, F)
