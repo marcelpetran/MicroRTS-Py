@@ -1,11 +1,13 @@
 --opponent
-simple
+classic
 --map
-4
+3
 --episodes
-24_000
+12_000
 --max_steps
 50
+--replay_capacity
+5000
 --batch_size
 128
 --qnet_dim
