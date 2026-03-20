@@ -306,11 +306,13 @@ class QLearningAgentClassic:
     """
     Gathers a trajectory and trains the Q-network.
     """
+    opp_loss_val = 0.0
     obs = self.env.reset()
     opponent_agent.reset()
 
     done = False
     ep_ret = 0.0
+    opp_ret = 0.0
 
     for step in range(max_steps or 500):
       a = self.select_action(obs[0])
@@ -318,6 +320,22 @@ class QLearningAgentClassic:
 
       actions = {0: a, 1: a_opponent}
       next_obs, reward, done, info = self.env.step(actions)
+
+      if hasattr(opponent_agent, 'replay'):
+        opp_step_info = {
+            "state": obs[1].copy(),
+            "action": a_opponent,
+            "reward": float(reward[1]),
+            "next_state": next_obs[1].copy(),
+            "done": bool(done),
+        }
+        opponent_agent.replay.push(opp_step_info)
+        opponent_agent.global_step += 1
+
+        opp_loss = opponent_agent.update()
+
+        if opp_loss is not None:
+          opp_loss_val = opp_loss
 
       step_info = {
           "state": obs[0].copy(),
@@ -329,24 +347,27 @@ class QLearningAgentClassic:
       self.replay.push(step_info)
 
       ep_ret += reward[0]
+      opp_ret += reward[1]
       obs = next_obs
       self.global_step += 1
       Q_loss = self.update()
 
       if Q_loss is not None and self.global_step % 100 == 0:
-        print(
-          f"Step {self.global_step}: Q_loss={Q_loss:.5f}, Tau={self._tau():.3f}")
-
+        print(f"Step {self.global_step}: Q_loss={Q_loss:.5f} "
+              f"Opp_Q_loss={opp_loss_val:.5f} "
+              f"Tau={self._tau():.2f}")
       if done:
         break
 
-    return {"return": ep_ret, "steps": step + 1}
+    return {"return": ep_ret, "steps": step + 1, "opp_return": opp_ret}
 
   def run_test_episode(self, opponent_agent, max_steps: Optional[int] = None, render: bool = False) -> Dict[str, float]:
     obs = self.env.reset()
     opponent_agent.reset()
     done = False
     ep_ret = 0.0
+    opp_ret = 0.0
+
 
     for step in range(max_steps or 500):
       a = self.select_action(obs[0], eval=True)
@@ -361,9 +382,10 @@ class QLearningAgentClassic:
 
       next_obs, reward, done, info = self.env.step(actions)
       ep_ret += reward[0]
+      opp_ret += reward[1]
       obs = next_obs
 
       if done:
         break
 
-    return {"return": ep_ret, "steps": step + 1}
+    return {"return": ep_ret, "steps": step + 1, "opp_return": opp_ret}
