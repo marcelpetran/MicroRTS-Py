@@ -150,6 +150,7 @@ if not args_parsed.classic and not args_parsed.oracle:
   del dataset
 
 return_list = []
+opp_return_list = []
 steps_list = []
 episode_list = []
 
@@ -158,7 +159,7 @@ for ep in range(args_parsed.episodes):
 
   if (ep + 1) % 50 == 0:
     print(
-      f"Episode {ep+1}: Return={stats['return']:.2f}, Steps={stats['steps']}")
+      f"Episode {ep+1}: Return={stats['return']:.2f}, Opp Return={stats['opp_return']:.2f}, Steps={stats['steps']}")
 
   # Run test episodes
   if (ep + 1) % args_parsed.save_models_every == 0:
@@ -167,44 +168,68 @@ for ep in range(args_parsed.episodes):
     if not args_parsed.classic and not args_parsed.oracle:
       torch.save(agent.model.inference_model.state_dict(),
                  f"./models/{args.folder_id}/opponent_model_ep{ep+1}.pth")
-    avg_ret, avg_steps = [], []
+    if args_parsed.opponent == 'classic':
+      torch.save(opponent_agent.q.state_dict(), f"./models/{args.folder_id}/opponent_classic_qnet_ep{ep+1}.pth")
+
+    avg_ret, avg_opp_ret, avg_steps = [], [], []
     stats = agent.run_test_episode(
       opponent_agent, max_steps=args.max_steps, render=True)
     avg_ret.append(stats['return'])
+    avg_opp_ret.append(stats['opp_return'])
     avg_steps.append(stats['steps'])
+    
     for i in range(99):
       st = agent.run_test_episode(
         opponent_agent, max_steps=args.max_steps, render=False)
       avg_ret.append(st['return'])
+      avg_opp_ret.append(st['opp_return'])
       avg_steps.append(st['steps'])
 
     return_list.append(sum(avg_ret) / len(avg_ret))
+    opp_return_list.append(sum(avg_opp_ret) / len(avg_opp_ret))
     steps_list.append(sum(avg_steps) / len(avg_steps))
     episode_list.append(ep + 1)
     print(
-      f"Test Episode {ep+1}: Return={stats['return']:.2f} | Avg={return_list[-1]:.2f}, Steps={stats['steps']} | Avg={steps_list[-1]:.1f}")
+      f"Test Episode {ep+1}: Return={stats['return']:.2f} | Avg={return_list[-1]:.2f}, "
+      f"Opp Return={stats['opp_return']:.2f} | Avg={opp_return_list[-1]:.2f}, "
+      f"Steps={stats['steps']} | Avg={steps_list[-1]:.1f}")
 
 # Save final models
 torch.save(agent.q.state_dict(), f"./models/{args.folder_id}/qnet.pth")
 if not args_parsed.classic and not args_parsed.oracle:
   torch.save(agent.model.inference_model.state_dict(),
              f"./models/{args.folder_id}/opponent_model.pth")
+if args_parsed.opponent == 'classic':
+  torch.save(opponent_agent.q.state_dict(), f"./models/{args.folder_id}/opponent_classic_qnet.pth")
 print("Training complete and models saved.")
 
 # Plotting
-plt.figure(figsize=(12, 5))
-plt.subplot(1, 2, 1)
-plt.plot(episode_list, return_list, label='Return per Episode')
+plt.figure(figsize=(18, 5))
+
+# Subplot 1: Agent 0 Return
+plt.subplot(1, 3, 1)
+plt.plot(episode_list, return_list, label='Agent 0 Return', color='blue')
 plt.xlabel('Episode')
 plt.ylabel('Return')
-plt.title('Return over Episodes')
+plt.title('Agent 0 Return over Episodes')
 plt.legend()
-plt.subplot(1, 2, 2)
+
+# Subplot 2: Agent 1 (Opponent) Return
+plt.subplot(1, 3, 2)
+plt.plot(episode_list, opp_return_list, label='Agent 1 (Opp) Return', color='red')
+plt.xlabel('Episode')
+plt.ylabel('Return')
+plt.title('Opponent Return over Episodes')
+plt.legend()
+
+# Subplot 3: Steps
+plt.subplot(1, 3, 3)
 plt.plot(episode_list, steps_list, label='Steps per Episode', color='orange')
 plt.xlabel('Episode')
 plt.ylabel('Steps')
 plt.title('Steps over Episodes')
 plt.legend()
+
 plt.tight_layout()
 plt.savefig(f"./diagrams/{args.folder_id}/training_progress.png")
 plt.show()
