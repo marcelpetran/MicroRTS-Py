@@ -122,7 +122,6 @@ class QLearningAgent:
     self.model = opponent_model
     self.args = args
     self.device = torch.device(args.device)
-    self.opponent_agent = RandomAgent(1)
 
     # Try to infer dims from env
     if args.state_shape is None:
@@ -419,12 +418,13 @@ class QLearningAgent:
     Gathers a trajectory, predicts subgoals, and uses Hindsight 
     to label the true subgoals at the end of the episode.
     """
-    opp_loss = 0.0
+    opp_loss_val = 0.0
     obs = self.env.reset()
     opponent_agent.reset()
 
     done = False
     ep_ret = 0.0
+    opp_ret = 0.0
 
     # History container for the Transformer
     history_len = self.args.max_history_length
@@ -458,7 +458,11 @@ class QLearningAgent:
         }
         opponent_agent.replay.push(opp_step_info)
         opponent_agent.global_step += 1
+
         opp_loss = opponent_agent.update()
+
+        if opp_loss is not None:
+          opp_loss_val = opp_loss
 
       # 2. Store the step without the true label (we don't know it yet)
       transition = {
@@ -479,6 +483,7 @@ class QLearningAgent:
       history["actions"].append(a_opponent)
 
       ep_ret += reward[0]
+      opp_ret += reward[1]
       obs = next_obs
 
       # 4. Train Step (Optional: can also be moved outside the loop)
@@ -487,7 +492,7 @@ class QLearningAgent:
 
       if Q_loss is not None and self.global_step % 100 == 0:
         print(f"Step {self.global_step}: Q_loss={Q_loss:.5f}, Model_loss={model_loss:.5f} "
-              f"Opp_Q_loss={opp_loss:.5f} "
+              f"Opp_Q_loss={opp_loss_val:.5f} "
               f"Tau={self._tau():.2f}")
 
       if done:
@@ -553,13 +558,14 @@ class QLearningAgent:
     for t in episode_transitions:
       self.replay.push(t)
 
-    return {"return": ep_ret, "steps": step + 1}
+    return {"return": ep_ret, "steps": step + 1, "opp_return": opp_ret}
 
   def run_test_episode(self, opponent_agent, max_steps: Optional[int] = None, render: bool = False) -> Dict[str, float]:
     obs = self.env.reset()
     opponent_agent.reset()
     done = False
     ep_ret = 0.0
+    opp_ret = 0.0
 
     history_len = self.args.max_history_length
     history = {
@@ -589,9 +595,10 @@ class QLearningAgent:
       history["actions"].append(a_opponent)
 
       ep_ret += reward[0]
+      opp_ret += reward[1]
       obs = next_obs
 
       if done:
         break
 
-    return {"return": ep_ret, "steps": step + 1}
+    return {"return": ep_ret, "steps": step + 1, "opp_return": opp_ret}
