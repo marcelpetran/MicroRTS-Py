@@ -64,13 +64,6 @@ class SpatialOpponentModel(nn.Module):
         nn.Linear(16 * H * W, args.d_model)
     )
 
-    self.character_embedder = nn.Sequential(
-        nn.Conv2d(F_dim, 8, kernel_size=3, padding=1),
-        nn.ReLU(),
-        nn.Flatten(),
-        nn.Linear(8 * H * W, args.d_model)
-    )
-
     self.action_embedder = nn.Embedding(args.action_dim, args.d_model)
 
     self.pos_encoder = PositionalEncoding(
@@ -89,7 +82,7 @@ class SpatialOpponentModel(nn.Module):
 
     # Spatial Head to predict heatmap of opponent location: d_model -> H*W
     self.spatial_head = nn.Sequential(
-        nn.Linear(args.d_model*2, 128),
+        nn.Linear(args.d_model, 128),
         nn.ReLU(),
         nn.Linear(128, H * W)
     )
@@ -127,10 +120,6 @@ class SpatialOpponentModel(nn.Module):
 
     hist_feat = hist_feat + hist_action_feat  # (B, T, d_model)
 
-    char_feats = self.character_embedder(hist_flat).view(B, T, -1)
-    char_mask = hist_mask.unsqueeze(-1).float() # (B, T, 1)
-    char_embed = (char_feats * char_mask).sum(dim=1) / (char_mask.sum(dim=1) + 1e-8) # (B, d_model)
-
     # Prepend current state
     seq_feats = torch.cat([x_feat, hist_feat], dim=1)  # (B, 1 + T, d_model)
 
@@ -151,9 +140,7 @@ class SpatialOpponentModel(nn.Module):
     # Extract summary and predict
     final_memory = memory[:, 0, :]
 
-    combined_feat = torch.cat([final_memory, char_embed], dim=-1)  # (B, 2*d_model)
-
-    logits = self.spatial_head(combined_feat)  # (B, H*W)
+    logits = self.spatial_head(final_memory)  # (B, H*W)
     heatmap_logits = logits.view(B, H, W)
 
     return heatmap_logits
