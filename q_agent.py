@@ -34,19 +34,13 @@ class QNet(nn.Module):
     input_channels = F_dim + 1
 
     self.cnn = nn.Sequential(
-        nn.Conv2d(input_channels, 8, kernel_size=3, padding=1),
+        nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
         nn.ReLU(),
-        nn.Conv2d(8, cnn_hidden, kernel_size=3, padding=1),
+        nn.Conv2d(32, cnn_hidden, kernel_size=3, padding=1),
         nn.ReLU(),
-        # nn.Conv2d(cnn_hidden, cnn_hidden, kernel_size=3, padding=1),
-        # nn.ReLU(),
+        nn.Conv2d(cnn_hidden, cnn_hidden, kernel_size=3, padding=1),
+        nn.ReLU(),
         nn.Flatten()
-    )
-
-    self.head = nn.Sequential(
-        nn.Linear(self.flat_dim, args.qnet_hidden),
-        nn.ReLU(),
-        nn.Linear(args.qnet_hidden, self.action_dim)
     )
 
     # Heads (Dueling)
@@ -88,10 +82,10 @@ class QNet(nn.Module):
     features = self.cnn(x)
 
     # Dueling Heads
-    # adv = self.advantage_head(features)
-    # val = self.value_head(features)
-    # q_vals = val + adv - adv.mean(dim=1, keepdim=True)
-    q_vals = self.head(features)
+    adv = self.advantage_head(features)
+    val = self.value_head(features)
+    q_vals = val + adv - adv.mean(dim=1, keepdim=True)
+
     return q_vals
 
 
