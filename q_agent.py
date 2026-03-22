@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+import wandb
 
 
 class QNet(nn.Module):
@@ -491,9 +492,14 @@ class QLearningAgent:
       Q_loss, model_loss = self.update()
 
       if Q_loss is not None and self.global_step % 100 == 0:
-        print(f"Step {self.global_step}: Q_loss={Q_loss:.5f}, Model_loss={model_loss:.5f} "
-              f"Opp_Q_loss={opp_loss_val:.5f} "
-              f"Tau={self._tau():.2f}")
+        if wandb.run is not None:
+          wandb.log({
+              "train/q_loss": Q_loss,
+              "train/model_loss": model_loss,
+              "train/opp_q_loss": opp_loss_val,
+              "train/tau": self._tau(),
+              "step": self.global_step
+          })
 
       if done:
         break
@@ -502,30 +508,16 @@ class QLearningAgent:
     next_map = np.zeros((H, W), dtype=np.float32)
     next_rollout_map = np.zeros((H, W), dtype=np.float32)
 
-    # Hindsight labeling, when opponent did not succeed to get last goal,
-    # we label naively with the closest food to the opponent's final position.
-    # This is a heuristic but it gives the transformer a better signal to learn from than just labeling discarding the trajectory.
+    # Hindsight labeling, when opponent did not succeed to get last subgoal.
     if len(episode_transitions) > 0:
       final_t = episode_transitions[-1]
 
       if final_t["opp_reward"] == 0:
         opp_pos_arr = np.argwhere(final_t["state"][:, :, 3] == 1)
-        food_pos_arr = np.argwhere(final_t["state"][:, :, 1] == 1)
-
-        if len(opp_pos_arr) > 0 and len(food_pos_arr) > 0:
-          opp_pos = tuple(opp_pos_arr[0])
-
-          # Find the closest food using Manhattan distance
-          closest_food = None
-          min_dist = float('inf')
-          for f_pos in food_pos_arr:
-            dist = abs(opp_pos[0] - f_pos[0]) + abs(opp_pos[1] - f_pos[1])
-            if dist < min_dist:
-              min_dist = dist
-              closest_food = tuple(f_pos)
-
-          if closest_food is not None:
-            current_true_goal_pos = closest_food
+        
+        if len(opp_pos_arr) > 0:
+          # Label the final achieved state as the intended goal
+          current_true_goal_pos = tuple(opp_pos_arr[0])
 
     # Walk backward through the episode to label goals
     for t in reversed(episode_transitions):
