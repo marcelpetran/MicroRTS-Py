@@ -1,10 +1,13 @@
 from typing import Dict, Tuple, List
 import random
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from omg_args import OMGArgs
+from tqdm import tqdm
+import wandb
 
 
 class OpponentModel(nn.Module):
@@ -55,26 +58,49 @@ class OpponentModel(nn.Module):
         "mask": mask
     }
 
-  def pretrain(self, dataset, epochs=10, batch_size=128):
+  def pretrain(self, dataset, epochs=10, batch_size=128, use_wandb=False, writer=None):
+    """
+    Enhanced pretraining loop with logging and progress bars.
+    """
+    print(f"Starting pretraining for {epochs} epochs on {self.device}...")
+    
     for epoch in range(epochs):
       random.shuffle(dataset)
-
       epoch_losses = []
-
-      for i in range(0, len(dataset), batch_size):
-        batch_data = dataset[i: i + batch_size]
+      
+      pbar = tqdm(range(0, len(dataset), batch_size), desc=f"Epoch {epoch+1}/{epochs}")
+      
+      for i in pbar:
+        batch_data = dataset[i : i + batch_size]
+        
+        # Prepare batch data
         om_batch = {
-            "states": torch.from_numpy(np.stack([b["state"] for b in batch_data], dtype=np.float32)).to(self.args.device, non_blocking=True),
-            "history": self.collate_history([b["history"] for b in batch_data]),
-            "true_goal_map": torch.from_numpy(np.stack([b["true_goal_map"] for b in batch_data], dtype=np.float32)).to(self.args.device, non_blocking=True)
+          "states": torch.from_numpy(np.stack([b["state"] for b in batch_data], dtype=np.float32)).to(self.device, non_blocking=True),
+          "history": self.collate_history([b["history"] for b in batch_data]),
+          "true_goal_map": torch.from_numpy(np.stack([b["true_goal_map"] for b in batch_data], dtype=np.float32)).to(self.device, non_blocking=True)
         }
 
         loss = self.train_step(om_batch)
         epoch_losses.append(loss)
+        
+        # Update progress bar suffix with current loss
+        pbar.set_postfix({"loss": f"{loss:.4f}"})
+
+        # Log individual steps if using wandb or TB
+        step = epoch * (len(dataset) // batch_size) + (i // batch_size)
+        if use_wandb:
+          wandb.log({"train/batch_loss": loss, "step": step})
+        if writer:
+          writer.add_scalar("Loss/batch", loss, step)
 
       avg_loss = sum(epoch_losses) / len(epoch_losses)
-      print(
-        f"Pretrain Epoch {epoch+1}/{epochs}, Opponent Model Loss: {avg_loss:.6f}")
+      print(f"  => Average Loss: {avg_loss:.6f}")
+      
+      # Log epoch-level metrics
+      if use_wandb:
+        wandb.log({"train/epoch_loss": avg_loss, "epoch": epoch})
+      if writer:
+        writer.add_scalar("Loss/epoch", avg_loss, epoch)
 
   def forward(self, x: torch.Tensor, history: Dict) -> torch.Tensor:
     """
@@ -90,6 +116,41 @@ class OpponentModel(nn.Module):
     """
     return self.inference_model(x, history)
 
+  def _generate_soft_targets(self, target_map: torch.Tensor, sigma: float = 1.0):
+    """
+    Applies a Gaussian filter directly on the GPU using PyTorch Conv2d.
+    target_map: (B, H, W)
+    """
+    kernel_size = int(2 * math.ceil(2 * sigma) + 1)
+    
+    # Create 1D Gaussian kernel
+    x = torch.arange(kernel_size, dtype=torch.float32, device=target_map.device)
+    x = x - kernel_size // 2
+    kernel_1d = torch.exp(-x**2 / (2 * sigma**2))
+    kernel_1d = kernel_1d / kernel_1d.sum()
+    
+    # Create 2D Gaussian kernel via outer product
+    kernel_2d = kernel_1d.unsqueeze(1) @ kernel_1d.unsqueeze(0)
+    kernel_2d = kernel_2d.unsqueeze(0).unsqueeze(0)  # (1, 1, K, K)
+    
+    # Reshape target map for convolution: (B, C, H, W) where C=1
+    target_reshaped = target_map.unsqueeze(1)
+    
+    # Apply padding to maintain spatial dimensions
+    padding = kernel_size // 2
+    soft_targets = F.conv2d(target_reshaped, kernel_2d, padding=padding)
+    
+    # Re-normalize each map in the batch so the peak is exactly 1.0
+    # Flatten spatial dims to find max per batch item
+    batch_size = soft_targets.shape[0]
+    max_vals = soft_targets.view(batch_size, -1).max(dim=1)[0]
+    
+    # Avoid division by zero for empty targets
+    max_vals = torch.clamp(max_vals, min=1e-8)
+    soft_targets = soft_targets / max_vals.view(batch_size, 1, 1, 1)
+    
+    return soft_targets.squeeze(1) # Return to (B, H, W)
+
   def train_step(self, batch):
     x = batch['states']
     history = batch['history']
@@ -98,17 +159,15 @@ class OpponentModel(nn.Module):
     self.inference_model.train()
     pred_logits = self.forward(x, history)  # (B, H, W)
 
-    # Flatten spatial dimensions for Cross Entropy
-    pred_flat = pred_logits.view(pred_logits.shape[0], -1)  # (B, H*W)
-    target_indices = target_map.view(
-      target_map.shape[0], -1).argmax(dim=1)  # (B,)
+    soft_targets = self._generate_soft_targets(target_map, sigma=1.0)
 
-    loss = F.cross_entropy(pred_flat, target_indices)
+    loss = F.binary_cross_entropy_with_logits(
+        pred_logits.view(pred_logits.shape[0], -1), 
+        soft_targets.view(soft_targets.shape[0], -1)
+    )
     loss_val = loss.item()
-    # Only backprop if loss is significant to save time
-    if loss_val > self.args.aux_loss_threshold:
-      self.optimizer.zero_grad()
-      loss.backward()
-      self.optimizer.step()
+    self.optimizer.zero_grad()
+    loss.backward()
+    self.optimizer.step()
 
     return loss_val
