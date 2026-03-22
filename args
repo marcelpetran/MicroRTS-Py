@@ -4,6 +4,10 @@ classic
 3
 --episodes
 12_000
+--episodes_per_epoch
+500
+--pretrain_epochs
+15
 --max_steps
 50
 --replay_capacity
