@@ -13,6 +13,8 @@ from transformers import SpatialOpponentModel
 from collect_data import collect_offline_data
 import torch
 import matplotlib
+import wandb
+from tqdm import tqdm
 matplotlib.use('Agg')  # Prevents memory leak on headless clusters
 
 torch.set_float32_matmul_precision('high')
@@ -32,6 +34,10 @@ parser.add_argument('--map', type=int, default=1,
                     choices=[i for i in range(1, len(map_layouts)+1)], help='Map layout to use for the environment')
 parser.add_argument('--episodes', type=int, default=12_000,
                     help='Number of training episodes')
+parser.add_argument('--episodes_per_epoch', type=int, default=500,
+                    help='Number of episodes per epoch for logging and evaluation')
+parser.add_argument('--pretrain_epochs', type=int, default=15,
+                    help='Number of epochs for pretraining the opponent model')
 parser.add_argument('--max_steps', type=int, default=50,
                     help='Max steps per episode')
 parser.add_argument('--batch_size', type=int, default=128,
@@ -82,6 +88,12 @@ env = SimpleForagingEnv(max_steps=args_parsed.max_steps,
 obs_sample = env.reset()
 H, W, F_dim = obs_sample[0].shape
 NUM_ACTIONS = 4  # Up, Down, Left, Right
+
+wandb.init(
+    project="om-simple-foraging",
+    config=args_parsed,
+    name=f"map{args_parsed.map}_{args_parsed.opponent}_id{args_parsed.folder_id}"
+)
 
 args = OMGArgs(
     device=device,
@@ -144,7 +156,7 @@ if not args_parsed.classic and not args_parsed.oracle:
   print("Loading offline dataset and pretraining opponent model...")
   dataset = torch.load(dataset_path, weights_only=False)
   print(f"Dataset loaded with {len(dataset)} samples. Starting pretraining...")
-  agent.model.pretrain(dataset, epochs=15, batch_size=args_parsed.batch_size)
+  agent.model.pretrain(dataset, epochs=args_parsed.pretrain_epochs, batch_size=args_parsed.batch_size)
   print("Opponent Model pretraining complete! Starting RL episodes...")
   # once pretraining is done, we can free up memory by deleting the dataset variable
   del dataset
@@ -154,45 +166,76 @@ opp_return_list = []
 steps_list = []
 episode_list = []
 
-for ep in range(args_parsed.episodes):
-  stats = agent.run_episode(opponent_agent, max_steps=args.max_steps)
+num_epochs = args_parsed.episodes // args_parsed.episodes_per_epoch
 
-  if (ep + 1) % 50 == 0:
-    print(
-      f"Episode {ep+1}: Return={stats['return']:.2f}, Opp Return={stats['opp_return']:.2f}, Steps={stats['steps']}")
+for epoch in range(num_epochs):
+  epoch_returns, epoch_opp_returns, epoch_steps = [], [], []
 
-  # Run test episodes
-  if (ep + 1) % args_parsed.save_models_every == 0:
-    torch.save(agent.q.state_dict(),
-               f"./models/{args.folder_id}/qnet_ep{ep+1}.pth")
-    if not args_parsed.classic and not args_parsed.oracle:
-      torch.save(agent.model.inference_model.state_dict(),
-                 f"./models/{args.folder_id}/opponent_model_ep{ep+1}.pth")
-    if args_parsed.opponent == 'classic':
-      torch.save(opponent_agent.q.state_dict(), f"./models/{args.folder_id}/opponent_classic_qnet_ep{ep+1}.pth")
+  # Training Phase
+  pbar = tqdm(range(args_parsed.episodes_per_epoch), desc=f"Epoch {epoch+1:02d}/{num_epochs} [Train]", leave=False)
+  
+  for ep in pbar:
+    global_ep = (epoch * args_parsed.episodes_per_epoch) + ep
+    stats = agent.run_episode(opponent_agent, max_steps=args.max_steps)
 
-    avg_ret, avg_opp_ret, avg_steps = [], [], []
-    stats = agent.run_test_episode(
-      opponent_agent, max_steps=args.max_steps, render=True)
-    avg_ret.append(stats['return'])
-    avg_opp_ret.append(stats['opp_return'])
-    avg_steps.append(stats['steps'])
-    
-    for i in range(99):
-      st = agent.run_test_episode(
-        opponent_agent, max_steps=args.max_steps, render=False)
-      avg_ret.append(st['return'])
-      avg_opp_ret.append(st['opp_return'])
-      avg_steps.append(st['steps'])
+    epoch_returns.append(stats['return'])
+    epoch_opp_returns.append(stats['opp_return'])
+    epoch_steps.append(stats['steps'])
 
-    return_list.append(sum(avg_ret) / len(avg_ret))
-    opp_return_list.append(sum(avg_opp_ret) / len(avg_opp_ret))
-    steps_list.append(sum(avg_steps) / len(avg_steps))
-    episode_list.append(ep + 1)
-    print(
-      f"Test Episode {ep+1}: Return={stats['return']:.2f} | Avg={return_list[-1]:.2f}, "
-      f"Opp Return={stats['opp_return']:.2f} | Avg={opp_return_list[-1]:.2f}, "
-      f"Steps={stats['steps']} | Avg={steps_list[-1]:.1f}")
+    wandb.log({
+      "train/return": stats['return'],
+      "train/opp_return": stats['opp_return'],
+      "train/steps": stats['steps'],
+      "episode": global_ep + 1
+    })
+
+    pbar.set_postfix({"Ret": f"{stats['return']:.1f}", "Opp": f"{stats['opp_return']:.1f}"})
+
+  # Calculate average training metrics for the epoch
+  avg_train_ret = sum(epoch_returns) / len(epoch_returns)
+  avg_train_opp = sum(epoch_opp_returns) / len(epoch_opp_returns)
+
+  # Evaluation Phase
+  # Save checkpoints at the end of every epoch
+  torch.save(agent.q.state_dict(), f"./models/{args.folder_id}/qnet_ep{epoch+1}.pth")
+  if not args_parsed.classic and not args_parsed.oracle:
+    torch.save(agent.model.inference_model.state_dict(), f"./models/{args.folder_id}/opponent_model_ep{epoch+1}.pth")
+  if args_parsed.opponent == 'classic':
+    torch.save(opponent_agent.q.state_dict(), f"./models/{args.folder_id}/opponent_classic_qnet_ep{epoch+1}.pth")
+
+  # Run Eval Episodes
+  avg_ret, avg_opp_ret, avg_steps = [], [], []
+  
+  # Rendered Test
+  test_stats = agent.run_test_episode(opponent_agent, max_steps=args.max_steps, render=True)
+  avg_ret.append(test_stats['return'])
+  avg_opp_ret.append(test_stats['opp_return'])
+  avg_steps.append(test_stats['steps'])
+  
+  # Headless Tests
+  for _ in range(99):
+    st = agent.run_test_episode(opponent_agent, max_steps=args.max_steps, render=False)
+    avg_ret.append(st['return'])
+    avg_opp_ret.append(st['opp_return'])
+    avg_steps.append(st['steps'])
+
+  final_avg_ret = sum(avg_ret) / len(avg_ret)
+  final_avg_opp_ret = sum(avg_opp_ret) / len(avg_opp_ret)
+  final_avg_steps = sum(avg_steps) / len(avg_steps)
+
+  wandb.log({
+    "eval/avg_return": final_avg_ret,
+    "eval/avg_opp_return": final_avg_opp_ret,
+    "eval/avg_steps": final_avg_steps,
+    "epoch": epoch + 1
+  })
+
+  return_list.append(final_avg_ret)
+  opp_return_list.append(final_avg_opp_ret)
+  steps_list.append(final_avg_steps)
+  episode_list.append((epoch + 1) * args_parsed.episodes_per_epoch)
+
+  print(f"Epoch {epoch+1:02d} Complete | Train Ret: {avg_train_ret:>4.1f} | Eval Ret: {final_avg_ret:>4.2f} | Eval Opp: {final_avg_opp_ret:>4.2f}")
 
 # Save final models
 torch.save(agent.q.state_dict(), f"./models/{args.folder_id}/qnet.pth")
@@ -233,7 +276,9 @@ plt.legend()
 plt.tight_layout()
 plt.savefig(f"./diagrams/{args.folder_id}/training_progress.png")
 plt.show()
+
 plt.close('all')
+wandb.finish()
 
 # python -m cProfile -o run.prof simple_foraging_train.py @args.txt
 # snakeviz run.prof
