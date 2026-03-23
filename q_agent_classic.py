@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+import wandb
 
 
 # ------ helpers ------
@@ -353,9 +354,14 @@ class QLearningAgentClassic:
       Q_loss = self.update()
 
       if Q_loss is not None and self.global_step % 100 == 0:
-        print(f"Step {self.global_step}: Q_loss={Q_loss:.5f} "
-              f"Opp_Q_loss={opp_loss_val:.5f} "
-              f"Tau={self._tau():.2f}")
+        if wandb.run is not None:
+          wandb.log({
+              "train/q_loss": Q_loss,
+              "train/opp_q_loss": opp_loss_val,
+              "train/tau": self._tau(),
+              "step": self.global_step
+          })
+
       if done:
         break
 
