@@ -81,20 +81,12 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
 
       if len(episode_transitions) > 0:
         final_t = episode_transitions[-1]
+
         if final_t["opp_reward"] == 0:
           opp_pos_arr = np.argwhere(final_t["state"][:, :, 3] == 1)
-          food_pos_arr = np.argwhere(final_t["state"][:, :, 1] == 1)
-          if len(opp_pos_arr) > 0 and len(food_pos_arr) > 0:
-            opp_pos = tuple(opp_pos_arr[0])
-            closest_food = None
-            min_dist = float('inf')
-            for f_pos in food_pos_arr:
-              dist = abs(opp_pos[0] - f_pos[0]) + abs(opp_pos[1] - f_pos[1])
-              if dist < min_dist:
-                min_dist = dist
-                closest_food = tuple(f_pos)
-            if closest_food is not None:
-              current_true_goal_pos = closest_food
+          
+          if len(opp_pos_arr) > 0:
+            current_true_goal_pos = tuple(opp_pos_arr[0])
 
       for t in reversed(episode_transitions):
         if t["opp_reward"] > 0:
