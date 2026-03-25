@@ -231,8 +231,9 @@ class QLearningAgentClassic:
   def choose_action(self, qvals: torch.Tensor, beta: float, eval) -> int:
     gumbel_noise = -beta * torch.empty_like(qvals).exponential_().log()
     if eval == True:
-      noise = torch.rand_like(qvals) * 1e-6
-      return int(torch.argmax(qvals + noise))
+      eval_tau = 0.05 
+      dist = F.softmax(qvals / eval_tau, dim=-1)
+      return int(torch.multinomial(dist, num_samples=1).item())
     return int(torch.argmax(qvals + gumbel_noise))
   
   @torch.no_grad()
@@ -300,6 +301,15 @@ class QLearningAgentClassic:
         target_param.lerp_(param, self.args.tau_soft)
 
     return loss.item()
+  
+  def load_historical_policy(self, state_dict: dict, om_state_dict: dict = None):
+    """Loads frozen historical weights for Fictitious Play."""
+    self.q.load_state_dict(state_dict)
+    self.q.eval() # Freeze layers like BatchNorm/Dropout if you add them later
+    
+    if om_state_dict is not None and hasattr(self, 'model'):
+      self.model.inference_model.load_state_dict(om_state_dict)
+      self.model.inference_model.eval()
 
   # ------------- rollout -------------
 
