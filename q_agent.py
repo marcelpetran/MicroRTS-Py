@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions import Categorical
 import matplotlib.pyplot as plt
 import wandb
 
@@ -307,10 +308,11 @@ class QLearningAgent:
 
   def choose_action(self, qvals: torch.Tensor, beta: float, eval=False) -> int:
     gumbel_noise = -beta * torch.empty_like(qvals).exponential_().log()
+
     if eval == True:
-      eval_tau = 0.05 
-      dist = F.softmax(qvals / eval_tau, dim=-1)
+      dist = F.softmax(qvals / beta, dim=-1)
       return int(torch.multinomial(dist, num_samples=1).item())
+
     return int(torch.argmax(qvals + gumbel_noise))
 
   @torch.no_grad()
@@ -324,9 +326,15 @@ class QLearningAgent:
       g_logits = self.model(x, collated_history)
       g_map = F.softmax(g_logits.view(
         g_logits.shape[0], -1), dim=-1).view_as(g_logits)  # (B, H, W)
+
     qvals = self.q(x, g_map)
-    a = self.choose_action(qvals, self._tau(), eval)
-    return a, g_map.squeeze(0)
+
+    tau = 0.05 if eval else self._tau()
+    entropy = Categorical(logits=qvals / tau).entropy().item()
+
+    a = self.choose_action(qvals, tau, eval)
+
+    return a, g_map.squeeze(0), entropy
 
   # ------------- training -------------
 
@@ -416,8 +424,8 @@ class QLearningAgent:
   def load_historical_policy(self, state_dict: dict, om_state_dict: dict = None):
     """Loads frozen historical weights for Fictitious Play."""
     self.q.load_state_dict(state_dict)
-    self.q.eval() # Freeze layers like BatchNorm/Dropout if you add them later
-    
+    self.q.eval()  # Freeze layers like BatchNorm/Dropout if you add them later
+
     if om_state_dict is not None and hasattr(self, 'model'):
       self.model.inference_model.load_state_dict(om_state_dict)
       self.model.inference_model.eval()
@@ -436,6 +444,7 @@ class QLearningAgent:
     done = False
     ep_ret = 0.0
     opp_ret = 0.0
+    ep_entropy = 0.0
 
     # History container for the Transformer
     history_len = self.args.max_history_length
@@ -453,9 +462,11 @@ class QLearningAgent:
     for step in range(max_steps or 500):
       current_history = {k: list(v) for k, v in history.items()}
 
-      a, g_map = self.select_action(obs[0], current_history)
+      a, g_map, step_entropy = self.select_action(obs[0], current_history)
       a_opponent = opponent_agent.select_action(obs[1])
       actions = {0: a, 1: a_opponent}
+
+      ep_entropy += step_entropy
 
       next_obs, reward, done, info = self.env.step(actions)
 
@@ -524,7 +535,7 @@ class QLearningAgent:
 
       if final_t["opp_reward"] == 0:
         opp_pos_arr = np.argwhere(final_t["state"][:, :, 3] == 1)
-        
+
         if len(opp_pos_arr) > 0:
           # Label the final achieved state as the intended goal
           current_true_goal_pos = tuple(opp_pos_arr[0])
@@ -560,7 +571,13 @@ class QLearningAgent:
     for t in episode_transitions:
       self.replay.push(t)
 
-    return {"return": ep_ret, "steps": step + 1, "opp_return": opp_ret}
+    return {
+      F"return": ep_ret,
+      "steps": step + 1,
+      "opp_return": opp_ret,
+      "avg_entropy": ep_entropy / (step + 1)
+
+    }
 
   def run_test_episode(self, opponent_agent, max_steps: Optional[int] = None, render: bool = False) -> Dict[str, float]:
     obs = self.env.reset()

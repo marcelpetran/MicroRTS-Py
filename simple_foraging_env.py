@@ -232,7 +232,8 @@ def precompute_paths(obstacles: set, h: int, w: int):
             path = a_star_path(start, goal, obstacles, h, w)
             all_paths[(start, goal)] = path
             all_paths[(goal, start)] = [inv_action[a]
-                                        for a in reversed(path)]  # Reverse path and invert actions
+                                        # Reverse path and invert actions
+                                        for a in reversed(path)]
   print(
     f"Precomputed paths for all pairs of positions. Total pairs: {len(all_paths) // 2}")
   return all_paths
@@ -245,7 +246,7 @@ class RandomAgent:
   def reset(self): pass
 
   def select_action(self, observation, eval=False):
-    return np.random.randint(0, 4)
+    return np.random.randint(0, 4), None
 
 
 class SimpleAgent:
@@ -262,12 +263,12 @@ class SimpleAgent:
   def select_action(self, observation, eval=False):
     agent_pos_arr = np.argwhere(observation[:, :, 2 + self.agent_id] == 1)
     if len(agent_pos_arr) == 0:
-      return np.random.randint(0, 4)
+      return np.random.randint(0, 4), None
     my_pos = tuple(agent_pos_arr[0])
 
     food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
     if not food_positions:
-      return np.random.randint(0, 4)
+      return np.random.randint(0, 4), None
 
     if self.precomputed_paths is None:
       wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
@@ -293,9 +294,9 @@ class SimpleAgent:
           my_pos, self.current_target, obstacles, observation.shape[0], observation.shape[1])
 
     if self.cached_path:
-      return self.cached_path.pop(0)
+      return self.cached_path.pop(0), None
     else:
-      return np.random.randint(0, 4)
+      return np.random.randint(0, 4), None
 
 
 class GreedySwitchAgent:
@@ -319,14 +320,14 @@ class GreedySwitchAgent:
     opp_pos_arr = np.argwhere(observation[:, :, 2 + (1 - self.agent_id)] == 1)
 
     if len(agent_pos_arr) == 0 or len(opp_pos_arr) == 0:
-      return np.random.randint(0, 4)
+      return np.random.randint(0, 4), None
 
     my_pos = tuple(agent_pos_arr[0])
     opp_pos = tuple(opp_pos_arr[0])
 
     food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
     if not food_positions:
-      return np.random.randint(0, 4)
+      return np.random.randint(0, 4), None
 
     if self.precomputed_paths is None:
       wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
@@ -374,9 +375,9 @@ class GreedySwitchAgent:
           my_pos, target_food, obstacles, observation.shape[0], observation.shape[1])
 
     if self.cached_path:
-      return self.cached_path.pop(0)
+      return self.cached_path.pop(0), None
     else:
-      return np.random.randint(0, 4)
+      return np.random.randint(0, 4), None
 
 
 class StalkerAgent:
@@ -399,14 +400,14 @@ class StalkerAgent:
     enemy_pos_arr = np.argwhere(observation[:, :, 2 + self.enemy_id] == 1)
 
     if len(my_pos_arr) == 0 or len(enemy_pos_arr) == 0:
-      return np.random.randint(0, 4)
+      return np.random.randint(0, 4), None
 
     my_pos = tuple(my_pos_arr[0])
     opp_pos = tuple(enemy_pos_arr[0])
 
     food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
     if not food_positions:
-      return np.random.randint(0, 4)
+      return np.random.randint(0, 4), None
 
     if self.precomputed_paths is None:
       wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
@@ -451,7 +452,7 @@ class StalkerAgent:
           nr, nc = my_pos[0] + dr, my_pos[1] + dc
           if (nr, nc) in obstacles:
             return action
-        return np.random.randint(0, 4)  # Fallback
+        return np.random.randint(0, 4), None  # Fallback
 
     else:
       # We are losing ALL races. The enemy has cleared their side.
@@ -469,15 +470,15 @@ class StalkerAgent:
         tie_foods = [f for sd, f in greedy_foods if sd == min_s_dist]
         target_food = tie_foods[np.random.randint(len(tie_foods))]
       else:
-        return np.random.randint(0, 4)
+        return np.random.randint(0, 4), None
 
     # --- 4. Execution ---
     # Take a single step towards the target_food. We re-evaluate next frame.
     p_path = self.precomputed_paths.get((my_pos, target_food), [])
     if p_path:
-      return p_path[0]
+      return p_path[0], None
     else:
-      return np.random.randint(0, 4)
+      return np.random.randint(0, 4), None
 
 
 class ChameleonAgent:

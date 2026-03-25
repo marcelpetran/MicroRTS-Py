@@ -1,3 +1,4 @@
+from math import e
 from typing import Deque, Dict, List, Tuple, Optional
 import random
 from collections import deque
@@ -9,6 +10,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions import Categorical
 import matplotlib.pyplot as plt
 import wandb
 
@@ -136,7 +138,7 @@ class QLearningAgentClassic:
 
     # Schedules
     self.global_step = 0
-  
+
   def reset(self):
     pass
 
@@ -188,12 +190,16 @@ class QLearningAgentClassic:
     # --- Plotting the Heatmap ---
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
     # Mark agent, opponent, and food positions on the heatmap
-    ax1.scatter(agent_pos[1], agent_pos[0], color='blue', marker='X', s=100, label='Agent')
-    ax1.scatter(opp_pos[1], opp_pos[0], color='red', marker='X', s=100, label='Opponent')
+    ax1.scatter(agent_pos[1], agent_pos[0], color='blue',
+                marker='X', s=100, label='Agent')
+    ax1.scatter(opp_pos[1], opp_pos[0], color='red',
+                marker='X', s=100, label='Opponent')
     for pos in food_pos:
-      ax1.scatter(pos[1], pos[0], color='green', marker='o', s=50, label='Food')
+      ax1.scatter(pos[1], pos[0], color='green',
+                  marker='o', s=50, label='Food')
     for pos in wall_pos:
-      ax1.scatter(pos[1], pos[0], color='black', marker='s', s=50, label='Wall')
+      ax1.scatter(pos[1], pos[0], color='black',
+                  marker='s', s=50, label='Wall')
     # Plot Q-value heatmap
     im1 = ax1.imshow(q_value_map, cmap='viridis')
     ax1.set_title("Max Q(s, g, a) Heatmap")
@@ -230,12 +236,13 @@ class QLearningAgentClassic:
 
   def choose_action(self, qvals: torch.Tensor, beta: float, eval) -> int:
     gumbel_noise = -beta * torch.empty_like(qvals).exponential_().log()
+
     if eval == True:
-      eval_tau = 0.05 
-      dist = F.softmax(qvals / eval_tau, dim=-1)
+      dist = F.softmax(qvals / beta, dim=-1)
       return int(torch.multinomial(dist, num_samples=1).item())
+
     return int(torch.argmax(qvals + gumbel_noise))
-  
+
   @torch.no_grad()
   def select_action(self, s_t: np.ndarray, eval=False) -> int:
     """
@@ -243,7 +250,11 @@ class QLearningAgentClassic:
     """
     s = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
     qvals = self.q(s)
-    return self.choose_action(qvals, self._tau(), eval)
+
+    tau = 0.05 if eval else self._tau()
+    entropy = Categorical(logits=qvals / tau).entropy().item()
+
+    return self.choose_action(qvals, tau, eval), entropy
 
   # ------------- training -------------
 
@@ -254,16 +265,21 @@ class QLearningAgentClassic:
     B = len(batch)
     H, W, F_dim = self.args.state_shape
 
-    s = torch.from_numpy(np.stack([b["state"] for b in batch])).float().to(self.device)
-    sp = torch.from_numpy(np.stack([b["next_state"] for b in batch])).float().to(self.device)
-    
-    a = torch.from_numpy(np.array([b["action"] for b in batch], dtype=np.int64)).to(self.device)
-    r = torch.from_numpy(np.array([b["reward"] for b in batch], dtype=np.float32)).to(self.device)
-    done = torch.from_numpy(np.array([b["done"] for b in batch], dtype=np.float32)).to(self.device)
+    s = torch.from_numpy(np.stack([b["state"]
+                         for b in batch])).float().to(self.device)
+    sp = torch.from_numpy(np.stack([b["next_state"]
+                          for b in batch])).float().to(self.device)
+
+    a = torch.from_numpy(
+      np.array([b["action"] for b in batch], dtype=np.int64)).to(self.device)
+    r = torch.from_numpy(
+      np.array([b["reward"] for b in batch], dtype=np.float32)).to(self.device)
+    done = torch.from_numpy(
+      np.array([b["done"] for b in batch], dtype=np.float32)).to(self.device)
 
     # Q(s,a) and target r + gamma * max_{a'} Q(s',a')
     q_sa = self.q(s).gather(1, a.unsqueeze(1)).squeeze(1)
-    
+
     with torch.no_grad():
       q_val = self.q(sp)
       noise = torch.rand_like(q_val) * 1e-6
@@ -301,12 +317,12 @@ class QLearningAgentClassic:
         target_param.lerp_(param, self.args.tau_soft)
 
     return loss.item()
-  
+
   def load_historical_policy(self, state_dict: dict, om_state_dict: dict = None):
     """Loads frozen historical weights for Fictitious Play."""
     self.q.load_state_dict(state_dict)
-    self.q.eval() # Freeze layers like BatchNorm/Dropout if you add them later
-    
+    self.q.eval()  # Freeze layers like BatchNorm/Dropout if you add them later
+
     if om_state_dict is not None and hasattr(self, 'model'):
       self.model.inference_model.load_state_dict(om_state_dict)
       self.model.inference_model.eval()
@@ -324,12 +340,15 @@ class QLearningAgentClassic:
     done = False
     ep_ret = 0.0
     opp_ret = 0.0
+    ep_entropy = 0.0
 
     for step in range(max_steps or 500):
-      a = self.select_action(obs[0])
-      a_opponent = opponent_agent.select_action(obs[1])
+      a, step_entropy = self.select_action(obs[0])
+      a_opponent, _ = opponent_agent.select_action(obs[1])
 
       actions = {0: a, 1: a_opponent}
+      ep_entropy += step_entropy
+
       next_obs, reward, done, info = self.env.step(actions)
 
       if hasattr(opponent_agent, 'replay'):
@@ -375,7 +394,12 @@ class QLearningAgentClassic:
       if done:
         break
 
-    return {"return": ep_ret, "steps": step + 1, "opp_return": opp_ret}
+    return {
+      "return": ep_ret,
+      "steps": step + 1,
+      "opp_return": opp_ret,
+      "avg_entropy": ep_entropy / (step + 1)
+    }
 
   def run_test_episode(self, opponent_agent, max_steps: Optional[int] = None, render: bool = False) -> Dict[str, float]:
     obs = self.env.reset()
@@ -383,7 +407,6 @@ class QLearningAgentClassic:
     done = False
     ep_ret = 0.0
     opp_ret = 0.0
-
 
     for step in range(max_steps or 500):
       a = self.select_action(obs[0], eval=True)
@@ -404,4 +427,9 @@ class QLearningAgentClassic:
       if done:
         break
 
-    return {"return": ep_ret, "steps": step + 1, "opp_return": opp_ret}
+    return {
+      "return": ep_ret,
+      "steps": step + 1,
+      "opp_return": opp_ret,
+
+    }
