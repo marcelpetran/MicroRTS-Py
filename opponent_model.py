@@ -40,18 +40,27 @@ class OpponentModel(nn.Module):
     padded_actions_np = np.zeros((B, max_len), dtype=np.int64)
 
     for i, h in enumerate(histories):
-      seq_len = true_lengths[i]
-      if seq_len > 0:
-        padded_states_np[i, :seq_len] = h["states"]
-        padded_actions_np[i, :seq_len] = h["actions"]
+      state_seq = h.get("states", [])
+      action_seq = h.get("actions", [])
+
+      s_len = len(state_seq)
+      if s_len > 0:
+        padded_states_np[i, :s_len] = state_seq
+
+      a_len = len(action_seq)
+      if a_len > 0:
+        flat_actions = np.array(action_seq, dtype=np.int64).flatten()
+        valid_len = min(len(flat_actions), max_len)
+        padded_actions_np[i, :valid_len] = flat_actions[:valid_len]
 
     final_padded_states = torch.from_numpy(padded_states_np).to(self.device)
     final_padded_actions = torch.from_numpy(padded_actions_np).to(self.device)
 
-    # Fast mask generation
+    # Fast mask generation (driven by state length, which is mathematically correct)
     true_lengths_np = np.array(true_lengths, dtype=np.int64)
     mask = torch.arange(max_len, device=self.device).expand(
       B, max_len) < torch.from_numpy(true_lengths_np).to(self.device).unsqueeze(1)
+
     return {
         "states": final_padded_states,
         "actions": final_padded_actions,
@@ -63,16 +72,17 @@ class OpponentModel(nn.Module):
     Enhanced pretraining loop with logging and progress bars.
     """
     print(f"Starting pretraining for {epochs} epochs on {self.device}...")
-    
+
     for epoch in range(epochs):
       random.shuffle(dataset)
       epoch_losses = []
-      
-      pbar = tqdm(range(0, len(dataset), batch_size), desc=f"Epoch {epoch+1}/{epochs}")
-      
+
+      pbar = tqdm(range(0, len(dataset), batch_size),
+                  desc=f"Epoch {epoch + 1}/{epochs}")
+
       for i in pbar:
-        batch_data = dataset[i : i + batch_size]
-        
+        batch_data = dataset[i: i + batch_size]
+
         # Prepare batch data
         om_batch = {
           "states": torch.from_numpy(np.stack([b["state"] for b in batch_data], dtype=np.float32)).to(self.device, non_blocking=True),
@@ -82,7 +92,7 @@ class OpponentModel(nn.Module):
 
         loss = self.train_step(om_batch)
         epoch_losses.append(loss)
-        
+
         # Update progress bar suffix with current loss
         pbar.set_postfix({"loss": f"{loss:.4f}"})
 
@@ -95,7 +105,7 @@ class OpponentModel(nn.Module):
 
       avg_loss = sum(epoch_losses) / len(epoch_losses)
       print(f"  => Average Loss: {avg_loss:.6f}")
-      
+
       # Log epoch-level metrics
       if use_wandb:
         wandb.log({"train/epoch_loss": avg_loss, "epoch": epoch})
@@ -122,34 +132,35 @@ class OpponentModel(nn.Module):
     target_map: (B, H, W)
     """
     kernel_size = int(2 * math.ceil(2 * sigma) + 1)
-    
+
     # Create 1D Gaussian kernel
-    x = torch.arange(kernel_size, dtype=torch.float32, device=target_map.device)
+    x = torch.arange(kernel_size, dtype=torch.float32,
+                     device=target_map.device)
     x = x - kernel_size // 2
     kernel_1d = torch.exp(-x**2 / (2 * sigma**2))
     kernel_1d = kernel_1d / kernel_1d.sum()
-    
+
     # Create 2D Gaussian kernel via outer product
     kernel_2d = kernel_1d.unsqueeze(1) @ kernel_1d.unsqueeze(0)
     kernel_2d = kernel_2d.unsqueeze(0).unsqueeze(0)  # (1, 1, K, K)
-    
+
     # Reshape target map for convolution: (B, C, H, W) where C=1
     target_reshaped = target_map.unsqueeze(1)
-    
+
     # Apply padding to maintain spatial dimensions
     padding = kernel_size // 2
     soft_targets = F.conv2d(target_reshaped, kernel_2d, padding=padding)
-    
+
     # Re-normalize each map in the batch so the peak is exactly 1.0
     # Flatten spatial dims to find max per batch item
     batch_size = soft_targets.shape[0]
     max_vals = soft_targets.view(batch_size, -1).max(dim=1)[0]
-    
+
     # Avoid division by zero for empty targets
     max_vals = torch.clamp(max_vals, min=1e-8)
     soft_targets = soft_targets / max_vals.view(batch_size, 1, 1, 1)
-    
-    return soft_targets.squeeze(1) # Return to (B, H, W)
+
+    return soft_targets.squeeze(1)  # Return to (B, H, W)
 
   def train_step(self, batch):
     x = batch['states']
@@ -162,7 +173,7 @@ class OpponentModel(nn.Module):
     soft_targets = self._generate_soft_targets(target_map, sigma=1.0)
 
     loss = F.binary_cross_entropy_with_logits(
-        pred_logits.view(pred_logits.shape[0], -1), 
+        pred_logits.view(pred_logits.shape[0], -1),
         soft_targets.view(soft_targets.shape[0], -1)
     )
     loss_val = loss.item()
