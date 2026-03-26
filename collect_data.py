@@ -58,8 +58,8 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
         current_history = {k: list(v) for k, v in history.items()}
 
         # Both agents act using pure heuristics
-        a_0 = agent0.select_action(obs[0])
-        a_1 = agent1.select_action(obs[1])
+        a_0, _ = agent0.select_action(obs[0])
+        a_1, _ = agent1.select_action(obs[1])
         actions = {0: a_0, 1: a_1}
 
         next_obs, reward, done, info = env.step(actions)
@@ -139,8 +139,8 @@ def run_episode(agent0, agent1, env, args, render=False):
     if render:
       env.render()
 
-    a_0 = agent0.select_action(obs[0])
-    a_1 = agent1.select_action(obs[1])
+    a_0, _ = agent0.select_action(obs[0])
+    a_1, _ = agent1.select_action(obs[1])
     actions = {0: a_0, 1: a_1}
 
     next_obs, reward, done, info = env.step(actions)
