@@ -125,7 +125,9 @@ for epoch in range(num_epochs):
 
   for ep in pbar:
     # Sample historical opponent
-    chosen_policy = random.choice(classic_policy_pool)
+    # Sample from the 10 most recent policies to ensure a challenging curriculum
+    recent_pool = classic_policy_pool[-10:]
+    chosen_policy = random.choice(recent_pool)
     opp_classic.load_historical_policy(chosen_policy)
 
     stats = agent_classic.run_episode(opp_classic, max_steps=args.max_steps)
@@ -186,7 +188,11 @@ for epoch in range(num_epochs):
 
   for ep in pbar:
     # Sample from the EXACT SAME pool Phase 1 generated
-    chosen_policy = random.choice(classic_policy_pool)
+    current_max_index = epoch + 2
+    available_history = classic_policy_pool[:current_max_index]
+    curriculum_window = available_history[-10:]
+    chosen_policy = random.choice(curriculum_window)
+
     opp_eval.load_historical_policy(chosen_policy)
 
     stats = agent_om.run_episode(opp_eval, max_steps=args.max_steps)

@@ -49,7 +49,7 @@ class SimpleForagingEnv:
     self.rewards = {0: 0, 1: 0}
     self.terminal = False
 
-    return self._get_observations()
+    return self._get_ego_centric_obs()
 
   def _place_agent(self, agent_id, position):
     self.agents[agent_id] = position
@@ -86,7 +86,7 @@ class SimpleForagingEnv:
     freed = self._get_freed_positions()
     pos = freed[np.random.randint(0, len(freed))]
     self.agents[agent_id] = pos
-    return self._get_observations()
+    return self._get_ego_centric_obs()
 
   def _get_action_space(self):
     return [0, 1, 2, 3]
@@ -110,6 +110,13 @@ class SimpleForagingEnv:
 
       observations[agent_id] = obs
     return observations
+
+  def _get_ego_centric_obs(self):
+    obs = self._get_observations()
+    obs_0 = obs[0].copy()
+    obs_1 = obs[1].copy()
+    obs_1[:, :, [2, 3]] = obs_1[:, :, [3, 2]]
+    return {0: obs_0, 1: obs_1}
 
   def _check_terminal(self):
     if self.steps >= self.max_steps or len(self.food_positions) == 0:
@@ -156,7 +163,7 @@ class SimpleForagingEnv:
         rewards[1] += 1.0
         self.food_positions.remove(pos1)
 
-    return self._get_observations(), rewards, self._check_terminal(), {}
+    return self._get_ego_centric_obs(), rewards, self._check_terminal(), {}
 
   @staticmethod
   def render_from_obs(obs):
@@ -261,7 +268,10 @@ class SimpleAgent:
     self.current_target = None
 
   def select_action(self, observation, eval=False):
-    agent_pos_arr = np.argwhere(observation[:, :, 2 + self.agent_id] == 1)
+    my_channel = 2
+    opp_channel = 3
+
+    agent_pos_arr = np.argwhere(observation[:, :, my_channel] == 1)
     if len(agent_pos_arr) == 0:
       return np.random.randint(0, 4), None
     my_pos = tuple(agent_pos_arr[0])
@@ -316,8 +326,11 @@ class GreedySwitchAgent:
     self.current_target = None
 
   def select_action(self, observation, eval=False):
-    agent_pos_arr = np.argwhere(observation[:, :, 2 + self.agent_id] == 1)
-    opp_pos_arr = np.argwhere(observation[:, :, 2 + (1 - self.agent_id)] == 1)
+    my_channel = 2
+    opp_channel = 3
+
+    agent_pos_arr = np.argwhere(observation[:, :, my_channel] == 1)
+    opp_pos_arr = np.argwhere(observation[:, :, opp_channel] == 1)
 
     if len(agent_pos_arr) == 0 or len(opp_pos_arr) == 0:
       return np.random.randint(0, 4), None
@@ -389,15 +402,17 @@ class StalkerAgent:
 
   def __init__(self, agent_id, precomputed_paths=None):
     self.agent_id = agent_id
-    self.enemy_id = 1 - agent_id
     self.precomputed_paths = precomputed_paths
 
   def reset(self):
     pass
 
   def select_action(self, observation, eval=False):
-    my_pos_arr = np.argwhere(observation[:, :, 2 + self.agent_id] == 1)
-    enemy_pos_arr = np.argwhere(observation[:, :, 2 + self.enemy_id] == 1)
+    my_channel = 2
+    opp_channel = 3
+
+    my_pos_arr = np.argwhere(observation[:, :, my_channel] == 1)
+    enemy_pos_arr = np.argwhere(observation[:, :, opp_channel] == 1)
 
     if len(my_pos_arr) == 0 or len(enemy_pos_arr) == 0:
       return np.random.randint(0, 4), None
