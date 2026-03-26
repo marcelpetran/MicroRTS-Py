@@ -182,7 +182,7 @@ opp_eval = QLearningAgentClassic(env, args=args)
 phase2_returns, phase2_opp_returns, phase2_entropies = [], [], []
 
 for epoch in range(num_epochs):
-  epoch_returns, epoch_opp_returns, epoch_entropies = [], []
+  epoch_returns, epoch_opp_returns, epoch_entropies = [], [], []
   pbar = tqdm(range(args_parsed.episodes_per_epoch),
               desc=f"Phase 2 Epoch {epoch + 1}/{num_epochs}", leave=False)
 
