@@ -39,6 +39,9 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
       obs = env.reset()
       if random.random() < 0.3:
         obs = env.reset_random_spawn()
+      elif random.random() < 0.5:
+        # 50% of the time swap spawns to add more diversity
+        obs = env.swap_agents()
       agent0.reset()
       agent1.reset()
 
