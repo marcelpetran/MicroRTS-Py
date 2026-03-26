@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import random
 from collections import deque
 
 from simple_foraging_env import SimpleForagingEnv, SimpleAgent, GreedySwitchAgent, StalkerAgent, ChameleonAgent
@@ -36,6 +37,8 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
       f"Collecting data for agent combination: {agent0.__class__.__name__} vs {agent1.__class__.__name__}")
     for ep in range(num_episodes):
       obs = env.reset()
+      if random.random() < 0.3:
+        obs = env.reset_random_spawn()
       agent0.reset()
       agent1.reset()
 
@@ -84,7 +87,7 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
 
         if final_t["opp_reward"] == 0:
           opp_pos_arr = np.argwhere(final_t["state"][:, :, 3] == 1)
-          
+
           if len(opp_pos_arr) > 0:
             current_true_goal_pos = tuple(opp_pos_arr[0])
 
@@ -120,6 +123,8 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
   print("Done!")
 
 # To test heurisctic agents, no collection, only run episodes and render gameplay
+
+
 def run_episode(agent0, agent1, env, args, render=False):
   obs = env.reset()
   agent0.reset()
@@ -147,7 +152,6 @@ def run_episode(agent0, agent1, env, args, render=False):
       break
 
 
-
 if __name__ == "__main__":
   # collect_offline_data(num_episodes=10)
   args = OMGArgs()
@@ -163,5 +167,5 @@ if __name__ == "__main__":
   agent_5 = StalkerAgent(1, precomputed_paths=precomputed_paths)
 
   for ep in range(2):
-    print(f"Episode {ep+1}")
+    print(f"Episode {ep + 1}")
     run_episode(agent_0, agent_5, env, args, render=True)
