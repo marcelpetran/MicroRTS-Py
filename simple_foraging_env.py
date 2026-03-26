@@ -72,6 +72,11 @@ class SimpleForagingEnv:
   def _get_wall_positions(self):
     return list(self.walls)
 
+  def swap_agents(self):
+    self.agents[0] = self._initial_agents[1]
+    self.agents[1] = self._initial_agents[0]
+    return self._get_ego_centric_obs()
+
   def reset_random_spawn(self):
     _ = self.reset()
 

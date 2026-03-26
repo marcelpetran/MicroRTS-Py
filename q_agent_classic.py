@@ -337,6 +337,9 @@ class QLearningAgentClassic:
     obs = self.env.reset()
     if random.random() < 0.3:
       obs = self.env.reset_random_spawn()
+    elif random.random() < 0.5:
+      # 50% of the time swap spawns to add more diversity
+      obs = self.env.swap_agents()
     opponent_agent.reset()
 
     done = False
