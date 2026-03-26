@@ -470,21 +470,21 @@ class QLearningAgent:
 
       next_obs, reward, done, info = self.env.step(actions)
 
-      if hasattr(opponent_agent, 'replay'):
-        opp_step_info = {
-            "state": obs[1].copy(),
-            "action": a_opponent,
-            "reward": float(reward[1]),
-            "next_state": next_obs[1].copy(),
-            "done": bool(done),
-        }
-        opponent_agent.replay.push(opp_step_info)
-        opponent_agent.global_step += 1
+      # if hasattr(opponent_agent, 'replay'):
+      #   opp_step_info = {
+      #       "state": obs[1].copy(),
+      #       "action": a_opponent,
+      #       "reward": float(reward[1]),
+      #       "next_state": next_obs[1].copy(),
+      #       "done": bool(done),
+      #   }
+      #   opponent_agent.replay.push(opp_step_info)
+      #   opponent_agent.global_step += 1
 
-        opp_loss = opponent_agent.update()
+      #   opp_loss = opponent_agent.update()
 
-        if opp_loss is not None:
-          opp_loss_val = opp_loss
+      #   if opp_loss is not None:
+      #     opp_loss_val = opp_loss
 
       # 2. Store the step without the true label (we don't know it yet)
       transition = {
