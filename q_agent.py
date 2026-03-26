@@ -439,6 +439,8 @@ class QLearningAgent:
     """
     opp_loss_val = 0.0
     obs = self.env.reset()
+    if random.random() < 0.3:
+      obs = self.env.reset_random_spawn()
     opponent_agent.reset()
 
     done = False

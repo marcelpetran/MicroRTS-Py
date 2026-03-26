@@ -55,8 +55,7 @@ class SimpleForagingEnv:
     self.agents[agent_id] = position
 
   def _get_freed_positions(self):
-    occupied = set(self.agents.values()).union(
-      self.food_positions).union(self.walls)
+    occupied = self.food_positions.union(self.walls)
     freed = []
     for i in range(self.height):
       for j in range(self.width):
@@ -73,7 +72,7 @@ class SimpleForagingEnv:
   def _get_wall_positions(self):
     return list(self.walls)
 
-  def reset_random_spawn(self, agent_id):
+  def reset_random_spawn(self):
     _ = self.reset()
 
     # Remove a random food
@@ -84,8 +83,10 @@ class SimpleForagingEnv:
         self.food_positions.remove(removed_food)
 
     freed = self._get_freed_positions()
-    pos = freed[np.random.randint(0, len(freed))]
-    self.agents[agent_id] = pos
+    A_pos = freed[np.random.randint(0, len(freed))]
+    B_pos = freed[np.random.randint(0, len(freed))]
+    self.agents[0] = A_pos
+    self.agents[1] = B_pos
     return self._get_ego_centric_obs()
 
   def _get_action_space(self):
