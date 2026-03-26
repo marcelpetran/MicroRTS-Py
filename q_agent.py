@@ -585,7 +585,9 @@ class QLearningAgent:
     done = False
     ep_ret = 0.0
     opp_ret = 0.0
+    ep_entropy = 0.0
 
+    # History container for the Transformer
     history_len = self.args.max_history_length
     history = {
         "states": deque(maxlen=history_len),
@@ -595,9 +597,9 @@ class QLearningAgent:
     for step in range(max_steps or 500):
       current_history = {k: list(v) for k, v in history.items()}
 
-      a, g_map = self.select_action(
+      a, g_map, step_entropy = self.select_action(
         obs[0], current_history, eval=True)
-      a_opponent = opponent_agent.select_action(obs[1], eval=True)
+      a_opponent, _ = opponent_agent.select_action(obs[1], eval=True)
       actions = {0: a, 1: a_opponent}
 
       if render:
@@ -616,8 +618,14 @@ class QLearningAgent:
       ep_ret += reward[0]
       opp_ret += reward[1]
       obs = next_obs
+      ep_entropy += step_entropy
 
       if done:
         break
 
-    return {"return": ep_ret, "steps": step + 1, "opp_return": opp_ret}
+    return {
+      "return": ep_ret,
+      "steps": step + 1,
+      "opp_return": opp_ret,
+      "avg_entropy": ep_entropy / (step + 1)
+    }
