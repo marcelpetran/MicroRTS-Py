@@ -5,10 +5,10 @@ from typing import Tuple
 @dataclass
 class OMGArgs:
   device: str = "cpu"  # cpu, cuda, mps
-  gamma: float = 0.955
+  gamma: float = 0.995
   lr: float = 5e-5
   batch_size: int = 128
-  capacity: int = 5_000
+  capacity: int = 10_000
   min_replay: int = 1_000
   train_every: int = 4
   target_update_every: int = 1_000

@@ -230,12 +230,12 @@ heuristics = {
 }
 
 eval_results = {}
-
+total_eval_episodes = 1_000
 for opp_name, heuristic_opp in heuristics.items():
   classic_eval_returns = []
   om_eval_returns = []
 
-  for _ in range(100):
+  for _ in range(total_eval_episodes):
     # Eval Classic
     c_stats = agent_classic.run_test_episode(
       heuristic_opp, max_steps=args.max_steps, render=False)
@@ -246,8 +246,8 @@ for opp_name, heuristic_opp in heuristics.items():
       heuristic_opp, max_steps=args.max_steps, render=False)
     om_eval_returns.append(o_stats['return'])
 
-  c_avg = sum(classic_eval_returns) / 100.0
-  o_avg = sum(om_eval_returns) / 100.0
+  c_avg = sum(classic_eval_returns) / total_eval_episodes
+  o_avg = sum(om_eval_returns) / total_eval_episodes
   eval_results[opp_name] = {"Classic": c_avg, "OM": o_avg}
 
   print(
@@ -295,7 +295,7 @@ plt.plot(episode_list, phase2_entropies,
          label='OM Agent Entropy', color='green')
 plt.xlabel('Episodes')
 plt.ylabel('Shannon Entropy')
-plt.title('Policy Entropy (Mixed Strategy Proof)')
+plt.title('Policy Entropy')
 plt.legend()
 
 # Subplot 4: Evaluation Returns vs All Heuristics
