@@ -257,7 +257,7 @@ for _ in range(total_eval_episodes):
   for step in range(args.max_steps):
     current_history = {k: list(v) for k, v in history.items()}
     a_c, _ = agent_classic.select_action(obs[0], eval=True)
-    a_o, _ = agent_om.select_action(obs[1], current_history, eval=True)
+    a_o, _, _ = agent_om.select_action(obs[1], current_history, eval=True)
     obs, rewards, done, _ = env.step({0: a_c, 1: a_o})
 
     history["states"].append(obs[1])
@@ -265,8 +265,9 @@ for _ in range(total_eval_episodes):
 
     c_ret += rewards[0]
     o_ret += rewards[1]
-    if done: break
-      
+    if done:
+      break
+
   classic_cross_returns.append(c_ret)
   om_cross_returns.append(o_ret)
 
@@ -283,7 +284,7 @@ for _ in range(total_eval_episodes):
   }
   for step in range(args.max_steps):
     current_history = {k: list(v) for k, v in history.items()}
-    a_o, _ = agent_om.select_action(obs[0], current_history, eval=True)
+    a_o, _, _ = agent_om.select_action(obs[0], current_history, eval=True)
     a_c, _ = agent_classic.select_action(obs[1], eval=True)
     obs, rewards, done, _ = env.step({1: a_c, 0: a_o})
 
@@ -292,17 +293,20 @@ for _ in range(total_eval_episodes):
 
     c_ret += rewards[1]
     o_ret += rewards[0]
-    if done: break
-      
+    if done:
+      break
+
   classic_cross_returns.append(c_ret)
   om_cross_returns.append(o_ret)
 
-c_cross_avg = sum(classic_cross_returns) / (total_eval_episodes*2)
-o_cross_avg = sum(om_cross_returns) / (total_eval_episodes*2)
+c_cross_avg = sum(classic_cross_returns) / (total_eval_episodes * 2)
+o_cross_avg = sum(om_cross_returns) / (total_eval_episodes * 2)
 eval_results["CrossPlay"] = {"Classic": c_cross_avg, "OM": o_cross_avg}
 
-print(f"Head-to-Head | Classic Avg: {c_cross_avg:>5.2f} | OM Avg: {o_cross_avg:>5.2f}")
-wandb.log({"eval/crossplay_classic": c_cross_avg, "eval/crossplay_om": o_cross_avg})
+print(
+  f"Head-to-Head | Classic Avg: {c_cross_avg:>5.2f} | OM Avg: {o_cross_avg:>5.2f}")
+wandb.log({"eval/crossplay_classic": c_cross_avg,
+          "eval/crossplay_om": o_cross_avg})
 # ==========================================
 # PLOTTING
 # ==========================================
