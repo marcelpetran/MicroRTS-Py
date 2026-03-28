@@ -386,21 +386,13 @@ class QLearningAgent:
     batch_list = self.replay.sample(self.args.batch_size)
 
     # --- Update the Opponent Model Transformer ---
-    # We ONLY train the transformer on steps where the opponent succeeded!
-    valid_indices = [i for i, b in enumerate(
-      batch_list) if b.get("valid_for_transformer", False)]
+    om_batch = {
+        "states": torch.from_numpy(np.array([b["state"] for b in batch_list], dtype=np.float32)).to(self.device),
+        "history": self.model.collate_history([b["history"] for b in batch_list]),
+        "true_goal_map": torch.from_numpy(np.array([b["true_goal_map"] for b in batch_list], dtype=np.float32)).to(self.device)
+    }
+    model_loss = self.model.train_step(om_batch)
 
-    if len(valid_indices) > 0:
-      valid_batch = [batch_list[i] for i in valid_indices]
-
-      om_batch = {
-          "states": torch.from_numpy(np.array([b["state"] for b in valid_batch], dtype=np.float32)).to(self.device),
-          "history": self.model.collate_history([b["history"] for b in valid_batch]),
-          "true_goal_map": torch.from_numpy(np.array([b["true_goal_map"] for b in valid_batch], dtype=np.float32)).to(self.device)
-      }
-      model_loss = self.model.train_step(om_batch)
-    else:
-      model_loss = 0.0
 
     # --- Update the Q-Network ---
     q_sa, target = self.compute_targets(batch_list)
