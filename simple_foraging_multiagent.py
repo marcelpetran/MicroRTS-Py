@@ -2,6 +2,7 @@ import os
 import argparse
 import copy
 import random
+from collections import deque, defaultdict
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
@@ -20,6 +21,7 @@ from omg_args import OMGArgs
 # Import the modified MA versions
 from q_agent import QLearningAgent
 from q_agent_classic import QLearningAgentClassic
+from sl_agent import SLAgent
 
 matplotlib.use('Agg')  # Prevents memory leak on headless clusters
 torch.set_float32_matmul_precision('high')
@@ -107,13 +109,10 @@ num_epochs = args_parsed.episodes // args_parsed.episodes_per_epoch
 # ==========================================
 print("\n--- PHASE 1: Training Classic Agent & Generating FSP Curriculum ---")
 agent_classic = QLearningAgentClassic(env, args=args)
-opp_classic = QLearningAgentClassic(env, args=args)
+opp_classic = SLAgent(env, args=args)
 
-classic_policy_pool = []
 phase1_returns, phase1_opp_returns, phase1_entropies = [], [], []
 
-# Bootstrap pool with initial random weights
-classic_policy_pool.append(copy.deepcopy(agent_classic.q.state_dict()))
 
 for epoch in range(num_epochs):
   epoch_returns, epoch_opp_returns, epoch_entropies = [], [], []
@@ -121,12 +120,6 @@ for epoch in range(num_epochs):
               desc=f"Phase 1 Epoch {epoch + 1}/{num_epochs}", leave=False)
 
   for ep in pbar:
-    # Sample historical opponent
-    # Sample from the 10 most recent policies to ensure a challenging curriculum
-    recent_pool = classic_policy_pool[-10:]
-    chosen_policy = random.choice(recent_pool)
-    opp_classic.load_historical_policy(chosen_policy)
-
     stats = agent_classic.run_episode(opp_classic, max_steps=args.max_steps)
     epoch_returns.append(stats['return'])
     epoch_opp_returns.append(stats['opp_return'])
@@ -145,17 +138,15 @@ for epoch in range(num_epochs):
   phase1_opp_returns.append(avg_opp)
   phase1_entropies.append(avg_ent)
 
-  # Add newly trained Classic policy to the frozen curriculum pool
-  classic_policy_pool.append(copy.deepcopy(agent_classic.q.state_dict()))
   torch.save(agent_classic.q.state_dict(),
              f"./models/{args.folder_id}/classic_qnet_ep{epoch + 1}.pth")
   print(
-    f"Phase 1 | Epoch {epoch + 1:02d} | Classic Ret: {avg_ret:>4.1f} | Opp Ret: {avg_opp:>4.1f} | Classic Entropy: {avg_ent:.4f} | Pool Size: {len(classic_policy_pool)}")
+    f"Phase 1 | Epoch {epoch + 1:02d} | Classic Ret: {avg_ret:>4.1f} | Opp Ret: {avg_opp:>4.1f} | Classic Entropy: {avg_ent:.4f} | Replay Size: {len(opp_classic.replay)}")
 
 # ==========================================
 # PHASE 2: TRAIN OM AGENT ON FROZEN CURRICULUM
 # ==========================================
-print("\n--- PHASE 2: Training OM Agent against Frozen Curriculum ---")
+print("\n--- PHASE 2: Training OM Agent ---")
 inference_model = SpatialOpponentModel(args=args).to(device)
 op_model = OpponentModel(inference_model, args=args)
 agent_om = QLearningAgent(env, op_model, args=args)
@@ -173,8 +164,8 @@ agent_om.model.pretrain(
   dataset, epochs=args_parsed.pretrain_epochs, batch_size=args_parsed.batch_size)
 del dataset
 
-# FSP Opponent (Strictly Classic)
-opp_eval = QLearningAgentClassic(env, args=args)
+# FSP Opponent
+opp_om = SLAgent(env, args=args)
 
 phase2_returns, phase2_opp_returns, phase2_entropies = [], [], []
 
@@ -184,15 +175,7 @@ for epoch in range(num_epochs):
               desc=f"Phase 2 Epoch {epoch + 1}/{num_epochs}", leave=False)
 
   for ep in pbar:
-    # Sample from the EXACT SAME pool Phase 1 generated
-    current_max_index = epoch + 2
-    available_history = classic_policy_pool[:current_max_index]
-    curriculum_window = available_history[-10:]
-    chosen_policy = random.choice(curriculum_window)
-
-    opp_eval.load_historical_policy(chosen_policy)
-
-    stats = agent_om.run_episode(opp_eval, max_steps=args.max_steps)
+    stats = agent_om.run_episode(opp_om, max_steps=args.max_steps)
     epoch_returns.append(stats['return'])
     epoch_opp_returns.append(stats['opp_return'])
     epoch_entropies.append(stats['avg_entropy'])
@@ -220,11 +203,14 @@ for epoch in range(num_epochs):
 # ==========================================
 # PHASE 3: EVALUATION AGAINST HEURISTICS
 # ==========================================
-print("\n--- PHASE 3: Headless Evaluation against Heuristics ---")
+print("\n--- PHASE 3a: Headless Evaluation against Heuristics ---")
 heuristics = {
     "Simple": SimpleAgent(agent_id=1),
     "GreedySwitch": GreedySwitchAgent(agent_id=1)
 }
+agent_classic.q.eval()
+agent_om.q.eval()
+agent_om.model.inference_model.eval()
 
 eval_results = {}
 total_eval_episodes = 1_000
@@ -254,6 +240,69 @@ for opp_name, heuristic_opp in heuristics.items():
      f"eval/om_vs_{opp_name}": o_avg
      })
 
+print("\n--- PHASE 3b: Head-to-Head Cross-Play ---")
+classic_cross_returns = []
+om_cross_returns = []
+# ==========================================
+# Matchup A: Classic (Player 0) vs OM (Player 1)
+# ==========================================
+for _ in range(total_eval_episodes):
+  obs = env.reset()
+  c_ret, o_ret = 0, 0
+  history_len = args.max_history_length
+  history = {
+      "states": deque(maxlen=history_len),
+      "actions": deque(maxlen=history_len)
+  }
+  for step in range(args.max_steps):
+    current_history = {k: list(v) for k, v in history.items()}
+    a_c, _ = agent_classic.select_action(obs[0], eval=True)
+    a_o, _ = agent_om.select_action(obs[1], current_history, eval=True)
+    obs, rewards, done, _ = env.step({0: a_c, 1: a_o})
+
+    history["states"].append(obs[1])
+    history["actions"].append(a_c)
+
+    c_ret += rewards[0]
+    o_ret += rewards[1]
+    if done: break
+      
+  classic_cross_returns.append(c_ret)
+  om_cross_returns.append(o_ret)
+
+# ==========================================
+# Matchup B: OM (Player 0) vs Classic (Player 1)
+# ==========================================
+for _ in range(total_eval_episodes):
+  obs = env.reset()
+  c_ret, o_ret = 0, 0
+  history_len = args.max_history_length
+  history = {
+      "states": deque(maxlen=history_len),
+      "actions": deque(maxlen=history_len)
+  }
+  for step in range(args.max_steps):
+    current_history = {k: list(v) for k, v in history.items()}
+    a_o, _ = agent_om.select_action(obs[0], current_history, eval=True)
+    a_c, _ = agent_classic.select_action(obs[1], eval=True)
+    obs, rewards, done, _ = env.step({1: a_c, 0: a_o})
+
+    history["states"].append(obs[0])
+    history["actions"].append(a_c)
+
+    c_ret += rewards[1]
+    o_ret += rewards[0]
+    if done: break
+      
+  classic_cross_returns.append(c_ret)
+  om_cross_returns.append(o_ret)
+
+c_cross_avg = sum(classic_cross_returns) / (total_eval_episodes*2)
+o_cross_avg = sum(om_cross_returns) / (total_eval_episodes*2)
+eval_results["CrossPlay"] = {"Classic": c_cross_avg, "OM": o_cross_avg}
+
+print(f"Head-to-Head | Classic Avg: {c_cross_avg:>5.2f} | OM Avg: {o_cross_avg:>5.2f}")
+wandb.log({"eval/crossplay_classic": c_cross_avg, "eval/crossplay_om": o_cross_avg})
 # ==========================================
 # PLOTTING
 # ==========================================
