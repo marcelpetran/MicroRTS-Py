@@ -304,9 +304,6 @@ class QLearningAgentClassic:
     q_sa, target = self.compute_targets(batch_list)
     loss = F.smooth_l1_loss(q_sa, target, reduction='mean')
 
-    if loss.item() < self.args.aux_loss_threshold:
-      return 0.0
-
     self.opt.zero_grad(set_to_none=True)
     loss.backward()
     nn.utils.clip_grad_norm_(self.q.parameters(), 5.0)
@@ -356,21 +353,18 @@ class QLearningAgentClassic:
 
       next_obs, reward, done, info = self.env.step(actions)
 
-      # if hasattr(opponent_agent, 'replay'):
-      #   opp_step_info = {
-      #       "state": obs[1].copy(),
-      #       "action": a_opponent,
-      #       "reward": float(reward[1]),
-      #       "next_state": next_obs[1].copy(),
-      #       "done": bool(done),
-      #   }
-      #   opponent_agent.replay.push(opp_step_info)
-      #   opponent_agent.global_step += 1
+      if hasattr(opponent_agent, 'replay'):
+        opp_step_info = {
+            "state": obs[0].copy(),
+            "action": a
+        }
+        opponent_agent.replay.push(opp_step_info)
+        opponent_agent.global_step += 1
 
-      #   opp_loss = opponent_agent.update()
+        opp_loss = opponent_agent.update()
 
-      #   if opp_loss is not None:
-      #     opp_loss_val = opp_loss
+        if opp_loss is not None:
+          opp_loss_val = opp_loss
 
       step_info = {
           "state": obs[0].copy(),
