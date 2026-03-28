@@ -14,6 +14,7 @@ from torch.distributions import Categorical
 import matplotlib.pyplot as plt
 import wandb
 
+
 class SLnet(nn.Module):
   """
   """
@@ -101,7 +102,8 @@ class SLAgent:
     self.opt = torch.optim.Adam(self.q.parameters(), lr=self.args.lr)
 
     # Replay
-    self.replay = SLBuffer(200_000) # extra large buffer to store all historical policies for Fictitious Play
+    # extra large buffer to store all historical policies for Fictitious Play
+    self.replay = SLBuffer(200_000)
 
     # Schedules
     self.global_step = 0
@@ -117,18 +119,20 @@ class SLAgent:
     """
     self.q.eval()
     s = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
-    
-    logits = self.q(s) # (1, action_dim)
-    
+
+    logits = self.q(s)  # (1, action_dim)
+    entropy = 0.0
     if eval:
-        action = torch.argmax(logits, dim=1).item()
-        entropy = 0.0
-        return action, entropy
+      action = torch.argmax(logits, dim=1).item()
+      return action, entropy
+    elif random.random() < 0.10:  # make mistakes 10% of the time
+      action = random.randint(0, self.args.action_dim - 1)
+      return action, entropy
 
     dist = Categorical(logits=logits)
     action = dist.sample().item()
     entropy = dist.entropy().item()
-    
+
     self.q.train()
     return action, entropy
 
@@ -146,7 +150,7 @@ class SLAgent:
 
     a = torch.from_numpy(
       np.array([b["action"] for b in batch], dtype=np.int64)).to(self.device)
-    
+
     # For SL, we treat the action as the "target" and use cross-entropy loss
     logits = self.q(s)  # (B, action_dim)
     loss = F.cross_entropy(logits, a)
