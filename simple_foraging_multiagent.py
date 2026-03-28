@@ -56,8 +56,6 @@ parser.add_argument('--tau_end', type=float, default=0.1,
                     help='Boltzmann end temp')
 parser.add_argument('--train_every', type=int,
                     default=2, help='Train frequency')
-parser.add_argument('--target_update_every', type=int,
-                    default=1_000, help='Target net update freq')
 parser.add_argument('--replay_capacity', type=int,
                     default=150_000, help='Replay buffer capacity')
 parser.add_argument('--seed', type=int, default=0, help='Random seed')
@@ -92,7 +90,6 @@ args = OMGArgs(
     qnet_hidden=args_parsed.qnet_dim,
     cnn_hidden=args_parsed.cnn_hidden,
     train_every=args_parsed.train_every,
-    target_update_every=args_parsed.target_update_every,
     max_steps=args_parsed.max_steps,
     tau_start=args_parsed.tau_start,
     tau_end=args_parsed.tau_end,
