@@ -107,7 +107,7 @@ num_epochs = args_parsed.episodes // args_parsed.episodes_per_epoch
 # ==========================================
 # PHASE 1: GENERATE CLASSIC FSP CURRICULUM
 # ==========================================
-print("\n--- PHASE 1: Training Classic Agent & Generating FSP Curriculum ---")
+print("\n--- PHASE 1: Training Classic Agent ---")
 agent_classic = QLearningAgentClassic(env, args=args)
 opp_classic = SLAgent(env, args=args)
 
