@@ -103,7 +103,7 @@ class SLAgent:
 
     # Replay
     # extra large buffer to store all historical policies for Fictitious Play
-    self.replay = SLBuffer(200_000)
+    self.replay = SLBuffer(1_000_000)
 
     # Schedules
     self.global_step = 0
@@ -113,20 +113,16 @@ class SLAgent:
 
   # ------------- acting -------------
   @torch.no_grad()
-  def select_action(self, s_t: np.ndarray, eval=False, opp_policy=None) -> Tuple[int, float]:
+  def select_action(self, s_t: np.ndarray, eval=False) -> Tuple[int, float]:
     """
     Samples an action from the learned average probability distribution.
     """
     self.q.eval()
     s = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
 
-    eta = 0.10  # exploration rate
-    # sigma = (1-eta)*pi + eta*beta
-    if not eval and opp_policy is not None and random.random() < eta:
-      opp_policy.q.eval()
-      q_vals = opp_policy.q(s)  # (1, action_dim)
-      action = int(torch.argmax(q_vals, dim=1).item())
-      opp_policy.q.train()
+    if random.random() < 0.10:  # make mistakes 10% of the time
+      action = random.randint(0, self.args.action_dim - 1)
+      self.q.train()
       return action, 0.0
 
     logits = self.q(s)  # (1, action_dim)
