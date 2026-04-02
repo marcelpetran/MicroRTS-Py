@@ -457,7 +457,7 @@ class QLearningAgent:
       current_history = {k: list(v) for k, v in history.items()}
 
       a, g_map, step_entropy = self.select_action(obs[0], current_history)
-      a_opponent, _ = opponent_agent.select_action(obs[1], self)
+      a_opponent, _ = opponent_agent.select_action(obs[1])
       actions = {0: a, 1: a_opponent}
 
       ep_entropy += step_entropy
