@@ -6,7 +6,7 @@ from typing import Tuple
 class OMGArgs:
   device: str = "cpu"  # cpu, cuda, mps
   gamma: float = 0.98
-  lr: float = 5e-5
+  lr: float = 1e-4
   batch_size: int = 128
   capacity: int = 5_000
   min_replay: int = 256
@@ -23,7 +23,7 @@ class OMGArgs:
   tau_soft: float = 0.001
   tau_start: float = 2.0
   tau_end: float = 0.05
-  tau_decay_steps: int = 600_000
+  tau_decay_steps: int = 300_000
   beta_start: float = 1.0
   beta_end: float = 0.01
   beta_decay_steps: int = 50_000
