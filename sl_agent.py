@@ -120,7 +120,7 @@ class SLAgent:
     self.q.eval()
     s = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
 
-    if random.random() < 0.10:  # make mistakes 10% of the time
+    if random.random() < 0.05:  # make mistakes 10% of the time
       action = random.randint(0, self.args.action_dim - 1)
       self.q.train()
       return action, 0.0
