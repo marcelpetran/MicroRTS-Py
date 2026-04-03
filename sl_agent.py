@@ -103,7 +103,7 @@ class SLAgent:
 
     # Replay
     # extra large buffer to store all historical policies for Fictitious Play
-    self.replay = SLBuffer(200_000)
+    self.replay = SLBuffer(self.args.sl_capacity)
 
     # Schedules
     self.global_step = 0
@@ -125,7 +125,7 @@ class SLAgent:
     if eval:
       action = torch.argmax(logits, dim=1).item()
       return action, entropy
-    elif random.random() < 0.10:  # make mistakes 10% of the time
+    elif random.random() < 0.05:
       action = random.randint(0, self.args.action_dim - 1)
       return action, entropy
 

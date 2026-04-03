@@ -9,6 +9,7 @@ class OMGArgs:
   lr: float = 5e-5
   batch_size: int = 128
   capacity: int = 5_000
+  sl_capacity: int = 250_000
   min_replay: int = 256
   train_every: int = 2
   visualise_every_n_step: int = 3
