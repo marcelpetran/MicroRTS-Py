@@ -240,13 +240,6 @@ class FSPAgentClassic:
     """Calculates the Average Strategy action using Supervised Learning."""
     self.sl.eval()
     s = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
-
-    # Optional epsilon greedy for SL exploration during training
-    if not eval and random.random() < 0.05:
-      action = random.randint(0, self.args.action_dim - 1)
-      self.sl.train()
-      return action, 0.0
-
     logits = self.sl(s)
     entropy = 0.0
     
