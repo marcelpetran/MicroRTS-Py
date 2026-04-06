@@ -316,14 +316,13 @@ class QLearningAgent:
     return int(torch.argmax(qvals + gumbel_noise))
 
   @torch.no_grad()
-  def select_action(self, s_t: np.ndarray, history: Dict[str, List[torch.Tensor]], eval=False) -> Tuple[int, torch.Tensor]:
+  def select_action(self, s_t: np.ndarray, history: Dict[str, torch.Tensor], eval=False) -> Tuple[int, torch.Tensor]:
     """
     (interaction phase) Infer g_hat and act eps-greedily on Q(s,g_hat,*)
     """
     x = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
-    collated_history = self.model.collate_history([history])
     with torch.no_grad():
-      g_logits = self.model(x, collated_history)
+      g_logits = self.model(x, history)  # (1, H, W)
       g_map = F.softmax(g_logits.view(
         g_logits.shape[0], -1), dim=-1).view_as(g_logits)  # (B, H, W)
 
@@ -388,7 +387,11 @@ class QLearningAgent:
     # --- Update the Opponent Model Transformer ---
     om_batch = {
         "states": torch.from_numpy(np.array([b["state"] for b in batch_list], dtype=np.float32)).to(self.device),
-        "history": self.model.collate_history([b["history"] for b in batch_list]),
+        "history": {
+            "state_features": torch.from_numpy(np.array([b["history"]["state_features"][0] for b in batch_list], dtype=np.float32)).to(self.device),
+            "actions": torch.from_numpy(np.array([b["history"]["actions"][0] for b in batch_list], dtype=np.int64)).to(self.device),
+            "mask": torch.from_numpy(np.array([b["history"]["mask"][0] for b in batch_list], dtype=np.bool_)).to(self.device)
+        },
         "true_goal_map": torch.from_numpy(np.array([b["true_goal_map"] for b in batch_list], dtype=np.float32)).to(self.device)
     }
     model_loss = self.model.train_step(om_batch)
@@ -440,12 +443,12 @@ class QLearningAgent:
     opp_ret = 0.0
     ep_entropy = 0.0
 
-    # History container for the Transformer
+    # History buffer for the transformer
     history_len = self.args.max_history_length
-    history = {
-        "states": deque(maxlen=history_len),
-        "actions": deque(maxlen=history_len)
-    }
+    rolling_feats = torch.zeros((1, history_len, self.args.d_model), device=self.device)
+    rolling_actions = torch.zeros((1, history_len), dtype=torch.long, device=self.device)
+    rolling_mask = torch.zeros((1, history_len), dtype=torch.bool, device=self.device)
+    current_seq_len = 0
 
     # Temporary list to hold the episode before hindsight labeling
     episode_transitions = []
@@ -454,9 +457,12 @@ class QLearningAgent:
     H, W, _ = obs[0].shape
 
     for step in range(max_steps or 500):
-      current_history = {k: list(v) for k, v in history.items()}
-
-      a, g_map, step_entropy = self.select_action(obs[0], current_history)
+      history_gpu = {
+        "state_features": rolling_feats,
+        "actions": rolling_actions,
+        "mask": rolling_mask
+      }
+      a, g_map, step_entropy = self.select_action(obs[0], history_gpu)
       a_opponent, _ = opponent_agent.select_action(obs[1])
       actions = {0: a, 1: a_opponent}
 
@@ -476,8 +482,14 @@ class QLearningAgent:
 
         if opp_loss is not None:
           opp_loss_val = opp_loss
+      
+      history_cpu = {
+          "state_features": rolling_feats.cpu().numpy(),
+          "actions": rolling_actions.cpu().numpy(),
+          "mask": rolling_mask.cpu().numpy()
+      }
 
-      # 2. Store the step without the true label (we don't know it yet)
+      # Store the step without the true label
       transition = {
           "state": obs[0].copy(),
           "action": a,
@@ -487,19 +499,31 @@ class QLearningAgent:
           "next_state": next_obs[0].copy(),
           "done": bool(done),
           "rollout_goal_map": g_map.cpu().numpy(),
-          "history": {k: [np.copy(item) if isinstance(item, np.ndarray) else item for item in v] for k, v in current_history.items()},
+          "history": history_cpu  # Store the raw history for hindsight labeling later
       }
       episode_transitions.append(transition)
 
-      # 3. Update history
-      history["states"].append(obs[0].copy())
-      history["actions"].append(a_opponent)
+      # Update history
+      state_tensor = torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device)
+      with torch.no_grad():
+        new_feat = self.model.inference_model.get_features(state_tensor) # (1, d_model)
+      
+      rolling_feats = torch.roll(rolling_feats, shifts=-1, dims=1)
+      rolling_actions = torch.roll(rolling_actions, shifts=-1, dims=1)
+      rolling_mask = torch.roll(rolling_mask, shifts=-1, dims=1)
+
+      rolling_feats[:, -1, :] = new_feat
+      rolling_actions[:, -1] = a_opponent
+
+      if current_seq_len < history_len:
+        current_seq_len += 1
+        rolling_mask[:, -current_seq_len:] = True
 
       ep_ret += reward[0]
       opp_ret += reward[1]
       obs = next_obs
 
-      # 4. Train Step (Optional: can also be moved outside the loop)
+      # Train Step
       self.global_step += 1
       Q_loss, model_loss = self.update()
 
@@ -580,16 +604,20 @@ class QLearningAgent:
 
     # History container for the Transformer
     history_len = self.args.max_history_length
-    history = {
-        "states": deque(maxlen=history_len),
-        "actions": deque(maxlen=history_len)
-    }
+    rolling_feats = torch.zeros((1, history_len, self.args.d_model), device=self.device)
+    rolling_actions = torch.zeros((1, history_len), dtype=torch.long, device=self.device)
+    rolling_mask = torch.zeros((1, history_len), dtype=torch.bool, device=self.device)
+    current_seq_len = 0
 
     for step in range(max_steps or 500):
-      current_history = {k: list(v) for k, v in history.items()}
+      history = {
+        "state_features": rolling_feats,
+        "actions": rolling_actions,
+        "mask": rolling_mask
+      }
 
       a, g_map, step_entropy = self.select_action(
-        obs[0], current_history, eval=True)
+        obs[0], history, eval=True)
       a_opponent, _ = opponent_agent.select_action(obs[1], eval=True)
       actions = {0: a, 1: a_opponent}
 
@@ -603,8 +631,20 @@ class QLearningAgent:
 
       next_obs, reward, done, info = self.env.step(actions)
 
-      history["states"].append(obs[0].copy())
-      history["actions"].append(a_opponent)
+      state_tensor = torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device)
+      with torch.no_grad():
+        new_feat = self.model.inference_model.get_features(state_tensor) # (1, d_model)
+      
+      rolling_feats = torch.roll(rolling_feats, shifts=-1, dims=1)
+      rolling_actions = torch.roll(rolling_actions, shifts=-1, dims=1)
+      rolling_mask = torch.roll(rolling_mask, shifts=-1, dims=1)
+
+      rolling_feats[:, -1, :] = new_feat
+      rolling_actions[:, -1] = a_opponent
+
+      if current_seq_len < history_len:
+        current_seq_len += 1
+        rolling_mask[:, -current_seq_len:] = True
 
       ep_ret += reward[0]
       opp_ret += reward[1]

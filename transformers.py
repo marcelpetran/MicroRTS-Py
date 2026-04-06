@@ -87,34 +87,32 @@ class SpatialOpponentModel(nn.Module):
         nn.Linear(128, H * W)
     )
 
-  def forward(self, x: torch.Tensor, history: Dict[str, torch.Tensor]) -> torch.Tensor:
+  def get_features(self, x: torch.Tensor) -> torch.Tensor:
+    """Helper function to extract features from a single state tensor (B, H, W, F)."""
+    x_flat = x.permute(0, 3, 1, 2)
+    return self.feature_extractor(x_flat)
+
+  def forward(self, x: torch.Tensor, history: Dict[str, torch.Tensor], cached_features: bool = True) -> torch.Tensor:
     """
     x: (B, H, W, F) Current state
     history: Dict containing padded 'states' (B, T, H, W, F) and 'mask' (B, T)
     """
     B, H, W, F_dim = x.shape
 
-    # Heuristic fallback if no history is available: predict opponent on food tiles
-    if not history or 'states' not in history or history['states'].numel() == 0:
-      food_channel = x[:, :, :, 1]
-      logits = torch.where(food_channel > 0.5,
-                           torch.tensor(10.0, device=x.device),
-                           torch.tensor(-10.0, device=x.device))
-      return logits
-
     # Embed current state
-    x_flat = x.permute(0, 3, 1, 2)  # (B, F, H, W)
-    x_feat = self.feature_extractor(x_flat).unsqueeze(1)  # (B, 1, d_model)
+    x_feat = self.get_features(x).unsqueeze(1)  # (B, 1, d_model)
 
     # Embed History
-    hist_states = history['states']  # (B, T, H, W, F)
     hist_actions = history['actions']  # (B, T)
     hist_mask = history['mask']      # (B, T) True for valid tokens
-    T = hist_states.shape[1]
+    T = hist_actions.shape[1]
 
-    hist_flat = hist_states.view(B * T, H, W, F_dim).permute(0, 3, 1, 2)
-    hist_feat = self.feature_extractor(
-      hist_flat).view(B, T, -1)  # (B, T, d_model)
+    if cached_features:
+      hist_feat = history['state_features']  # (B, T, d_model)
+    else:
+      hist_states = history['states']  # (B, T, H, W, F)
+      hist_flat = hist_states.reshape(B * T, H, W, F_dim).permute(0, 3, 1, 2)
+      hist_feat = self.feature_extractor(hist_flat).reshape(B, T, -1)
 
     hist_action_feat = self.action_embedder(hist_actions)  # (B, T, d_model)
 

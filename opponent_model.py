@@ -90,7 +90,7 @@ class OpponentModel(nn.Module):
           "true_goal_map": torch.from_numpy(np.stack([b["true_goal_map"] for b in batch_data], dtype=np.float32)).to(self.device, non_blocking=True)
         }
 
-        loss = self.train_step(om_batch)
+        loss = self.train_step(om_batch, cached_features=False)
         epoch_losses.append(loss)
 
         # Update progress bar suffix with current loss
@@ -112,7 +112,7 @@ class OpponentModel(nn.Module):
       if writer:
         writer.add_scalar("Loss/epoch", avg_loss, epoch)
 
-  def forward(self, x: torch.Tensor, history: Dict) -> torch.Tensor:
+  def forward(self, x: torch.Tensor, history: Dict, cached_features=True) -> torch.Tensor:
     """
     Calculates the forward pass, using the inference model 
     to predict the opponent's subgoal.
@@ -124,7 +124,7 @@ class OpponentModel(nn.Module):
     Returns:
         Heatmap (B, H, W) of the predicted subgoal location.
     """
-    return self.inference_model(x, history)
+    return self.inference_model(x, history, cached_features=cached_features)
 
   def _generate_soft_targets(self, target_map: torch.Tensor, sigma: float = 1.0):
     """
@@ -162,13 +162,13 @@ class OpponentModel(nn.Module):
 
     return soft_targets.squeeze(1)  # Return to (B, H, W)
 
-  def train_step(self, batch):
+  def train_step(self, batch, cached_features=True):
     x = batch['states']
     history = batch['history']
     # (B, H, W) Ground Truth from Hindsight
     target_map = batch['true_goal_map']
     self.inference_model.train()
-    pred_logits = self.forward(x, history)  # (B, H, W)
+    pred_logits = self.forward(x, history, cached_features)  # (B, H, W)
 
     soft_targets = self._generate_soft_targets(target_map, sigma=1.0)
 
