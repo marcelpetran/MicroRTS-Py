@@ -17,11 +17,13 @@ from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv
 # NETWORKS
 # ==========================================
 
+
 class QNetClassic(nn.Module):
   """
   RL Network: Q(s, a)
   Learns the Best Response to the opponent's average strategy.
   """
+
   def __init__(self, args: OMGArgs):
     super().__init__()
     H, W, F_dim = args.state_shape
@@ -29,7 +31,7 @@ class QNetClassic(nn.Module):
     self.action_dim = args.action_dim
     cnn_hidden = args.cnn_hidden
     self.flat_dim = cnn_hidden * H * W
-    
+
     self.cnn = nn.Sequential(
         nn.Conv2d(F_dim, 32, kernel_size=3, padding=1),
         nn.ReLU(),
@@ -78,6 +80,7 @@ class SLnet(nn.Module):
   SL Network: Pi(a | s)
   Learns the agent's own average historical strategy.
   """
+
   def __init__(self, args: OMGArgs):
     super().__init__()
     H, W, F_dim = args.state_shape
@@ -85,7 +88,7 @@ class SLnet(nn.Module):
     self.action_dim = args.action_dim
     cnn_hidden = args.cnn_hidden
     self.flat_dim = cnn_hidden * H * W
-    
+
     self.cnn = nn.Sequential(
         nn.Conv2d(F_dim, 32, kernel_size=3, padding=1),
         nn.ReLU(),
@@ -119,8 +122,10 @@ class SLnet(nn.Module):
 # BUFFERS
 # ==========================================
 
+
 class ReplayBuffer:
   """Standard FIFO buffer for Q-learning (requires recent data)."""
+
   def __init__(self, capacity: int):
     self.capacity = capacity
     self.buf: Deque[Dict] = deque(maxlen=capacity)
@@ -134,8 +139,10 @@ class ReplayBuffer:
   def __len__(self):
     return len(self.buf)
 
+
 class ReservoirBuffer:
   """Reservoir Sampler for SL (preserves uniform distribution of ALL history)."""
+
   def __init__(self, capacity: int):
     self.capacity = capacity
     self.buf = []
@@ -143,11 +150,11 @@ class ReservoirBuffer:
 
   def push(self, item: Dict):
     if len(self.buf) < self.capacity:
-        self.buf.append(item)
+      self.buf.append(item)
     else:
-        j = random.randint(0, self.n_seen)
-        if j < self.capacity:
-            self.buf[j] = item
+      j = random.randint(0, self.n_seen)
+      if j < self.capacity:
+        self.buf[j] = item
     self.n_seen += 1
 
   def sample(self, batch_size: int) -> List[Dict]:
@@ -160,11 +167,13 @@ class ReservoirBuffer:
 # FSP CLASSIC AGENT
 # ==========================================
 
+
 class FSPAgentClassic:
   """
   Unified Fictitious Self-Play Agent using classic Q-Learning.
   Contains both RL (Best Response) and SL (Average Strategy) components.
   """
+
   def __init__(self, env, args: OMGArgs = OMGArgs()):
     self.env = env
     self.args = args
@@ -174,10 +183,11 @@ class FSPAgentClassic:
       obs = self.env.reset()
       H, W, F_dim = obs.shape
       self.args.state_shape = (H, W, F_dim)
-        
+
     if not hasattr(self.env, "action_space") or self.env.action_space is None:
       raise ValueError("Env must have action_space (list or int).")
-    self.args.action_dim = len(self.env.action_space) if hasattr(self.env.action_space, "__len__") else int(self.env.action_space)
+    self.args.action_dim = len(self.env.action_space) if hasattr(
+      self.env.action_space, "__len__") else int(self.env.action_space)
 
     # RL Networks & Optimizer
     self.q = QNetClassic(args).to(self.device)
@@ -226,11 +236,11 @@ class FSPAgentClassic:
     """Calculates the Best Response action using classic Q-learning."""
     self.q.eval()
     x = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
-    
+
     qvals = self.q(x)
     tau = 0.05 if eval else self._tau()
     entropy = Categorical(logits=qvals / tau).entropy().item()
-    
+
     a = self._choose_q_action(qvals, tau, eval)
     self.q.train()
     return a, entropy
@@ -242,7 +252,7 @@ class FSPAgentClassic:
     s = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
     logits = self.sl(s)
     entropy = 0.0
-    
+
     if eval:
       action = torch.argmax(logits, dim=1).item()
     else:
@@ -261,13 +271,18 @@ class FSPAgentClassic:
     return a, ent
 
   # ------------- RL Update Logic -------------
-  
+
   def compute_targets(self, batch: List[Dict]) -> Tuple[torch.Tensor, torch.Tensor]:
-    s = torch.from_numpy(np.array([b["state"] for b in batch], dtype=np.float32)).to(self.device)
-    sp = torch.from_numpy(np.array([b["next_state"] for b in batch], dtype=np.float32)).to(self.device)
-    a = torch.from_numpy(np.array([b["action"] for b in batch], dtype=np.int64)).to(self.device)
-    r = torch.from_numpy(np.array([b["reward"] for b in batch], dtype=np.float32)).to(self.device)
-    done = torch.from_numpy(np.array([b["done"] for b in batch], dtype=np.float32)).to(self.device)
+    s = torch.from_numpy(
+      np.array([b["state"] for b in batch], dtype=np.float32)).to(self.device)
+    sp = torch.from_numpy(
+      np.array([b["next_state"] for b in batch], dtype=np.float32)).to(self.device)
+    a = torch.from_numpy(
+      np.array([b["action"] for b in batch], dtype=np.int64)).to(self.device)
+    r = torch.from_numpy(
+      np.array([b["reward"] for b in batch], dtype=np.float32)).to(self.device)
+    done = torch.from_numpy(
+      np.array([b["done"] for b in batch], dtype=np.float32)).to(self.device)
 
     q_sa = self.q(s).gather(1, a.unsqueeze(1)).squeeze(1)
 
@@ -277,7 +292,7 @@ class FSPAgentClassic:
       best_actions = (q_val + noise).argmax(dim=1, keepdim=True)
       q_next = self.q_tgt(sp).gather(1, best_actions).squeeze(1)
       target = r + (1.0 - done) * self.args.gamma * q_next
-      target = torch.clamp(target, min=-5.0, max=5.0)
+      target = torch.clamp(target, min=-15.0, max=15.0)
 
     return q_sa, target
 
@@ -311,8 +326,10 @@ class FSPAgentClassic:
       return None
 
     batch = self.sl_replay.sample(self.args.batch_size)
-    s = torch.from_numpy(np.stack([b["state"] for b in batch])).float().to(self.device)
-    a = torch.from_numpy(np.array([b["action"] for b in batch], dtype=np.int64)).to(self.device)
+    s = torch.from_numpy(np.stack([b["state"]
+                         for b in batch])).float().to(self.device)
+    a = torch.from_numpy(
+      np.array([b["action"] for b in batch], dtype=np.int64)).to(self.device)
 
     logits = self.sl(s)
     loss = F.cross_entropy(logits, a)
@@ -360,7 +377,9 @@ class FSPAgentClassic:
       if hasattr(opponent_agent, 'is_frozen_as_sl') and opponent_agent.is_frozen_as_sl:
         a_opponent, _ = opponent_agent.select_sl_action(obs[1])
       else:
-        a_opponent, _ = opponent_agent.select_action(obs[1])
+        opp_rl_a, _ = opponent_agent.select_rl_action(obs[1])
+        opp_sl_a, _ = opponent_agent.select_sl_action(obs[1])
+        a_opponent = opp_rl_a if random.random() < eta else opp_sl_a
 
       actions = {0: a, 1: a_opponent}
       ep_entropy += step_entropy
@@ -410,7 +429,7 @@ class FSPAgentClassic:
         a, step_entropy = self.select_sl_action(obs[0], eval=True)
       else:
         a, step_entropy = self.select_rl_action(obs[0], eval=True)
-          
+
       if hasattr(opponent_agent, 'is_frozen_as_sl') and opponent_agent.is_frozen_as_sl:
         a_opponent, _ = opponent_agent.select_sl_action(obs[1], eval=True)
       else:

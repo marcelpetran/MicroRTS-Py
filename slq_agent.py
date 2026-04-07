@@ -17,11 +17,13 @@ from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv
 # NETWORKS
 # ==========================================
 
+
 class QNet(nn.Module):
   """
   RL Network: Q(s, g, a)
   Learns the Best Response to the opponent's average strategy.
   """
+
   def __init__(self, args: OMGArgs):
     super().__init__()
     H, W, F_dim = args.state_shape
@@ -78,6 +80,7 @@ class SLnet(nn.Module):
   SL Network: Pi(a | s)
   Learns the agent's own average historical strategy.
   """
+
   def __init__(self, args: OMGArgs):
     super().__init__()
     H, W, F_dim = args.state_shape
@@ -85,7 +88,7 @@ class SLnet(nn.Module):
     self.action_dim = args.action_dim
     cnn_hidden = args.cnn_hidden
     self.flat_dim = cnn_hidden * H * W
-    
+
     self.cnn = nn.Sequential(
         nn.Conv2d(F_dim, 32, kernel_size=3, padding=1),
         nn.ReLU(),
@@ -119,8 +122,10 @@ class SLnet(nn.Module):
 # BUFFERS
 # ==========================================
 
+
 class ReplayBuffer:
   """Standard FIFO buffer for Q-learning (requires recent data)."""
+
   def __init__(self, capacity: int):
     self.capacity = capacity
     self.buf: Deque[Dict] = deque(maxlen=capacity)
@@ -134,8 +139,10 @@ class ReplayBuffer:
   def __len__(self):
     return len(self.buf)
 
+
 class ReservoirBuffer:
   """Reservoir Sampler for SL."""
+
   def __init__(self, capacity: int):
     self.capacity = capacity
     self.buf = []
@@ -160,11 +167,13 @@ class ReservoirBuffer:
 # FSP AGENT
 # ==========================================
 
+
 class FSPAgentOM:
   """
   Unified Fictitious Self-Play Agent with Opponent Modeling.
   Contains both RL (Best Response) and SL (Average Strategy) components.
   """
+
   def __init__(self, env, opponent_model, args: OMGArgs = OMGArgs()):
     self.env = env
     self.model = opponent_model
@@ -175,10 +184,11 @@ class FSPAgentOM:
       obs = self.env.reset()
       H, W, F_dim = obs.shape
       self.args.state_shape = (H, W, F_dim)
-        
+
     if not hasattr(self.env, "action_space") or self.env.action_space is None:
       raise ValueError("Env must have action_space (list or int).")
-    self.args.action_dim = len(self.env.action_space) if hasattr(self.env.action_space, "__len__") else int(self.env.action_space)
+    self.args.action_dim = len(self.env.action_space) if hasattr(
+      self.env.action_space, "__len__") else int(self.env.action_space)
 
     # RL Networks & Optimizer
     self.q = QNet(args).to(self.device)
@@ -227,14 +237,15 @@ class FSPAgentOM:
     """Calculates the Best Response action using Q-learning and OM."""
     self.q.eval()
     x = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
-    
+
     g_logits = self.model(x, history, cached_features=True)
-    g_map = F.softmax(g_logits.view(g_logits.shape[0], -1), dim=-1).view_as(g_logits)
+    g_map = F.softmax(g_logits.view(
+      g_logits.shape[0], -1), dim=-1).view_as(g_logits)
 
     qvals = self.q(x, g_map)
     tau = 0.05 if eval else self._tau()
     entropy = Categorical(logits=qvals / tau).entropy().item()
-    
+
     a = self._choose_q_action(qvals, tau, eval)
     self.q.train()
     return a, g_map.squeeze(0), entropy
@@ -246,7 +257,7 @@ class FSPAgentOM:
     s = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
     logits = self.sl(s)
     entropy = 0.0
-    
+
     if eval:
       action = torch.argmax(logits, dim=1).item()
     else:
@@ -266,16 +277,23 @@ class FSPAgentOM:
     return a, ent
 
   # ------------- RL Update Logic -------------
-  
-  def compute_targets(self, batch: List[Dict]) -> Tuple[torch.Tensor, torch.Tensor]:
-    s = torch.from_numpy(np.array([b["state"] for b in batch], dtype=np.float32)).to(self.device)
-    sp = torch.from_numpy(np.array([b["next_state"] for b in batch], dtype=np.float32)).to(self.device)
-    a = torch.from_numpy(np.array([b["action"] for b in batch], dtype=np.int64)).to(self.device)
-    r = torch.from_numpy(np.array([b["reward"] for b in batch], dtype=np.float32)).to(self.device)
-    done = torch.from_numpy(np.array([b["done"] for b in batch], dtype=np.float32)).to(self.device)
 
-    g_map = torch.from_numpy(np.array([b["rollout_goal_map"] for b in batch], dtype=np.float32)).to(self.device)
-    g_map_next = torch.from_numpy(np.array([b["rollout_goal_map_next"] for b in batch], dtype=np.float32)).to(self.device)
+  def compute_targets(self, batch: List[Dict]) -> Tuple[torch.Tensor, torch.Tensor]:
+    s = torch.from_numpy(
+      np.array([b["state"] for b in batch], dtype=np.float32)).to(self.device)
+    sp = torch.from_numpy(
+      np.array([b["next_state"] for b in batch], dtype=np.float32)).to(self.device)
+    a = torch.from_numpy(
+      np.array([b["action"] for b in batch], dtype=np.int64)).to(self.device)
+    r = torch.from_numpy(
+      np.array([b["reward"] for b in batch], dtype=np.float32)).to(self.device)
+    done = torch.from_numpy(
+      np.array([b["done"] for b in batch], dtype=np.float32)).to(self.device)
+
+    g_map = torch.from_numpy(np.array(
+      [b["rollout_goal_map"] for b in batch], dtype=np.float32)).to(self.device)
+    g_map_next = torch.from_numpy(np.array(
+      [b["rollout_goal_map_next"] for b in batch], dtype=np.float32)).to(self.device)
 
     q_sa = self.q(s, g_map).gather(1, a.unsqueeze(1)).squeeze(1)
 
@@ -285,14 +303,14 @@ class FSPAgentOM:
       best_actions = (q_val + noise).argmax(dim=1, keepdim=True)
       q_next = self.q_tgt(sp, g_map_next).gather(1, best_actions).squeeze(1)
       target = r + (1.0 - done) * self.args.gamma * q_next
-      target = torch.clamp(target, min=-5.0, max=5.0)
+      target = torch.clamp(target, min=-15.0, max=15.0)
 
     return q_sa, target
 
   def update_rl(self):
     """Updates the Q-network and the OM Transformer."""
     if len(self.rl_replay) < self.args.min_replay:
-        return None, None
+      return None, None
 
     batch_list = self.rl_replay.sample(self.args.batch_size)
 
@@ -306,7 +324,7 @@ class FSPAgentOM:
       },
       "true_goal_map": torch.from_numpy(np.array([b["true_goal_map"] for b in batch_list], dtype=np.float32)).to(self.device)
     }
-    # cached_features=True bypasses the CNN for history (massive speedup)
+
     model_loss = self.model.train_step(om_batch, cached_features=True)
 
     # 2. Update Q-Network
@@ -333,8 +351,10 @@ class FSPAgentOM:
       return None
 
     batch = self.sl_replay.sample(self.args.batch_size)
-    s = torch.from_numpy(np.stack([b["state"] for b in batch])).float().to(self.device)
-    a = torch.from_numpy(np.array([b["action"] for b in batch], dtype=np.int64)).to(self.device)
+    s = torch.from_numpy(np.stack([b["state"]
+                         for b in batch])).float().to(self.device)
+    a = torch.from_numpy(
+      np.array([b["action"] for b in batch], dtype=np.int64)).to(self.device)
 
     logits = self.sl(s)
     loss = F.cross_entropy(logits, a)
@@ -355,18 +375,27 @@ class FSPAgentOM:
     """
     obs = self.env.reset()
     if random.random() < 0.3:
-        obs = self.env.reset_random_spawn()
+      obs = self.env.reset_random_spawn()
     elif random.random() < 0.5:
-        obs = self.env.swap_agents()
+      obs = self.env.swap_agents()
     opponent_agent.reset()
 
     done = False
     ep_ret, opp_ret, ep_entropy = 0.0, 0.0, 0.0
 
     history_len = self.args.max_history_length
-    rolling_feats = torch.zeros((1, history_len, self.args.d_model), device=self.device)
-    rolling_actions = torch.zeros((1, history_len), dtype=torch.long, device=self.device)
-    rolling_mask = torch.zeros((1, history_len), dtype=torch.bool, device=self.device)
+    rolling_feats = torch.zeros(
+      (1, history_len, self.args.d_model), device=self.device)
+    rolling_actions = torch.zeros(
+      (1, history_len), dtype=torch.long, device=self.device)
+    rolling_mask = torch.zeros(
+      (1, history_len), dtype=torch.bool, device=self.device)
+    opp_rolling_feats = torch.zeros(
+      (1, history_len, self.args.d_model), device=self.device)
+    opp_rolling_actions = torch.zeros(
+      (1, history_len), dtype=torch.long, device=self.device)
+    opp_rolling_mask = torch.zeros(
+      (1, history_len), dtype=torch.bool, device=self.device)
     current_seq_len = 0
 
     episode_transitions = []
@@ -377,6 +406,11 @@ class FSPAgentOM:
           "state_features": rolling_feats,
           "actions": rolling_actions,
           "mask": rolling_mask
+      }
+      opp_history_gpu = {
+          "state_features": opp_rolling_feats,
+          "actions": opp_rolling_actions,
+          "mask": opp_rolling_mask
       }
 
       # Compute both RL (Best Response) and SL (Average) actions
@@ -397,7 +431,9 @@ class FSPAgentOM:
       if hasattr(opponent_agent, 'is_frozen_as_sl') and opponent_agent.is_frozen_as_sl:
         a_opponent, _ = opponent_agent.select_sl_action(obs[1])
       else:
-        a_opponent, _ = opponent_agent.select_action(obs[1])
+        opp_rl_a, _ = opponent_agent.select_rl_action(obs[1], opp_history_gpu)
+        opp_sl_a, _ = opponent_agent.select_sl_action(obs[1])
+        a_opponent = opp_rl_a if random.random() < eta else opp_sl_a
 
       actions = {0: a, 1: a_opponent}
       ep_entropy += step_entropy
@@ -428,20 +464,34 @@ class FSPAgentOM:
       episode_transitions.append(transition)
 
       # Update rolling history
-      state_tensor = torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device)
+      state_tensor = torch.from_numpy(
+        obs[0]).float().unsqueeze(0).to(self.device)
+      opp_state_tensor = torch.from_numpy(
+        obs[1]).float().unsqueeze(0).to(self.device)
       with torch.no_grad():
         new_feat = self.model.inference_model.get_features(state_tensor)
+        opp_new_feat = self.model.inference_model.get_features(
+          opp_state_tensor)
 
       rolling_feats = torch.roll(rolling_feats, shifts=-1, dims=1)
       rolling_actions = torch.roll(rolling_actions, shifts=-1, dims=1)
       rolling_mask = torch.roll(rolling_mask, shifts=-1, dims=1)
 
+      opp_rolling_feats = torch.roll(opp_rolling_feats, shifts=-1, dims=1)
+      opp_rolling_actions = torch.roll(
+        opp_rolling_actions, shifts=-1, dims=1)
+      opp_rolling_mask = torch.roll(opp_rolling_mask, shifts=-1, dims=1)
+
       rolling_feats[:, -1, :] = new_feat
       rolling_actions[:, -1] = a_opponent
+
+      opp_rolling_feats[:, -1, :] = opp_new_feat
+      opp_rolling_actions[:, -1] = a
 
       if current_seq_len < history_len:
         current_seq_len += 1
         rolling_mask[:, -current_seq_len:] = True
+        opp_rolling_mask[:, -current_seq_len:] = True
 
       ep_ret += reward[0]
       opp_ret += reward[1]
@@ -473,11 +523,9 @@ class FSPAgentOM:
         true_map = np.zeros((H, W), dtype=np.float32)
         true_map[current_true_goal_pos[0], current_true_goal_pos[1]] = 1.0
         t["true_goal_map"] = true_map
-        t["valid_for_transformer"] = True
       else:
         true_map = np.zeros((H, W), dtype=np.float32)
         t["true_goal_map"] = true_map
-        t["valid_for_transformer"] = False
 
       t["true_goal_map_next"] = next_map
       next_map = true_map.copy()
@@ -505,9 +553,18 @@ class FSPAgentOM:
     ep_ret, opp_ret, ep_entropy = 0.0, 0.0, 0.0
 
     history_len = self.args.max_history_length
-    rolling_feats = torch.zeros((1, history_len, self.args.d_model), device=self.device)
-    rolling_actions = torch.zeros((1, history_len), dtype=torch.long, device=self.device)
-    rolling_mask = torch.zeros((1, history_len), dtype=torch.bool, device=self.device)
+    rolling_feats = torch.zeros(
+      (1, history_len, self.args.d_model), device=self.device)
+    rolling_actions = torch.zeros(
+      (1, history_len), dtype=torch.long, device=self.device)
+    rolling_mask = torch.zeros(
+      (1, history_len), dtype=torch.bool, device=self.device)
+    opp_rolling_feats = torch.zeros(
+      (1, history_len, self.args.d_model), device=self.device)
+    opp_rolling_actions = torch.zeros(
+      (1, history_len), dtype=torch.long, device=self.device)
+    opp_rolling_mask = torch.zeros(
+      (1, history_len), dtype=torch.bool, device=self.device)
     current_seq_len = 0
 
     for step in range(max_steps or 500):
@@ -516,34 +573,54 @@ class FSPAgentOM:
           "actions": rolling_actions,
           "mask": rolling_mask
       }
+      opp_history_gpu = {
+          "state_features": opp_rolling_feats,
+          "actions": opp_rolling_actions,
+          "mask": opp_rolling_mask
+      }
 
       if use_sl:
         a, step_entropy = self.select_sl_action(obs[0], eval=True)
       else:
-        a, _, step_entropy = self.select_rl_action(obs[0], history_gpu, eval=True)
-          
+        a, _, step_entropy = self.select_rl_action(
+          obs[0], history_gpu, eval=True)
+
       if hasattr(opponent_agent, 'is_frozen_as_sl') and opponent_agent.is_frozen_as_sl:
         a_opponent, _ = opponent_agent.select_sl_action(obs[1], eval=True)
       else:
-        a_opponent, _ = opponent_agent.select_action(obs[1], eval=True)
+        a_opponent, _ = opponent_agent.select_action(
+          obs[1], opp_history_gpu, eval=True)
 
       actions = {0: a, 1: a_opponent}
       next_obs, reward, done, info = self.env.step(actions)
 
-      state_tensor = torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device)
+      state_tensor = torch.from_numpy(
+        obs[0]).float().unsqueeze(0).to(self.device)
+      opp_state_tensor = torch.from_numpy(
+        obs[1]).float().unsqueeze(0).to(self.device)
       with torch.no_grad():
         new_feat = self.model.inference_model.get_features(state_tensor)
-      
+        opp_new_feat = self.model.inference_model.get_features(
+          opp_state_tensor)
+
       rolling_feats = torch.roll(rolling_feats, shifts=-1, dims=1)
       rolling_actions = torch.roll(rolling_actions, shifts=-1, dims=1)
       rolling_mask = torch.roll(rolling_mask, shifts=-1, dims=1)
 
+      opp_rolling_feats = torch.roll(opp_rolling_feats, shifts=-1, dims=1)
+      opp_rolling_actions = torch.roll(opp_rolling_actions, shifts=-1, dims=1)
+      opp_rolling_mask = torch.roll(opp_rolling_mask, shifts=-1, dims=1)
+
       rolling_feats[:, -1, :] = new_feat
       rolling_actions[:, -1] = a_opponent
+
+      opp_rolling_feats[:, -1, :] = opp_new_feat
+      opp_rolling_actions[:, -1] = a
 
       if current_seq_len < history_len:
         current_seq_len += 1
         rolling_mask[:, -current_seq_len:] = True
+        opp_rolling_mask[:, -current_seq_len:] = True
 
       ep_ret += reward[0]
       opp_ret += reward[1]

@@ -100,7 +100,6 @@ args = OMGArgs(
 )
 
 num_epochs = args_parsed.episodes // args_parsed.episodes_per_epoch
-updates_per_epoch = (args_parsed.episodes_per_epoch * args.max_steps) // args.train_every
 
 # ==========================================
 # PHASE 1: GENERATE CLASSIC FSP CURRICULUM
@@ -115,27 +114,28 @@ for epoch in range(num_epochs):
   # Calculate mixing parameter
   eta = max(0.05, 1.0 / (epoch + 1))
   epoch_returns, epoch_opp_returns, epoch_entropies = [], [], []
-  
+
   # 1. DATA GENERATION PHASE
   pbar = tqdm(range(args_parsed.episodes_per_epoch),
-              desc=f"Phase 1 Epoch {epoch + 1}/{num_epochs} [Rollouts]", leave=False)
+              desc=f"Phase 1 Epoch {epoch + 1}/{num_epochs}", leave=False)
 
   for ep in pbar:
     # Agent self-plays against itself to build the curriculum
-    stats = agent_classic.run_fsp_episode(opponent_agent=agent_classic, eta=eta, max_steps=args.max_steps)
+    stats = agent_classic.run_fsp_episode(
+      opponent_agent=agent_classic, eta=eta, max_steps=args.max_steps)
     epoch_returns.append(stats['return'])
     epoch_opp_returns.append(stats['opp_return'])
     epoch_entropies.append(stats['avg_entropy'])
-
-  # 2. LEARNING PHASE
-  for _ in range(updates_per_epoch):
-    agent_classic.update_rl()
-    agent_classic.update_sl()
+    steps_taken = stats['steps']
+    updates = steps_taken // args.train_every
+    for _ in range(updates):
+      agent_classic.update_rl()
+      agent_classic.update_sl()
 
   avg_ret = sum(epoch_returns) / len(epoch_returns)
   avg_opp = sum(epoch_opp_returns) / len(epoch_opp_returns)
   avg_ent = sum(epoch_entropies) / len(epoch_entropies)
-  
+
   phase1_returns.append(avg_ret)
   phase1_opp_returns.append(avg_opp)
   phase1_entropies.append(avg_ent)
@@ -147,14 +147,16 @@ for epoch in range(num_epochs):
       "phase1/eta": eta
   })
 
-  torch.save(agent_classic.q.state_dict(), f"./models/{args.folder_id}/classic_qnet_ep{epoch + 1}.pth")
-  torch.save(agent_classic.sl.state_dict(), f"./models/{args.folder_id}/classic_slnet_ep{epoch + 1}.pth")
-  
+  torch.save(agent_classic.q.state_dict(),
+             f"./models/{args.folder_id}/classic_qnet_ep{epoch + 1}.pth")
+  torch.save(agent_classic.sl.state_dict(),
+             f"./models/{args.folder_id}/classic_slnet_ep{epoch + 1}.pth")
+
   print(f"Phase 1 | Epoch {epoch + 1:02d} | Classic Ret: {avg_ret:>4.1f} | Opp Ret: {avg_opp:>4.1f} | Classic Entropy: {avg_ent:.4f} | SL Buffer: {len(agent_classic.sl_replay)}")
 
 
 # ==========================================
-# PHASE 2: TRAIN OM AGENT ON FROZEN CURRICULUM
+# PHASE 2: TRAIN OM AGENT
 # ==========================================
 print("\n--- PHASE 2: Training OM Agent ---")
 inference_model = SpatialOpponentModel(args=args).to(device)
@@ -166,7 +168,7 @@ dataset_path = f"./dataset/dataset_map_{args_parsed.map}.pt"
 if not os.path.exists(dataset_path):
   print("Collecting Offline Data for OM Pretraining...")
   collect_offline_data(num_episodes=500, save_path=dataset_path,
-                        map_layout=map_layouts[args_parsed.map - 1])
+                       map_layout=map_layouts[args_parsed.map - 1])
 
 print("Loading dataset and pretraining OM...")
 dataset = torch.load(dataset_path, weights_only=False)
@@ -174,35 +176,33 @@ agent_om.model.pretrain(
     dataset, epochs=args_parsed.pretrain_epochs, batch_size=args_parsed.batch_size)
 del dataset
 
-# Freeze classic agent to act only as the SL opponent (Average Strategy)
-agent_classic.freeze_as_sl_opponent()
-
 phase2_returns, phase2_opp_returns, phase2_entropies = [], [], []
 
 for epoch in range(num_epochs):
   eta = max(0.05, 1.0 / (epoch + 1))
   epoch_returns, epoch_opp_returns, epoch_entropies = [], [], []
-  
+
   # 1. DATA GENERATION PHASE
   pbar = tqdm(range(args_parsed.episodes_per_epoch),
-              desc=f"Phase 2 Epoch {epoch + 1}/{num_epochs} [Rollouts]", leave=False)
+              desc=f"Phase 2 Epoch {epoch + 1}/{num_epochs}", leave=False)
 
   for ep in pbar:
     # FSP OM Agent mixes between RL and SL. Opponent purely executes SL.
-    stats = agent_om.run_fsp_episode(opponent_agent=agent_classic, eta=eta, max_steps=args.max_steps)
+    stats = agent_om.run_fsp_episode(
+      opponent_agent=agent_om, eta=eta, max_steps=args.max_steps)
     epoch_returns.append(stats['return'])
     epoch_opp_returns.append(stats['opp_return'])
     epoch_entropies.append(stats['avg_entropy'])
-
-  # 2. LEARNING PHASE
-  for _ in range(updates_per_epoch):
-    agent_om.update_rl()
-    agent_om.update_sl()
+    steps_taken = stats['steps']
+    updates = steps_taken // args.train_every
+    for _ in range(updates):
+      agent_om.update_rl()
+      agent_om.update_sl()
 
   avg_ret = sum(epoch_returns) / len(epoch_returns)
   avg_opp = sum(epoch_opp_returns) / len(epoch_opp_returns)
   avg_ent = sum(epoch_entropies) / len(epoch_entropies)
-  
+
   phase2_returns.append(avg_ret)
   phase2_opp_returns.append(avg_opp)
   phase2_entropies.append(avg_ent)
@@ -214,15 +214,19 @@ for epoch in range(num_epochs):
       "phase2/eta": eta
   })
 
-  torch.save(agent_om.q.state_dict(), f"./models/{args.folder_id}/om_qnet_ep{epoch + 1}.pth")
-  torch.save(agent_om.sl.state_dict(), f"./models/{args.folder_id}/om_slnet_ep{epoch + 1}.pth")
-  torch.save(agent_om.model.inference_model.state_dict(), f"./models/{args.folder_id}/om_inference_ep{epoch + 1}.pth")
-  
-  print(f"Phase 2 | Epoch {epoch + 1:02d} | OM Agent Ret: {avg_ret:>4.1f} | Opp Ret: {avg_opp:>4.1f} | OM Entropy: {avg_ent:.4f}")
+  torch.save(agent_om.q.state_dict(),
+             f"./models/{args.folder_id}/om_qnet_ep{epoch + 1}.pth")
+  torch.save(agent_om.sl.state_dict(),
+             f"./models/{args.folder_id}/om_slnet_ep{epoch + 1}.pth")
+  torch.save(agent_om.model.inference_model.state_dict(),
+             f"./models/{args.folder_id}/om_inference_ep{epoch + 1}.pth")
+
+  print(
+    f"Phase 2 | Epoch {epoch + 1:02d} | OM Agent Ret: {avg_ret:>4.1f} | Opp Ret: {avg_opp:>4.1f} | OM Entropy: {avg_ent:.4f}")
 
 
 # ==========================================
-# PHASE 3: EVALUATION 
+# PHASE 3: EVALUATION
 # ==========================================
 print("\n--- PHASE 3: Evaluation ---")
 agent_classic.q.eval()
@@ -231,6 +235,7 @@ agent_om.q.eval()
 agent_om.sl.eval()
 agent_om.model.inference_model.eval()
 
+
 def evaluate_matchup(agent0, agent1, env, args, use_sl=False):
   """
   Safely executes a matchup, handling the rolling GPU history correctly 
@@ -238,26 +243,28 @@ def evaluate_matchup(agent0, agent1, env, args, use_sl=False):
   """
   agent0_is_om = isinstance(agent0, FSPAgentOM)
   agent1_is_om = isinstance(agent1, FSPAgentOM)
-  
+
   if agent0_is_om:
     hist_len0 = agent0.args.max_history_length
-    rf0 = torch.zeros((1, hist_len0, agent0.args.d_model), device=agent0.device)
+    rf0 = torch.zeros((1, hist_len0, agent0.args.d_model),
+                      device=agent0.device)
     ra0 = torch.zeros((1, hist_len0), dtype=torch.long, device=agent0.device)
     rm0 = torch.zeros((1, hist_len0), dtype=torch.bool, device=agent0.device)
     c_seq0 = 0
-  
+
   if agent1_is_om:
     hist_len1 = agent1.args.max_history_length
-    rf1 = torch.zeros((1, hist_len1, agent1.args.d_model), device=agent1.device)
+    rf1 = torch.zeros((1, hist_len1, agent1.args.d_model),
+                      device=agent1.device)
     ra1 = torch.zeros((1, hist_len1), dtype=torch.long, device=agent1.device)
     rm1 = torch.zeros((1, hist_len1), dtype=torch.bool, device=agent1.device)
     c_seq1 = 0
-      
+
   obs = env.reset()
   agent0.reset()
   agent1.reset()
   ret0, ret1 = 0, 0
-  
+
   for step in range(args.max_steps):
     # Agent 0 action
     if agent0_is_om:
@@ -270,8 +277,9 @@ def evaluate_matchup(agent0, agent1, env, args, use_sl=False):
       if use_sl and hasattr(agent0, 'select_sl_action'):
         a0, _ = agent0.select_sl_action(obs[0], eval=True)
       else:
-        a0, _ = agent0.select_rl_action(obs[0], eval=True) if hasattr(agent0, 'select_rl_action') else agent0.select_action(obs[0])
-            
+        a0, _ = agent0.select_rl_action(obs[0], eval=True) if hasattr(
+          agent0, 'select_rl_action') else agent0.select_action(obs[0])
+
     # Agent 1 action
     if agent1_is_om:
       h1 = {"state_features": rf1, "actions": ra1, "mask": rm1}
@@ -283,10 +291,11 @@ def evaluate_matchup(agent0, agent1, env, args, use_sl=False):
       if use_sl and hasattr(agent1, 'select_sl_action'):
         a1, _ = agent1.select_sl_action(obs[1], eval=True)
       else:
-        a1, _ = agent1.select_rl_action(obs[1], eval=True) if hasattr(agent1, 'select_rl_action') else agent1.select_action(obs[1])
-    
+        a1, _ = agent1.select_rl_action(obs[1], eval=True) if hasattr(
+          agent1, 'select_rl_action') else agent1.select_action(obs[1])
+
     next_obs, rewards, done, _ = env.step({0: a0, 1: a1})
-    
+
     # Update OM histories
     if agent0_is_om:
       s_tens = torch.from_numpy(obs[0]).float().unsqueeze(0).to(agent0.device)
@@ -300,7 +309,7 @@ def evaluate_matchup(agent0, agent1, env, args, use_sl=False):
       if c_seq0 < hist_len0:
         c_seq0 += 1
         rm0[:, -c_seq0:] = True
-            
+
     if agent1_is_om:
       s_tens = torch.from_numpy(obs[1]).float().unsqueeze(0).to(agent1.device)
       with torch.no_grad():
@@ -313,13 +322,15 @@ def evaluate_matchup(agent0, agent1, env, args, use_sl=False):
       if c_seq1 < hist_len1:
         c_seq1 += 1
         rm1[:, -c_seq1:] = True
-            
+
     obs = next_obs
     ret0 += rewards[0]
     ret1 += rewards[1]
-    if done: break
-      
+    if done:
+      break
+
   return ret0, ret1
+
 
 print("\n--- PHASE 3a: Headless Evaluation against Heuristics ---")
 heuristics = {
@@ -335,8 +346,10 @@ for opp_name, heuristic_opp in heuristics.items():
 
   for _ in range(total_eval_episodes):
     # Evaluate Best Response (use_sl=False) against heuristics
-    c_ret, _ = evaluate_matchup(agent_classic, heuristic_opp, env, args, use_sl=False)
-    o_ret, _ = evaluate_matchup(agent_om, heuristic_opp, env, args, use_sl=False)
+    c_ret, _ = evaluate_matchup(
+      agent_classic, heuristic_opp, env, args, use_sl=False)
+    o_ret, _ = evaluate_matchup(
+      agent_om, heuristic_opp, env, args, use_sl=False)
     classic_eval_returns.append(c_ret)
     om_eval_returns.append(o_ret)
 
@@ -344,7 +357,8 @@ for opp_name, heuristic_opp in heuristics.items():
   o_avg = sum(om_eval_returns) / total_eval_episodes
   eval_results[opp_name] = {"Classic": c_avg, "OM": o_avg}
 
-  print(f"Vs {opp_name:>12} | Classic Avg Ret: {c_avg:>5.2f} | OM Avg Ret: {o_avg:>5.2f}")
+  print(
+    f"Vs {opp_name:>12} | Classic Avg Ret: {c_avg:>5.2f} | OM Avg Ret: {o_avg:>5.2f}")
   wandb.log({
       f"eval/classic_vs_{opp_name}": c_avg,
       f"eval/om_vs_{opp_name}": o_avg
@@ -356,12 +370,14 @@ om_cross_returns = []
 
 for _ in range(total_eval_episodes):
   # Matchup A: Classic (0) vs OM (1) - Evaluating Best Responses
-  c_ret, o_ret = evaluate_matchup(agent_classic, agent_om, env, args, use_sl=False)
+  c_ret, o_ret = evaluate_matchup(
+    agent_classic, agent_om, env, args, use_sl=False)
   classic_cross_returns.append(c_ret)
   om_cross_returns.append(o_ret)
-  
+
   # Matchup B: OM (0) vs Classic (1)
-  o_ret, c_ret = evaluate_matchup(agent_om, agent_classic, env, args, use_sl=False)
+  o_ret, c_ret = evaluate_matchup(
+    agent_om, agent_classic, env, args, use_sl=False)
   classic_cross_returns.append(c_ret)
   om_cross_returns.append(o_ret)
 
@@ -369,19 +385,23 @@ c_cross_avg = sum(classic_cross_returns) / (total_eval_episodes * 2)
 o_cross_avg = sum(om_cross_returns) / (total_eval_episodes * 2)
 eval_results["CrossPlay"] = {"Classic": c_cross_avg, "OM": o_cross_avg}
 
-print(f"Head-to-Head | Classic Avg: {c_cross_avg:>5.2f} | OM Avg: {o_cross_avg:>5.2f}")
-wandb.log({"eval/crossplay_classic": c_cross_avg, "eval/crossplay_om": o_cross_avg})
+print(
+  f"Head-to-Head | Classic Avg: {c_cross_avg:>5.2f} | OM Avg: {o_cross_avg:>5.2f}")
+wandb.log({"eval/crossplay_classic": c_cross_avg,
+          "eval/crossplay_om": o_cross_avg})
 
 # ==========================================
 # PLOTTING
 # ==========================================
-episode_list = [(i + 1) * args_parsed.episodes_per_epoch for i in range(num_epochs)]
+episode_list = [
+  (i + 1) * args_parsed.episodes_per_epoch for i in range(num_epochs)]
 
 plt.figure(figsize=(16, 10))
 
 # Subplot 1: Agent Return
 plt.subplot(2, 2, 1)
-plt.plot(episode_list, phase1_returns, label='Classic Agent', color='blue', linestyle='--')
+plt.plot(episode_list, phase1_returns,
+         label='Classic Agent', color='blue', linestyle='--')
 plt.plot(episode_list, phase2_returns, label='OM Agent', color='green')
 plt.xlabel('Episodes')
 plt.ylabel('Average Return')
@@ -390,8 +410,10 @@ plt.legend()
 
 # Subplot 2: Opponent Return
 plt.subplot(2, 2, 2)
-plt.plot(episode_list, phase1_opp_returns, label='Opponent (Phase 1)', color='red', linestyle='--')
-plt.plot(episode_list, phase2_opp_returns, label='Opponent (Phase 2)', color='orange')
+plt.plot(episode_list, phase1_opp_returns,
+         label='Opponent (Phase 1)', color='red', linestyle='--')
+plt.plot(episode_list, phase2_opp_returns,
+         label='Opponent (Phase 2)', color='orange')
 plt.xlabel('Episodes')
 plt.ylabel('Average Return')
 plt.title('Opponent Returns')
@@ -399,8 +421,10 @@ plt.legend()
 
 # Subplot 3: Policy Entropy
 plt.subplot(2, 2, 3)
-plt.plot(episode_list, phase1_entropies, label='Classic Agent Entropy', color='blue', linestyle='--')
-plt.plot(episode_list, phase2_entropies, label='OM Agent Entropy', color='green')
+plt.plot(episode_list, phase1_entropies,
+         label='Classic Agent Entropy', color='blue', linestyle='--')
+plt.plot(episode_list, phase2_entropies,
+         label='OM Agent Entropy', color='green')
 plt.xlabel('Episodes')
 plt.ylabel('Shannon Entropy')
 plt.title('Policy Entropy')
@@ -414,7 +438,8 @@ om_wins = [eval_results[opp]['OM'] for opp in labels]
 
 x = np.arange(len(labels))
 width = 0.35
-plt.bar(x - width / 2, classic_wins, width, label='Classic Agent', color='blue')
+plt.bar(x - width / 2, classic_wins, width,
+        label='Classic Agent', color='blue')
 plt.bar(x + width / 2, om_wins, width, label='OM Agent', color='green')
 
 plt.xlabel('Opponent Heuristic')

@@ -371,7 +371,7 @@ class QLearningAgent:
       q_next = self.q_tgt(sp, g_map_next).gather(1, best_actions).squeeze(1)
 
       target = r + (1.0 - done) * self.args.gamma * q_next
-      target = torch.clamp(target, min=-5.0, max=5.0)
+      target = torch.clamp(target, min=-15.0, max=15.0)
 
     return q_sa, target
 
@@ -445,9 +445,12 @@ class QLearningAgent:
 
     # History buffer for the transformer
     history_len = self.args.max_history_length
-    rolling_feats = torch.zeros((1, history_len, self.args.d_model), device=self.device)
-    rolling_actions = torch.zeros((1, history_len), dtype=torch.long, device=self.device)
-    rolling_mask = torch.zeros((1, history_len), dtype=torch.bool, device=self.device)
+    rolling_feats = torch.zeros(
+      (1, history_len, self.args.d_model), device=self.device)
+    rolling_actions = torch.zeros(
+      (1, history_len), dtype=torch.long, device=self.device)
+    rolling_mask = torch.zeros(
+      (1, history_len), dtype=torch.bool, device=self.device)
     current_seq_len = 0
 
     # Temporary list to hold the episode before hindsight labeling
@@ -482,7 +485,7 @@ class QLearningAgent:
 
         if opp_loss is not None:
           opp_loss_val = opp_loss
-      
+
       history_cpu = {
           "state_features": rolling_feats.cpu().numpy(),
           "actions": rolling_actions.cpu().numpy(),
@@ -504,10 +507,12 @@ class QLearningAgent:
       episode_transitions.append(transition)
 
       # Update history
-      state_tensor = torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device)
+      state_tensor = torch.from_numpy(
+        obs[0]).float().unsqueeze(0).to(self.device)
       with torch.no_grad():
-        new_feat = self.model.inference_model.get_features(state_tensor) # (1, d_model)
-      
+        new_feat = self.model.inference_model.get_features(
+          state_tensor)  # (1, d_model)
+
       rolling_feats = torch.roll(rolling_feats, shifts=-1, dims=1)
       rolling_actions = torch.roll(rolling_actions, shifts=-1, dims=1)
       rolling_mask = torch.roll(rolling_mask, shifts=-1, dims=1)
@@ -570,11 +575,9 @@ class QLearningAgent:
         true_map[current_true_goal_pos[0], current_true_goal_pos[1]] = 1.0
 
         t["true_goal_map"] = true_map
-        t["valid_for_transformer"] = True
       else:
         true_map = np.zeros((H, W), dtype=np.float32)
         t["true_goal_map"] = true_map
-        t["valid_for_transformer"] = False
 
       t["true_goal_map_next"] = next_map
       next_map = true_map.copy()
@@ -604,9 +607,12 @@ class QLearningAgent:
 
     # History container for the Transformer
     history_len = self.args.max_history_length
-    rolling_feats = torch.zeros((1, history_len, self.args.d_model), device=self.device)
-    rolling_actions = torch.zeros((1, history_len), dtype=torch.long, device=self.device)
-    rolling_mask = torch.zeros((1, history_len), dtype=torch.bool, device=self.device)
+    rolling_feats = torch.zeros(
+      (1, history_len, self.args.d_model), device=self.device)
+    rolling_actions = torch.zeros(
+      (1, history_len), dtype=torch.long, device=self.device)
+    rolling_mask = torch.zeros(
+      (1, history_len), dtype=torch.bool, device=self.device)
     current_seq_len = 0
 
     for step in range(max_steps or 500):
@@ -631,10 +637,12 @@ class QLearningAgent:
 
       next_obs, reward, done, info = self.env.step(actions)
 
-      state_tensor = torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device)
+      state_tensor = torch.from_numpy(
+        obs[0]).float().unsqueeze(0).to(self.device)
       with torch.no_grad():
-        new_feat = self.model.inference_model.get_features(state_tensor) # (1, d_model)
-      
+        new_feat = self.model.inference_model.get_features(
+          state_tensor)  # (1, d_model)
+
       rolling_feats = torch.roll(rolling_feats, shifts=-1, dims=1)
       rolling_actions = torch.roll(rolling_actions, shifts=-1, dims=1)
       rolling_mask = torch.roll(rolling_mask, shifts=-1, dims=1)

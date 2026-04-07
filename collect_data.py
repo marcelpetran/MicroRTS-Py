@@ -104,18 +104,15 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
           true_map = np.zeros((H, W), dtype=np.float32)
           true_map[current_true_goal_pos[0], current_true_goal_pos[1]] = 1.0
           t["true_goal_map"] = true_map
-          t["valid_for_transformer"] = True
         else:
           true_map = np.zeros((H, W), dtype=np.float32)
           t["true_goal_map"] = true_map
-          t["valid_for_transformer"] = False
 
         del t["opp_reward"]
         del t["reward"]
         del t["next_state"]
 
-        if t["valid_for_transformer"]:
-          master_dataset.append(t)
+        master_dataset.append(t)
 
       if (ep + 1) % 100 == 0:
         print(

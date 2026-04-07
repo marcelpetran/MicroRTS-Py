@@ -288,7 +288,7 @@ class QLearningAgentClassic:
       q_next = self.q_tgt(sp).gather(1, best_actions).squeeze(1)
 
       target = r + (1.0 - done) * self.args.gamma * q_next
-      target = torch.clamp(target, min=-5.0, max=5.0)
+      target = torch.clamp(target, min=-15.0, max=15.0)
 
     return q_sa, target
 

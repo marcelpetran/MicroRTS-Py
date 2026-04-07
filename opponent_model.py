@@ -31,7 +31,11 @@ class OpponentModel(nn.Module):
     max_len = self.args.max_history_length
 
     if max_len == 0:
-      return {"states": torch.empty(0).to(self.device), "actions": torch.empty(0).to(self.device), "mask": torch.empty(0).to(self.device)}
+      return {
+          "states": torch.empty(0).to(self.device),
+          "actions": torch.empty(0).to(self.device),
+          "mask": torch.empty(0).to(self.device)
+      }
 
     B = len(histories)
     H, W, F_dim = self.args.state_shape
@@ -45,21 +49,23 @@ class OpponentModel(nn.Module):
 
       s_len = len(state_seq)
       if s_len > 0:
-        padded_states_np[i, :s_len] = state_seq
+        padded_states_np[i, -s_len:] = state_seq
 
       a_len = len(action_seq)
       if a_len > 0:
         flat_actions = np.array(action_seq, dtype=np.int64).flatten()
         valid_len = min(len(flat_actions), max_len)
-        padded_actions_np[i, :valid_len] = flat_actions[:valid_len]
+        padded_actions_np[i, -valid_len:] = flat_actions[-valid_len:]
 
     final_padded_states = torch.from_numpy(padded_states_np).to(self.device)
     final_padded_actions = torch.from_numpy(padded_actions_np).to(self.device)
 
     # Fast mask generation (driven by state length, which is mathematically correct)
     true_lengths_np = np.array(true_lengths, dtype=np.int64)
+    lengths_tensor = torch.from_numpy(
+      true_lengths_np).to(self.device).unsqueeze(1)
     mask = torch.arange(max_len, device=self.device).expand(
-      B, max_len) < torch.from_numpy(true_lengths_np).to(self.device).unsqueeze(1)
+      B, max_len) >= (max_len - lengths_tensor)
 
     return {
         "states": final_padded_states,
