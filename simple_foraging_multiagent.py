@@ -371,13 +371,13 @@ om_cross_returns = []
 for _ in range(total_eval_episodes):
   # Matchup A: Classic (0) vs OM (1) - Evaluating Best Responses
   c_ret, o_ret = evaluate_matchup(
-    agent_classic, agent_om, env, args, use_sl=False)
+    agent_classic, agent_om, env, args, use_sl=True)
   classic_cross_returns.append(c_ret)
   om_cross_returns.append(o_ret)
 
   # Matchup B: OM (0) vs Classic (1)
   o_ret, c_ret = evaluate_matchup(
-    agent_om, agent_classic, env, args, use_sl=False)
+    agent_om, agent_classic, env, args, use_sl=True)
   classic_cross_returns.append(c_ret)
   om_cross_returns.append(o_ret)
 

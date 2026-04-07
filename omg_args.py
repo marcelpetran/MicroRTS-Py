@@ -11,12 +11,12 @@ class OMGArgs:
   capacity: int = 5_000
   sl_capacity: int = 2_000_000
   min_replay: int = 256
-  train_every: int = 2
+  train_every: int = 4
   visualise_every_n_step: int = 3
   qnet_hidden: int = 256
   cnn_hidden: int = 64
-  max_history_length: int = 51
-  max_steps: int = 50
+  max_history_length: int = 70
+  max_steps: int = 70
   seed: int = 0
   folder_id: int = 0
 
