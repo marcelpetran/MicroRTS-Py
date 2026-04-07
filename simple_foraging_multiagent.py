@@ -347,9 +347,9 @@ for opp_name, heuristic_opp in heuristics.items():
   for _ in range(total_eval_episodes):
     # Evaluate Best Response (use_sl=False) against heuristics
     c_ret, _ = evaluate_matchup(
-      agent_classic, heuristic_opp, env, args, use_sl=False)
+      agent_classic, heuristic_opp, env, args, use_sl=True)
     o_ret, _ = evaluate_matchup(
-      agent_om, heuristic_opp, env, args, use_sl=False)
+      agent_om, heuristic_opp, env, args, use_sl=True)
     classic_eval_returns.append(c_ret)
     om_eval_returns.append(o_ret)
 
