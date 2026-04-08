@@ -15,8 +15,8 @@ class OMGArgs:
   visualise_every_n_step: int = 3
   qnet_hidden: int = 256
   cnn_hidden: int = 64
-  max_history_length: int = 70
-  max_steps: int = 70
+  max_history_length: int = 50
+  max_steps: int = 50
   seed: int = 0
   folder_id: int = 0
 
