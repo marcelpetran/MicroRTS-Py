@@ -5,7 +5,7 @@ from typing import Tuple
 @dataclass
 class OMGArgs:
   device: str = "cpu"  # cpu, cuda, mps
-  gamma: float = 0.98
+  gamma: float = 0.99
   lr: float = 1e-4
   batch_size: int = 128
   capacity: int = 5_000

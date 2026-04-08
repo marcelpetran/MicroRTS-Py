@@ -112,7 +112,7 @@ phase1_returns, phase1_opp_returns, phase1_entropies = [], [], []
 
 for epoch in range(num_epochs):
   # Calculate mixing parameter
-  eta = max(0.05, 1.0 / (epoch + 1))
+  eta = max(0.05, 1.0 - (epoch / num_epochs))  # Linearly decay from 1.0 to 0.05
   epoch_returns, epoch_opp_returns, epoch_entropies = [], [], []
 
   # 1. DATA GENERATION PHASE
@@ -179,7 +179,7 @@ del dataset
 phase2_returns, phase2_opp_returns, phase2_entropies = [], [], []
 
 for epoch in range(num_epochs):
-  eta = max(0.05, 1.0 / (epoch + 1))
+  eta = max(0.05, 1.0 - (epoch / num_epochs))  # Linearly decay from 1.0 to 0.05
   epoch_returns, epoch_opp_returns, epoch_entropies = [], [], []
 
   # 1. DATA GENERATION PHASE
