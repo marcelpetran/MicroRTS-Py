@@ -108,12 +108,12 @@ print("\n--- PHASE 1: Training Classic FSP Agent ---")
 # FSP agent contains both RL and SL, and plays against itself
 agent_classic = FSPAgentClassic(env, args=args)
 
-phase1_returns, phase1_opp_returns, phase1_entropies = [], [], []
+phase1_returns, phase1_opp_returns, phase1_entropies, phase1_steps = [], [], [], []
 
 for epoch in range(num_epochs):
   # Calculate mixing parameter
   eta = max(0.05, 1.0 - (epoch / num_epochs))  # Linearly decay from 1.0 to 0.05
-  epoch_returns, epoch_opp_returns, epoch_entropies = [], [], []
+  epoch_returns, epoch_opp_returns, epoch_entropies, epoch_steps = [], [], [], []
 
   # 1. DATA GENERATION PHASE
   pbar = tqdm(range(args_parsed.episodes_per_epoch),
@@ -126,6 +126,7 @@ for epoch in range(num_epochs):
     epoch_returns.append(stats['return'])
     epoch_opp_returns.append(stats['opp_return'])
     epoch_entropies.append(stats['avg_entropy'])
+    epoch_steps.append(stats['steps'])
     steps_taken = stats['steps']
     updates = steps_taken // args.train_every
     for _ in range(updates):
@@ -135,14 +136,17 @@ for epoch in range(num_epochs):
   avg_ret = sum(epoch_returns) / len(epoch_returns)
   avg_opp = sum(epoch_opp_returns) / len(epoch_opp_returns)
   avg_ent = sum(epoch_entropies) / len(epoch_entropies)
+  avg_steps = sum(epoch_steps) / len(epoch_steps)
 
   phase1_returns.append(avg_ret)
   phase1_opp_returns.append(avg_opp)
   phase1_entropies.append(avg_ent)
+  phase1_steps.append(avg_steps)
 
   wandb.log({
       "phase1/train_return": avg_ret,
       "phase1/opp_return": avg_opp,
+      "phase1/avg_steps": avg_steps,
       "phase1/entropy": avg_ent,
       "phase1/eta": eta
   })
@@ -176,11 +180,11 @@ agent_om.model.pretrain(
     dataset, epochs=args_parsed.pretrain_epochs, batch_size=args_parsed.batch_size)
 del dataset
 
-phase2_returns, phase2_opp_returns, phase2_entropies = [], [], []
+phase2_returns, phase2_opp_returns, phase2_entropies, phase2_steps = [], [], [], []
 
 for epoch in range(num_epochs):
   eta = max(0.05, 1.0 - (epoch / num_epochs))  # Linearly decay from 1.0 to 0.05
-  epoch_returns, epoch_opp_returns, epoch_entropies = [], [], []
+  epoch_returns, epoch_opp_returns, epoch_entropies, epoch_steps = [], [], [], []
 
   # 1. DATA GENERATION PHASE
   pbar = tqdm(range(args_parsed.episodes_per_epoch),
@@ -193,6 +197,7 @@ for epoch in range(num_epochs):
     epoch_returns.append(stats['return'])
     epoch_opp_returns.append(stats['opp_return'])
     epoch_entropies.append(stats['avg_entropy'])
+    epoch_steps.append(stats['steps'])
     steps_taken = stats['steps']
     updates = steps_taken // args.train_every
     for _ in range(updates):
@@ -202,14 +207,17 @@ for epoch in range(num_epochs):
   avg_ret = sum(epoch_returns) / len(epoch_returns)
   avg_opp = sum(epoch_opp_returns) / len(epoch_opp_returns)
   avg_ent = sum(epoch_entropies) / len(epoch_entropies)
+  avg_steps = sum(epoch_steps) / len(epoch_steps)
 
   phase2_returns.append(avg_ret)
   phase2_opp_returns.append(avg_opp)
   phase2_entropies.append(avg_ent)
+  phase2_steps.append(avg_steps)
 
   wandb.log({
       "phase2/train_return": avg_ret,
       "phase2/opp_return": avg_opp,
+      "phase2/avg_steps": avg_steps,
       "phase2/entropy": avg_ent,
       "phase2/eta": eta
   })
