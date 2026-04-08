@@ -48,7 +48,6 @@ class PositionalEncoding(nn.Module):
     return self.dropout(x)
 
 
-
 class SpatialOpponentModel(nn.Module):
   def __init__(self, args: OMGArgs):
     super().__init__()

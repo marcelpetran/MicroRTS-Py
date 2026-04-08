@@ -376,10 +376,16 @@ class FSPAgentClassic:
       # Opponent acts
       if hasattr(opponent_agent, 'is_frozen_as_sl') and opponent_agent.is_frozen_as_sl:
         a_opponent, _ = opponent_agent.select_sl_action(obs[1])
+        opp_is_rl = False
       else:
         opp_rl_a, _ = opponent_agent.select_rl_action(obs[1])
         opp_sl_a, _ = opponent_agent.select_sl_action(obs[1])
-        a_opponent = opp_rl_a if random.random() < eta else opp_sl_a
+        if random.random() < eta:
+          a_opponent = opp_rl_a
+          opp_is_rl = True
+        else:
+          a_opponent = opp_sl_a
+          opp_is_rl = False
 
       actions = {0: a, 1: a_opponent}
       ep_entropy += step_entropy
@@ -389,6 +395,8 @@ class FSPAgentClassic:
       # 3. Store in SL Buffer ONLY if the action was a Best Response (NFSP Standard)
       if is_rl:
         self.sl_replay.push({"state": obs[0].copy(), "action": a})
+      if opp_is_rl and opponent_agent is self:
+        self.sl_replay.push({"state": obs[1].copy(), "action": a_opponent})
 
       # 4. Store in RL Buffer for standard Q-learning
       transition = {

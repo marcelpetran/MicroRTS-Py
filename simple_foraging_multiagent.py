@@ -345,7 +345,7 @@ for opp_name, heuristic_opp in heuristics.items():
   classic_eval_returns, om_eval_returns = [], []
 
   for _ in range(total_eval_episodes):
-    # Evaluate Best Response (use_sl=False) against heuristics
+    # Evaluate Average Strategy/Nash Equilibrium (use_sl=True) against heuristics
     c_ret, _ = evaluate_matchup(
       agent_classic, heuristic_opp, env, args, use_sl=True)
     o_ret, _ = evaluate_matchup(
@@ -369,7 +369,7 @@ classic_cross_returns = []
 om_cross_returns = []
 
 for _ in range(total_eval_episodes):
-  # Matchup A: Classic (0) vs OM (1) - Evaluating Best Responses
+  # Matchup A: Classic (0) vs OM (1) - Evaluating Average Strategies
   c_ret, o_ret = evaluate_matchup(
     agent_classic, agent_om, env, args, use_sl=True)
   classic_cross_returns.append(c_ret)

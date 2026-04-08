@@ -430,10 +430,17 @@ class FSPAgentOM:
       # Opponent acts
       if hasattr(opponent_agent, 'is_frozen_as_sl') and opponent_agent.is_frozen_as_sl:
         a_opponent, _ = opponent_agent.select_sl_action(obs[1])
+        opp_is_rl = False
       else:
-        opp_rl_a, _ = opponent_agent.select_rl_action(obs[1], opp_history_gpu)
+        opp_rl_a, _, _ = opponent_agent.select_rl_action(
+          obs[1], opp_history_gpu)
         opp_sl_a, _ = opponent_agent.select_sl_action(obs[1])
-        a_opponent = opp_rl_a if random.random() < eta else opp_sl_a
+        if random.random() < eta:
+          a_opponent = opp_rl_a
+          opp_is_rl = True
+        else:
+          a_opponent = opp_sl_a
+          opp_is_rl = False
 
       actions = {0: a, 1: a_opponent}
       ep_entropy += step_entropy
@@ -443,6 +450,8 @@ class FSPAgentOM:
       # Store in SL Buffer only if the action was a Best Response (NFSP Standard)
       if is_rl:
         self.sl_replay.push({"state": obs[0].copy(), "action": a})
+      if opp_is_rl and opponent_agent is self:
+        self.sl_replay.push({"state": obs[1].copy(), "action": a_opponent})
 
       history_cpu = {
           "state_features": rolling_feats.cpu().numpy(),
@@ -588,8 +597,11 @@ class FSPAgentOM:
       if hasattr(opponent_agent, 'is_frozen_as_sl') and opponent_agent.is_frozen_as_sl:
         a_opponent, _ = opponent_agent.select_sl_action(obs[1], eval=True)
       else:
-        a_opponent, _ = opponent_agent.select_action(
-          obs[1], opp_history_gpu, eval=True)
+        if isinstance(opponent_agent, FSPAgentOM):
+          a_opponent, _ = opponent_agent.select_action(
+            obs[1], opp_history_gpu, eval=True)
+        else:
+          a_opponent, _ = opponent_agent.select_action(obs[1], eval=True)
 
       actions = {0: a, 1: a_opponent}
       next_obs, reward, done, info = self.env.step(actions)
