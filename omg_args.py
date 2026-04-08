@@ -5,8 +5,8 @@ from typing import Tuple
 @dataclass
 class OMGArgs:
   device: str = "cpu"  # cpu, cuda, mps
-  gamma: float = 0.99
-  lr: float = 1e-4
+  gamma: float = 0.985
+  lr: float = 3e-4
   batch_size: int = 128
   capacity: int = 5_000
   sl_capacity: int = 2_000_000
@@ -25,14 +25,6 @@ class OMGArgs:
   tau_start: float = 2.0
   tau_end: float = 0.05
   tau_decay_steps: int = 300_000
-  beta_start: float = 1.0
-  beta_end: float = 0.01
-  beta_decay_steps: int = 50_000
-  eps_start: float = 1.0
-  eps_end: float = 0.05
-  eps_decay_steps: int = 50_000
-  # Only backprop OM if loss is above this threshold
-  aux_loss_threshold: float = 1e-6
 
   # Transformer architecture params
   state_shape: Tuple[int, int, int] = None  # (H, W, F)

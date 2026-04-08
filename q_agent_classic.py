@@ -228,10 +228,6 @@ class QLearningAgentClassic:
     t = min(self.global_step, self.args.tau_decay_steps)
     return self.args.tau_end + (self.args.tau_start - self.args.tau_end) * (1 - t / self.args.tau_decay_steps)
 
-  def _eps(self) -> float:
-    t = min(self.global_step, self.args.eps_decay_steps)
-    return self.args.eps_end + (self.args.eps_start - self.args.eps_end) * (1 - t / self.args.eps_decay_steps)
-
   # ------------- acting -------------
 
   def choose_action(self, qvals: torch.Tensor, beta: float, eval) -> int:

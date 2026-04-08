@@ -151,19 +151,11 @@ class QLearningAgent:
   def reset(self):
     pass
 
-  # ------------- epsilon schedules --------------
-
-  def _eps(self) -> float:
-    t = min(self.global_step, self.args.eps_decay_steps)
-    return self.args.eps_end + (self.args.eps_start - self.args.eps_end) * (1 - t / self.args.eps_decay_steps)
+  # ------------- Tau schedules --------------
 
   def _tau(self) -> float:
     t = min(self.global_step, self.args.tau_decay_steps)
     return self.args.tau_end + (self.args.tau_start - self.args.tau_end) * (1 - t / self.args.tau_decay_steps)
-
-  def _beta(self) -> float:
-    t = min(self.global_step, self.args.beta_decay_steps)
-    return self.args.beta_end + (self.args.beta_start - self.args.beta_end) * (1 - t / self.args.beta_decay_steps)
 
   @torch.no_grad()
   def value(self, s_t: torch.Tensor, g: torch.Tensor) -> torch.Tensor:

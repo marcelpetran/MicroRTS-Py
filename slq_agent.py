@@ -214,10 +214,7 @@ class FSPAgentOM:
     """Forces the agent to only act using the Average Strategy (for Phase 2 evaluation)."""
     self.is_frozen_as_sl = True
 
-  # ------------- Epsilon/Tau Schedules --------------
-  def _eps(self) -> float:
-    t = min(self.global_step, self.args.eps_decay_steps)
-    return self.args.eps_end + (self.args.eps_start - self.args.eps_end) * (1 - t / self.args.eps_decay_steps)
+  # ------------- Tau Schedules --------------
 
   def _tau(self) -> float:
     t = min(self.global_step, self.args.tau_decay_steps)
