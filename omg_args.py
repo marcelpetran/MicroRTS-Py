@@ -24,7 +24,7 @@ class OMGArgs:
   tau_soft: float = 0.001
   tau_start: float = 2.0
   tau_end: float = 0.05
-  tau_decay_steps: int = 150_000
+  tau_decay_steps: int = 500_000
 
   # Transformer architecture params
   state_shape: Tuple[int, int, int] = None  # (H, W, F)
