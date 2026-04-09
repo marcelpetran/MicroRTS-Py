@@ -352,21 +352,21 @@ class FSPAgentClassic:
     opponent_agent.reset()
 
     done = False
-    ep_ret, opp_ret, ep_entropy = 0.0, 0.0, 0.0
+    ep_ret, opp_ret, rl_ep_entropy, sl_ep_entropy = 0.0, 0.0, 0.0, 0.0
 
     for step in range(max_steps or 500):
       # 1. Compute both RL (Best Response) and SL (Average) actions
       rl_a, rl_entropy = self.select_rl_action(obs[0])
       sl_a, sl_entropy = self.select_sl_action(obs[0])
+      rl_ep_entropy += rl_entropy
+      sl_ep_entropy += sl_entropy
 
       # 2. Mix policies based on eta (Fictitious Play)
       if random.random() < eta:
         a = rl_a
-        step_entropy = rl_entropy
         is_rl = True
       else:
         a = sl_a
-        step_entropy = sl_entropy
         is_rl = False
 
       # Opponent acts
@@ -384,7 +384,6 @@ class FSPAgentClassic:
           opp_is_rl = False
 
       actions = {0: a, 1: a_opponent}
-      ep_entropy += step_entropy
 
       next_obs, reward, done, info = self.env.step(actions)
 
@@ -418,7 +417,8 @@ class FSPAgentClassic:
         "return": ep_ret,
         "steps": step + 1,
         "opp_return": opp_ret,
-        "avg_entropy": ep_entropy / (step + 1)
+        "avg_rl_entropy": rl_ep_entropy / (step + 1),
+        "avg_sl_entropy": sl_ep_entropy / (step + 1)
     }
 
   def run_test_episode(self, opponent_agent, use_sl: bool = True, max_steps: Optional[int] = None) -> Dict[str, float]:
@@ -454,5 +454,6 @@ class FSPAgentClassic:
         "return": ep_ret,
         "steps": step + 1,
         "opp_return": opp_ret,
-        "avg_entropy": ep_entropy / (step + 1)
+        "avg_rl_entropy": ep_entropy / (step + 1) if not use_sl else 0.0,
+        "avg_sl_entropy": ep_entropy / (step + 1) if use_sl else 0.0
     }

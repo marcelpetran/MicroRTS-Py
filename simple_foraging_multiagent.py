@@ -108,12 +108,12 @@ print("\n--- PHASE 1: Training Classic FSP Agent ---")
 # FSP agent contains both RL and SL, and plays against itself
 agent_classic = FSPAgentClassic(env, args=args)
 
-phase1_returns, phase1_opp_returns, phase1_entropies, phase1_steps = [], [], [], []
+phase1_returns, phase1_opp_returns, phase1_rl_entropies, phase1_sl_entropies, phase1_steps = [], [], [], [], []
 
 for epoch in range(num_epochs):
   # Calculate mixing parameter
-  eta = max(0.05, 1.0 - (epoch / num_epochs))  # Linearly decay from 1.0 to 0.05
-  epoch_returns, epoch_opp_returns, epoch_entropies, epoch_steps = [], [], [], []
+  eta = 0.1
+  epoch_returns, epoch_opp_returns, epoch_rl_entropies, epoch_sl_entropies, epoch_steps = [], [], [], [], []
 
   # 1. DATA GENERATION PHASE
   pbar = tqdm(range(args_parsed.episodes_per_epoch),
@@ -125,7 +125,8 @@ for epoch in range(num_epochs):
       opponent_agent=agent_classic, eta=eta, max_steps=args.max_steps)
     epoch_returns.append(stats['return'])
     epoch_opp_returns.append(stats['opp_return'])
-    epoch_entropies.append(stats['avg_entropy'])
+    epoch_rl_entropies.append(stats['avg_rl_entropy'])
+    epoch_sl_entropies.append(stats['avg_sl_entropy'])
     epoch_steps.append(stats['steps'])
     steps_taken = stats['steps']
     updates = steps_taken // args.train_every
@@ -135,19 +136,22 @@ for epoch in range(num_epochs):
 
   avg_ret = sum(epoch_returns) / len(epoch_returns)
   avg_opp = sum(epoch_opp_returns) / len(epoch_opp_returns)
-  avg_ent = sum(epoch_entropies) / len(epoch_entropies)
+  avg_rl_ent = sum(epoch_rl_entropies) / len(epoch_rl_entropies)
+  avg_sl_ent = sum(epoch_sl_entropies) / len(epoch_sl_entropies)
   avg_steps = sum(epoch_steps) / len(epoch_steps)
 
   phase1_returns.append(avg_ret)
   phase1_opp_returns.append(avg_opp)
-  phase1_entropies.append(avg_ent)
+  phase1_rl_entropies.append(avg_rl_ent)
+  phase1_sl_entropies.append(avg_sl_ent)
   phase1_steps.append(avg_steps)
 
   wandb.log({
       "phase1/train_return": avg_ret,
       "phase1/opp_return": avg_opp,
       "phase1/avg_steps": avg_steps,
-      "phase1/entropy": avg_ent,
+      "phase1/rl_entropy": avg_rl_ent,
+      "phase1/sl_entropy": avg_sl_ent,
       "phase1/eta": eta
   })
 
@@ -156,7 +160,7 @@ for epoch in range(num_epochs):
   torch.save(agent_classic.sl.state_dict(),
              f"./models/{args.folder_id}/classic_slnet_ep{epoch + 1}.pth")
 
-  print(f"Phase 1 | Epoch {epoch + 1:02d} | Classic Ret: {avg_ret:>4.1f} | Opp Ret: {avg_opp:>4.1f} | Classic Entropy: {avg_ent:.4f} | SL Buffer: {len(agent_classic.sl_replay)}")
+  print(f"Phase 1 | Epoch {epoch + 1:02d} | Classic Ret: {avg_ret:>4.1f} | Opp Ret: {avg_opp:>4.1f} | RL Entropy: {avg_rl_ent:.4f} | SL Entropy: {avg_sl_ent:.4f}| SL Buffer: {len(agent_classic.sl_replay)}")
 
 
 # ==========================================
@@ -180,11 +184,11 @@ agent_om.model.pretrain(
     dataset, epochs=args_parsed.pretrain_epochs, batch_size=args_parsed.batch_size)
 del dataset
 
-phase2_returns, phase2_opp_returns, phase2_entropies, phase2_steps = [], [], [], []
+phase2_returns, phase2_opp_returns, phase2_rl_entropies, phase2_sl_entropies, phase2_steps = [], [], [], [], []
 
 for epoch in range(num_epochs):
-  eta = max(0.05, 1.0 - (epoch / num_epochs))  # Linearly decay from 1.0 to 0.05
-  epoch_returns, epoch_opp_returns, epoch_entropies, epoch_steps = [], [], [], []
+  eta = 0.1
+  epoch_returns, epoch_opp_returns, epoch_rl_entropies, epoch_sl_entropies, epoch_steps = [], [], [], [], []
 
   # 1. DATA GENERATION PHASE
   pbar = tqdm(range(args_parsed.episodes_per_epoch),
@@ -196,7 +200,8 @@ for epoch in range(num_epochs):
       opponent_agent=agent_om, eta=eta, max_steps=args.max_steps)
     epoch_returns.append(stats['return'])
     epoch_opp_returns.append(stats['opp_return'])
-    epoch_entropies.append(stats['avg_entropy'])
+    epoch_rl_entropies.append(stats['avg_rl_entropy'])
+    epoch_sl_entropies.append(stats['avg_sl_entropy'])
     epoch_steps.append(stats['steps'])
     steps_taken = stats['steps']
     updates = steps_taken // args.train_every
@@ -206,19 +211,22 @@ for epoch in range(num_epochs):
 
   avg_ret = sum(epoch_returns) / len(epoch_returns)
   avg_opp = sum(epoch_opp_returns) / len(epoch_opp_returns)
-  avg_ent = sum(epoch_entropies) / len(epoch_entropies)
+  avg_rl_ent = sum(epoch_rl_entropies) / len(epoch_rl_entropies)
+  avg_sl_ent = sum(epoch_sl_entropies) / len(epoch_sl_entropies)
   avg_steps = sum(epoch_steps) / len(epoch_steps)
 
   phase2_returns.append(avg_ret)
   phase2_opp_returns.append(avg_opp)
-  phase2_entropies.append(avg_ent)
+  phase2_rl_entropies.append(avg_rl_ent)
+  phase2_sl_entropies.append(avg_sl_ent)
   phase2_steps.append(avg_steps)
 
   wandb.log({
       "phase2/train_return": avg_ret,
       "phase2/opp_return": avg_opp,
       "phase2/avg_steps": avg_steps,
-      "phase2/entropy": avg_ent,
+      "phase2/rl_entropy": avg_rl_ent,
+      "phase2/sl_entropy": avg_sl_ent,
       "phase2/eta": eta
   })
 
@@ -230,7 +238,7 @@ for epoch in range(num_epochs):
              f"./models/{args.folder_id}/om_inference_ep{epoch + 1}.pth")
 
   print(
-    f"Phase 2 | Epoch {epoch + 1:02d} | OM Agent Ret: {avg_ret:>4.1f} | Opp Ret: {avg_opp:>4.1f} | OM Entropy: {avg_ent:.4f}")
+    f"Phase 2 | Epoch {epoch + 1:02d} | OM Agent Ret: {avg_ret:>4.1f} | Opp Ret: {avg_opp:>4.1f} | RL Entropy: {avg_rl_ent:.4f} | SL Entropy: {avg_sl_ent:.4f} | SL Buffer: {len(agent_om.sl_replay)}")
 
 
 # ==========================================
@@ -429,10 +437,14 @@ plt.legend()
 
 # Subplot 3: Policy Entropy
 plt.subplot(2, 2, 3)
-plt.plot(episode_list, phase1_entropies,
-         label='Classic Agent Entropy', color='blue', linestyle='--')
-plt.plot(episode_list, phase2_entropies,
-         label='OM Agent Entropy', color='green')
+plt.plot(episode_list, phase1_rl_entropies,
+         label='Classic Agent RL Entropy', color='blue', linestyle='--')
+plt.plot(episode_list, phase1_sl_entropies,
+         label='Classic Agent SL Entropy', color='red', linestyle='--')
+plt.plot(episode_list, phase2_rl_entropies,
+         label='OM Agent RL Entropy', color='green')
+plt.plot(episode_list, phase2_sl_entropies,
+         label='OM Agent SL Entropy', color='orange')
 plt.xlabel('Episodes')
 plt.ylabel('Shannon Entropy')
 plt.title('Policy Entropy')

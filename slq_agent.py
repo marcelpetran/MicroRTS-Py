@@ -378,7 +378,7 @@ class FSPAgentOM:
     opponent_agent.reset()
 
     done = False
-    ep_ret, opp_ret, ep_entropy = 0.0, 0.0, 0.0
+    ep_ret, opp_ret, rl_ep_entropy, sl_ep_entropy = 0.0, 0.0, 0.0, 0.0
 
     history_len = self.args.max_history_length
     rolling_feats = torch.zeros(
@@ -413,15 +413,15 @@ class FSPAgentOM:
       # Compute both RL (Best Response) and SL (Average) actions
       rl_a, g_map, rl_entropy = self.select_rl_action(obs[0], history_gpu)
       sl_a, sl_entropy = self.select_sl_action(obs[0])
+      rl_ep_entropy += rl_entropy
+      sl_ep_entropy += sl_entropy
 
       # Mix policies based on eta (Fictitious Play)
       if random.random() < eta:
         a = rl_a
-        step_entropy = rl_entropy
         is_rl = True
       else:
         a = sl_a
-        step_entropy = sl_entropy
         is_rl = False
 
       # Opponent acts
@@ -440,7 +440,6 @@ class FSPAgentOM:
           opp_is_rl = False
 
       actions = {0: a, 1: a_opponent}
-      ep_entropy += step_entropy
 
       next_obs, reward, done, info = self.env.step(actions)
 
@@ -548,7 +547,8 @@ class FSPAgentOM:
         "return": ep_ret,
         "steps": step + 1,
         "opp_return": opp_ret,
-        "avg_entropy": ep_entropy / (step + 1)
+        "avg_rl_entropy": rl_ep_entropy / (step + 1),
+        "avg_sl_entropy": sl_ep_entropy / (step + 1)
     }
 
   def run_test_episode(self, opponent_agent, use_sl: bool = True, max_steps: Optional[int] = None) -> Dict[str, float]:
@@ -556,7 +556,7 @@ class FSPAgentOM:
     obs = self.env.reset()
     opponent_agent.reset()
     done = False
-    ep_ret, opp_ret, ep_entropy = 0.0, 0.0, 0.0
+    ep_ret, opp_ret, rl_ep_entropy, sl_ep_entropy = 0.0, 0.0, 0.0, 0.0
 
     history_len = self.args.max_history_length
     rolling_feats = torch.zeros(
@@ -584,12 +584,13 @@ class FSPAgentOM:
           "actions": opp_rolling_actions,
           "mask": opp_rolling_mask
       }
-
-      if use_sl:
-        a, step_entropy = self.select_sl_action(obs[0], eval=True)
-      else:
-        a, _, step_entropy = self.select_rl_action(
+      sl_a, sl_entropy = self.select_sl_action(obs[0], eval=True)
+      rl_a, _, rl_entropy = self.select_rl_action(
           obs[0], history_gpu, eval=True)
+      if use_sl:
+        a = sl_a
+      else:
+        a = rl_a
 
       if hasattr(opponent_agent, 'is_frozen_as_sl') and opponent_agent.is_frozen_as_sl:
         a_opponent, _ = opponent_agent.select_sl_action(obs[1], eval=True)
@@ -634,7 +635,8 @@ class FSPAgentOM:
       ep_ret += reward[0]
       opp_ret += reward[1]
       obs = next_obs
-      ep_entropy += step_entropy
+      rl_ep_entropy += rl_entropy
+      sl_ep_entropy += sl_entropy
 
       if done:
         break
@@ -643,5 +645,6 @@ class FSPAgentOM:
         "return": ep_ret,
         "steps": step + 1,
         "opp_return": opp_ret,
-        "avg_entropy": ep_entropy / (step + 1)
+        "avg_rl_entropy": rl_ep_entropy / (step + 1) if not use_sl else 0.0,
+        "avg_sl_entropy": sl_ep_entropy / (step + 1) if use_sl else 0.0
     }
