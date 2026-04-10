@@ -72,8 +72,57 @@ class OpponentModel(nn.Module):
         "actions": final_padded_actions,
         "mask": mask
     }
+  
+  def heatmap_kl_divergence(self, g_map: torch.Tensor, true_goal_map: torch.Tensor) -> float:
+    """
+    Evaluates how closely the inferred subgoal distribution matches the true intent distribution
+    using Kullback-Leibler Divergence. Lower is better (0.0 is perfect).
 
-  def pretrain(self, dataset, epochs=10, batch_size=128, use_wandb=False, writer=None):
+    Args:
+        g_map (torch.Tensor): Inferred subgoal heatmap as logits, shape (B, H, W)
+        true_goal_map (torch.Tensor): Ground truth distribution over subgoals, shape (B, H, W)
+    """
+    B = g_map.shape[0]
+    g_map_flat = g_map.view(B, -1)  # (B, H*W)
+    true_goal_flat = true_goal_map.view(B, -1)  # (B, H*W)
+
+    # Convert logits to log-probabilities for PyTorch's kl_div
+    log_probs = F.log_softmax(g_map_flat, dim=-1)
+
+    # Compute KL Divergence
+    kl_div = F.kl_div(log_probs, true_goal_flat, reduction='batchmean')
+
+    return kl_div.item()
+
+  def top1_spatial_error(self, g_map: torch.Tensor, true_goal_map: torch.Tensor) -> float:
+    """
+    Measures the Manhattan distance between the model's most confident prediction 
+    and the closest valid ground-truth target.
+
+    Args:
+        g_map (torch.Tensor): Inferred subgoal heatmap as logits, shape (B, H, W)
+        true_goal_map (torch.Tensor): Ground truth distribution over subgoals, shape (B, H, W)
+    """
+    B, H, W = g_map.shape
+    g_map_flat = g_map.view(B, -1)
+    
+    # Get coordinates of highest predicted probability
+    pred_idx = torch.argmax(g_map_flat, dim=-1)
+    pred_r, pred_c = pred_idx // W, pred_idx % W
+
+    total_error = 0.0
+    for b in range(B):
+        # Get all valid true targets for this batch item (where probability > 0)
+        true_targets = torch.nonzero(true_goal_map[b] > 0)
+        
+        if len(true_targets) > 0:
+            # Calculate Manhattan distances from the predicted point to all valid true targets
+            dists = torch.abs(true_targets[:, 0] - pred_r[b]) + torch.abs(true_targets[:, 1] - pred_c[b])
+            total_error += torch.min(dists).item() # Distance to the nearest valid target
+
+    return total_error / B
+
+  def pretrain(self, dataset, epochs=10, batch_size=128):
     """
     Enhanced pretraining loop with logging and progress bars.
     """
@@ -104,19 +153,19 @@ class OpponentModel(nn.Module):
 
         # Log individual steps if using wandb or TB
         step = epoch * (len(dataset) // batch_size) + (i // batch_size)
-        if use_wandb:
-          wandb.log({"train/batch_loss": loss, "step": step})
-        if writer:
-          writer.add_scalar("Loss/batch", loss, step)
+        wandb.log({
+          "train/batch_loss": loss, 
+          "step": step
+        })
 
       avg_loss = sum(epoch_losses) / len(epoch_losses)
       print(f"  => Average Loss: {avg_loss:.6f}")
 
       # Log epoch-level metrics
-      if use_wandb:
-        wandb.log({"train/epoch_loss": avg_loss, "epoch": epoch})
-      if writer:
-        writer.add_scalar("Loss/epoch", avg_loss, epoch)
+      wandb.log({
+        "train/epoch_loss": avg_loss, 
+        "epoch": epoch
+      })
 
   def forward(self, x: torch.Tensor, history: Dict, cached_features=True) -> torch.Tensor:
     """
