@@ -350,7 +350,8 @@ class QLearningAgent:
       self.model.inference_model.eval()
 
       hist_feats = torch.from_numpy(
-          np.array([b["history"]["state_features"][0] for b in batch], dtype=np.float32)
+          np.array([b["history"]["state_features"][0]
+                   for b in batch], dtype=np.float32)
       ).to(self.device)
       hist_acts = torch.from_numpy(
           np.array([b["history"]["actions"][0] for b in batch], dtype=np.int64)
@@ -358,10 +359,12 @@ class QLearningAgent:
       hist_mask = torch.from_numpy(
           np.array([b["history"]["mask"][0] for b in batch])
       ).to(self.device)
-      hist = {"state_features": hist_feats, "actions": hist_acts, "mask": hist_mask}
+      hist = {"state_features": hist_feats,
+              "actions": hist_acts, "mask": hist_mask}
 
       g_logits = self.model.inference_model(s, hist, cached_features=True)
-      g_map = F.softmax(g_logits.view(len(batch), -1), dim=-1).view_as(g_logits)
+      g_map = F.softmax(g_logits.view(len(batch), -1),
+                        dim=-1).view_as(g_logits)
 
       # For next state
       next_feats = torch.from_numpy(
@@ -375,10 +378,13 @@ class QLearningAgent:
       ).to(self.device)
       hist_mask_next = torch.roll(hist_mask, shifts=-1, dims=1)
       hist_mask_next[:, -1] = True
-      hist_next = {"state_features": hist_feats_next, "actions": hist_acts_next, "mask": hist_mask_next}
+      hist_next = {"state_features": hist_feats_next,
+                   "actions": hist_acts_next, "mask": hist_mask_next}
 
-      g_logits_next = self.model.inference_model(sp, hist_next, cached_features=True)
-      g_map_next = F.softmax(g_logits_next.view(len(batch), -1), dim=-1).view_as(g_logits_next)
+      g_logits_next = self.model.inference_model(
+        sp, hist_next, cached_features=True)
+      g_map_next = F.softmax(g_logits_next.view(
+        len(batch), -1), dim=-1).view_as(g_logits_next)
 
       self.model.inference_model.train()
 
@@ -432,7 +438,7 @@ class QLearningAgent:
     with torch.no_grad():
       for param, target_param in zip(self.q.parameters(), self.q_tgt.parameters()):
         target_param.lerp_(param, self.args.tau_soft)
-    
+
     model_loss = self.model.train_step(om_batch)
 
     return loss_val, model_loss
@@ -649,7 +655,8 @@ class QLearningAgent:
 
       a, g_map, step_entropy = self.select_action(
         obs[0], history, eval=True)
-      a_opponent, _, opp_heatmap = opponent_agent.select_action(obs[1], eval=True)
+      a_opponent, _, opp_heatmap = opponent_agent.select_action(
+        obs[1], eval=True)
       actions = {0: a, 1: a_opponent}
 
       if render:

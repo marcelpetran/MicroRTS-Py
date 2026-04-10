@@ -289,7 +289,7 @@ class SimpleAgent:
       prob = 1.0 / len(food_positions)
       for f in food_positions:
         heatmap[f[0], f[1]] = prob
-        
+
     return heatmap
 
   def select_action(self, observation, eval=False):
@@ -351,7 +351,7 @@ class GreedySwitchAgent:
   def reset(self):
     self.cached_path = []
     self.current_target = None
-  
+
   def get_subgoal_heatmap(self, observation):
     h, w = observation.shape[:2]
     heatmap = np.zeros((h, w), dtype=np.float32)
@@ -367,7 +367,8 @@ class GreedySwitchAgent:
 
     if self.precomputed_paths is None:
       wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
-      self.precomputed_paths = precompute_paths(set(tuple(p) for p in wall_pos_arr), h, w)
+      self.precomputed_paths = precompute_paths(
+        set(tuple(p) for p in wall_pos_arr), h, w)
 
     dists = []
     for f in food_positions:
@@ -505,11 +506,13 @@ class StalkerAgent:
 
     if self.precomputed_paths is None:
       wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
-      self.precomputed_paths = precompute_paths(set(tuple(p) for p in wall_pos_arr), h, w)
+      self.precomputed_paths = precompute_paths(
+        set(tuple(p) for p in wall_pos_arr), h, w)
 
     winnable_foods = []
     for f in food_positions:
-      e_dist = len(self.precomputed_paths.get((opp_pos, f), [])) or float('inf')
+      e_dist = len(self.precomputed_paths.get(
+        (opp_pos, f), [])) or float('inf')
       s_dist = len(self.precomputed_paths.get((my_pos, f), [])) or float('inf')
       if s_dist <= e_dist and s_dist != float('inf'):
         winnable_foods.append((e_dist, s_dist, f))
@@ -518,7 +521,7 @@ class StalkerAgent:
       winnable_foods.sort(key=lambda x: x[0])
       min_e_dist = winnable_foods[0][0]
       tie_foods = [f for ed, sd, f in winnable_foods if ed == min_e_dist]
-      
+
       prob = 1.0 / len(tie_foods)
       for f in tie_foods:
         heatmap[f[0], f[1]] += prob
@@ -526,7 +529,8 @@ class StalkerAgent:
       # Fallback to greedy distribution
       greedy_foods = []
       for f in food_positions:
-        s_dist = len(self.precomputed_paths.get((my_pos, f), [])) or float('inf')
+        s_dist = len(self.precomputed_paths.get(
+          (my_pos, f), [])) or float('inf')
         if s_dist != float('inf'):
           greedy_foods.append((s_dist, f))
 
@@ -534,7 +538,7 @@ class StalkerAgent:
         greedy_foods.sort(key=lambda x: x[0])
         min_s_dist = greedy_foods[0][0]
         tie_foods = [f for sd, f in greedy_foods if sd == min_s_dist]
-        
+
         prob = 1.0 / len(tie_foods)
         for f in tie_foods:
           heatmap[f[0], f[1]] += prob
@@ -646,7 +650,7 @@ class ChameleonAgent:
   def reset(self):
     self.simple_agent.reset()
     self.greedy_agent.reset()
-  
+
   def get_subgoal_heatmap(self, observation):
     # The true prior is the weighted sum of its internal heuristic choices
     simple_hm = self.simple_agent.get_subgoal_heatmap(observation)
@@ -664,8 +668,8 @@ class ChameleonAgent:
       self.current_persona = new_persona
 
     if self.current_persona == "simple":
-       action, _, _ =self.simple_agent.select_action(observation, eval)
+      action, _, _ = self.simple_agent.select_action(observation, eval)
     else:
-       action, _, _ = self.greedy_agent.select_action(observation, eval)
-    
+      action, _, _ = self.greedy_agent.select_action(observation, eval)
+
     return action, None, heatmap

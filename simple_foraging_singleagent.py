@@ -29,7 +29,7 @@ parser.add_argument('--opponent', type=str, default='simple',
                     choices=['simple', 'greedy', 'stalker', 'chameleon'],
                     help='Type of heuristic opponent agent to play against')
 parser.add_argument('--map', type=int, default=1,
-                    choices=[i for i in range(1, len(map_layouts)+1)], help='Map layout to use')
+                    choices=[i for i in range(1, len(map_layouts) + 1)], help='Map layout to use')
 parser.add_argument('--episodes', type=int, default=12_000,
                     help='Total training episodes per phase')
 parser.add_argument('--episodes_per_epoch', type=int, default=500,
@@ -122,7 +122,8 @@ eval_episodes = 100
 # ==========================================
 # PHASE 1: TRAIN CLASSIC AGENT
 # ==========================================
-print(f"\n--- PHASE 1: Training Classic Agent vs {args_parsed.opponent.capitalize()} ---")
+print(
+  f"\n--- PHASE 1: Training Classic Agent vs {args_parsed.opponent.capitalize()} ---")
 agent_classic = QLearningAgentClassic(env, args=args)
 
 phase1_train_returns, phase1_train_steps, phase1_entropies, phase1_q_losses = [], [], [], []
@@ -130,9 +131,10 @@ phase1_eval_opp_returns, phase1_eval_steps, phase1_eval_returns = [], [], []
 
 for epoch in range(num_epochs):
   epoch_returns, epoch_entropies, epoch_steps, epoch_q_losses = [], [], [], []
-  
+
   # Training
-  pbar = tqdm(range(args_parsed.episodes_per_epoch), desc=f"Phase 1 Epoch {epoch+1:02d}/{num_epochs} [Train]", leave=False)
+  pbar = tqdm(range(args_parsed.episodes_per_epoch),
+              desc=f"Phase 1 Epoch {epoch + 1:02d}/{num_epochs} [Train]", leave=False)
   for ep in pbar:
     stats = agent_classic.run_episode(opponent_agent, max_steps=args.max_steps)
     epoch_returns.append(stats['return'])
@@ -143,7 +145,8 @@ for epoch in range(num_epochs):
   # Evaluation
   eval_rets, eval_opp_rets, eval_steps = [], [], []
   for _ in range(eval_episodes):
-    test_stats = agent_classic.run_test_episode(opponent_agent, max_steps=args.max_steps, render=False)
+    test_stats = agent_classic.run_test_episode(
+      opponent_agent, max_steps=args.max_steps, render=False)
     eval_rets.append(test_stats['return'])
     eval_opp_rets.append(test_stats['opp_return'])
     eval_steps.append(test_stats['steps'])
@@ -177,14 +180,16 @@ for epoch in range(num_epochs):
       "epoch": epoch + 1
   })
 
-  torch.save(agent_classic.q.state_dict(), f"./models/{args.folder_id}/classic_qnet_ep{epoch+1}.pth")
-  print(f"Phase 1 | Epoch {epoch+1:02d} | Train Ret: {avg_train_ret:>4.1f} | Eval Ret: {avg_eval_ret:>4.2f} | Eval Opp: {avg_eval_opp:>4.2f} | Entropy: {avg_entropy:.4f}")
+  torch.save(agent_classic.q.state_dict(),
+             f"./models/{args.folder_id}/classic_qnet_ep{epoch + 1}.pth")
+  print(f"Phase 1 | Epoch {epoch + 1:02d} | Train Ret: {avg_train_ret:>4.1f} | Eval Ret: {avg_eval_ret:>4.2f} | Eval Opp: {avg_eval_opp:>4.2f} | Entropy: {avg_entropy:.4f}")
 
 
 # ==========================================
 # PHASE 2: TRAIN OM AGENT
 # ==========================================
-print(f"\n--- PHASE 2: Training OM Agent vs {args_parsed.opponent.capitalize()} ---")
+print(
+  f"\n--- PHASE 2: Training OM Agent vs {args_parsed.opponent.capitalize()} ---")
 inference_model = SpatialOpponentModel(args=args).to(device)
 op_model = OpponentModel(inference_model, args=args)
 agent_om = QLearningAgent(env, op_model, args=args)
@@ -193,11 +198,13 @@ agent_om = QLearningAgent(env, op_model, args=args)
 dataset_path = f"./dataset/dataset_map_{args_parsed.map}.pt"
 if not os.path.exists(dataset_path):
   print("Collecting Offline Data for OM Pretraining...")
-  collect_offline_data(num_episodes=500, save_path=dataset_path, map_layout=map_layouts[args_parsed.map - 1])
+  collect_offline_data(num_episodes=500, save_path=dataset_path,
+                       map_layout=map_layouts[args_parsed.map - 1])
 
 print("Loading dataset and pretraining OM...")
 dataset = torch.load(dataset_path, weights_only=False)
-agent_om.model.pretrain(dataset, epochs=args_parsed.pretrain_epochs, batch_size=args_parsed.batch_size)
+agent_om.model.pretrain(
+  dataset, epochs=args_parsed.pretrain_epochs, batch_size=args_parsed.batch_size)
 del dataset
 
 phase2_train_returns, phase2_train_steps, phase2_entropies, phase2_q_losses, phase2_model_losses = [], [], [], [], []
@@ -206,9 +213,10 @@ phase2_eval_opp_returns, phase2_eval_steps, phase2_eval_returns = [], [], []
 for epoch in range(num_epochs):
   epoch_returns, epoch_entropies, epoch_steps, epoch_q_losses, epoch_model_losses = [], [], [], [], []
   epoch_eval_kl_errors, epoch_eval_spatial_errors = [], []
-  
+
   # Training
-  pbar = tqdm(range(args_parsed.episodes_per_epoch), desc=f"Phase 2 Epoch {epoch+1:02d}/{num_epochs} [Train]", leave=False)
+  pbar = tqdm(range(args_parsed.episodes_per_epoch),
+              desc=f"Phase 2 Epoch {epoch + 1:02d}/{num_epochs} [Train]", leave=False)
   for ep in pbar:
     stats = agent_om.run_episode(opponent_agent, max_steps=args.max_steps)
     epoch_returns.append(stats['return'])
@@ -220,7 +228,8 @@ for epoch in range(num_epochs):
   # Evaluation
   eval_rets, eval_opp_rets, eval_steps = [], [], []
   for _ in range(eval_episodes):
-    test_stats = agent_om.run_test_episode(opponent_agent, max_steps=args.max_steps, render=False)
+    test_stats = agent_om.run_test_episode(
+      opponent_agent, max_steps=args.max_steps, render=False)
     eval_rets.append(test_stats['return'])
     eval_opp_rets.append(test_stats['opp_return'])
     eval_steps.append(test_stats['steps'])
@@ -231,14 +240,15 @@ for epoch in range(num_epochs):
   avg_eval_opp = sum(eval_opp_rets) / eval_episodes
   avg_eval_steps = sum(eval_steps) / eval_episodes
   avg_eval_kl_error = sum(epoch_eval_kl_errors) / len(epoch_eval_kl_errors)
-  avg_eval_spatial_error = sum(epoch_eval_spatial_errors) / len(epoch_eval_spatial_errors)
+  avg_eval_spatial_error = sum(
+    epoch_eval_spatial_errors) / len(epoch_eval_spatial_errors)
 
   avg_train_ret = sum(epoch_returns) / len(epoch_returns)
   avg_train_steps = sum(epoch_steps) / len(epoch_steps)
   avg_entropy = sum(epoch_entropies) / len(epoch_entropies)
   avg_q_loss = sum(epoch_q_losses) / len(epoch_q_losses)
   avg_model_loss = sum(epoch_model_losses) / len(epoch_model_losses)
-  
+
   phase2_eval_returns.append(avg_eval_ret)
   phase2_eval_opp_returns.append(avg_eval_opp)
   phase2_eval_steps.append(avg_eval_steps)
@@ -263,22 +273,26 @@ for epoch in range(num_epochs):
       "epoch": epoch + 1
   })
 
-  torch.save(agent_om.q.state_dict(), f"./models/{args.folder_id}/om_qnet_ep{epoch+1}.pth")
-  torch.save(agent_om.model.inference_model.state_dict(), f"./models/{args.folder_id}/om_inference_ep{epoch+1}.pth")
-  print(f"Phase 2 | Epoch {epoch+1:02d} | Train Ret: {avg_train_ret:>4.1f} | Eval Ret: {avg_eval_ret:>4.2f} | Eval Opp: {avg_eval_opp:>4.2f} | Entropy: {avg_entropy:.4f} | Q Loss: {avg_q_loss:.4f} | Model Loss: {avg_model_loss:.4f}")
+  torch.save(agent_om.q.state_dict(),
+             f"./models/{args.folder_id}/om_qnet_ep{epoch + 1}.pth")
+  torch.save(agent_om.model.inference_model.state_dict(),
+             f"./models/{args.folder_id}/om_inference_ep{epoch + 1}.pth")
+  print(f"Phase 2 | Epoch {epoch + 1:02d} | Train Ret: {avg_train_ret:>4.1f} | Eval Ret: {avg_eval_ret:>4.2f} | Eval Opp: {avg_eval_opp:>4.2f} | Entropy: {avg_entropy:.4f} | Q Loss: {avg_q_loss:.4f} | Model Loss: {avg_model_loss:.4f}")
 
 
 # ==========================================
 # PLOTTING
 # ==========================================
 print("\n--- Generating Evaluation Charts ---")
-episode_list = [(i + 1) * args_parsed.episodes_per_epoch for i in range(num_epochs)]
+episode_list = [
+  (i + 1) * args_parsed.episodes_per_epoch for i in range(num_epochs)]
 
 plt.figure(figsize=(18, 5))
 
 # Subplot 1: Evaluation Returns
 plt.subplot(1, 3, 1)
-plt.plot(episode_list, phase1_eval_returns, label='Classic Agent', color='blue', linestyle='--')
+plt.plot(episode_list, phase1_eval_returns,
+         label='Classic Agent', color='blue', linestyle='--')
 plt.plot(episode_list, phase2_eval_returns, label='OM Agent', color='green')
 plt.xlabel('Training Episodes')
 plt.ylabel('Average Eval Return')
@@ -287,8 +301,10 @@ plt.legend()
 
 # Subplot 2: Opponent Evaluation Returns
 plt.subplot(1, 3, 2)
-plt.plot(episode_list, phase1_eval_opp_returns, label='Opponent (vs Classic)', color='red', linestyle='--')
-plt.plot(episode_list, phase2_eval_opp_returns, label='Opponent (vs OM)', color='orange')
+plt.plot(episode_list, phase1_eval_opp_returns,
+         label='Opponent (vs Classic)', color='red', linestyle='--')
+plt.plot(episode_list, phase2_eval_opp_returns,
+         label='Opponent (vs OM)', color='orange')
 plt.xlabel('Training Episodes')
 plt.ylabel('Average Eval Return')
 plt.title(f'Heuristic Opponent Performance')
@@ -296,7 +312,8 @@ plt.legend()
 
 # Subplot 3: Episode Steps
 plt.subplot(1, 3, 3)
-plt.plot(episode_list, phase1_eval_steps, label='Classic Agent', color='blue', linestyle='--')
+plt.plot(episode_list, phase1_eval_steps,
+         label='Classic Agent', color='blue', linestyle='--')
 plt.plot(episode_list, phase2_eval_steps, label='OM Agent', color='green')
 plt.xlabel('Training Episodes')
 plt.ylabel('Average Steps')
@@ -304,7 +321,8 @@ plt.title('Steps per Episode')
 plt.legend()
 
 plt.tight_layout()
-plt.savefig(f"./diagrams/{args.folder_id}/comparative_training_{args_parsed.opponent}.png")
+plt.savefig(
+  f"./diagrams/{args.folder_id}/comparative_training_{args_parsed.opponent}.png")
 plt.close('all')
 
 wandb.finish()

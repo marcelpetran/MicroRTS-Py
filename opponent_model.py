@@ -72,7 +72,7 @@ class OpponentModel(nn.Module):
         "actions": final_padded_actions,
         "mask": mask
     }
-  
+
   def heatmap_kl_divergence(self, g_map: torch.Tensor, true_goal_map: torch.Tensor) -> float:
     """
     Evaluates how closely the inferred subgoal distribution matches the true intent distribution
@@ -105,7 +105,7 @@ class OpponentModel(nn.Module):
     """
     B, H, W = g_map.shape
     g_map_flat = g_map.view(B, -1)
-    
+
     # Get coordinates of highest predicted probability
     pred_idx = torch.argmax(g_map_flat, dim=-1)
     pred_r, pred_c = pred_idx // W, pred_idx % W
@@ -113,12 +113,14 @@ class OpponentModel(nn.Module):
     total_error = 0.0
     for b in range(B):
         # Get all valid true targets for this batch item (where probability > 0)
-        true_targets = torch.nonzero(true_goal_map[b] > 0)
-        
-        if len(true_targets) > 0:
-            # Calculate Manhattan distances from the predicted point to all valid true targets
-            dists = torch.abs(true_targets[:, 0] - pred_r[b]) + torch.abs(true_targets[:, 1] - pred_c[b])
-            total_error += torch.min(dists).item() # Distance to the nearest valid target
+      true_targets = torch.nonzero(true_goal_map[b] > 0)
+
+      if len(true_targets) > 0:
+        # Calculate Manhattan distances from the predicted point to all valid true targets
+        dists = torch.abs(
+          true_targets[:, 0] - pred_r[b]) + torch.abs(true_targets[:, 1] - pred_c[b])
+        # Distance to the nearest valid target
+        total_error += torch.min(dists).item()
 
     return total_error / B
 
@@ -154,7 +156,7 @@ class OpponentModel(nn.Module):
         # Log individual steps if using wandb or TB
         step = epoch * (len(dataset) // batch_size) + (i // batch_size)
         wandb.log({
-          "train/batch_loss": loss, 
+          "train/batch_loss": loss,
           "step": step
         })
 
@@ -163,7 +165,7 @@ class OpponentModel(nn.Module):
 
       # Log epoch-level metrics
       wandb.log({
-        "train/epoch_loss": avg_loss, 
+        "train/epoch_loss": avg_loss,
         "epoch": epoch
       })
 
