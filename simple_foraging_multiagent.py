@@ -53,6 +53,8 @@ parser.add_argument('--tau_start', type=float, default=2.1,
                     help='Boltzmann start temp')
 parser.add_argument('--tau_end', type=float, default=0.1,
                     help='Boltzmann end temp')
+parser.add_argument('--tau_decay_steps', type=int, default=600_000,
+                    help='Boltzmann decay steps')
 parser.add_argument('--train_every', type=int,
                     default=2, help='Train frequency')
 parser.add_argument('--replay_capacity', type=int,
@@ -92,6 +94,7 @@ args = OMGArgs(
     max_steps=args_parsed.max_steps,
     tau_start=args_parsed.tau_start,
     tau_end=args_parsed.tau_end,
+    tau_decay_steps=args_parsed.tau_decay_steps,
     state_shape=obs_sample[0].shape,
     H=H, W=W, action_dim=4,
     d_model=args_parsed.d_model, nhead=args_parsed.nhead,
@@ -195,7 +198,7 @@ for epoch in range(num_epochs):
               desc=f"Phase 2 Epoch {epoch + 1}/{num_epochs}", leave=False)
 
   for ep in pbar:
-    # FSP OM Agent mixes between RL and SL. Opponent purely executes SL.
+    # FSP OM Agent mixes between RL and SL.
     stats = agent_om.run_fsp_episode(
       opponent_agent=agent_om, eta=eta, max_steps=args.max_steps)
     epoch_returns.append(stats['return'])

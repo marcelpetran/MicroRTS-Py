@@ -287,10 +287,41 @@ class FSPAgentOM:
     done = torch.from_numpy(
       np.array([b["done"] for b in batch], dtype=np.float32)).to(self.device)
 
-    g_map = torch.from_numpy(np.array(
-      [b["rollout_goal_map"] for b in batch], dtype=np.float32)).to(self.device)
-    g_map_next = torch.from_numpy(np.array(
-      [b["rollout_goal_map_next"] for b in batch], dtype=np.float32)).to(self.device)
+    with torch.no_grad():
+      self.model.inference_model.eval()
+
+      hist_feats = torch.from_numpy(
+          np.array([b["history"]["state_features"][0] for b in batch], dtype=np.float32)
+      ).to(self.device)
+      hist_acts = torch.from_numpy(
+          np.array([b["history"]["actions"][0] for b in batch], dtype=np.int64)
+      ).to(self.device)
+      hist_mask = torch.from_numpy(
+          np.array([b["history"]["mask"][0] for b in batch])
+      ).to(self.device)
+      hist = {"state_features": hist_feats, "actions": hist_acts, "mask": hist_mask}
+
+      g_logits = self.model.inference_model(s, hist, cached_features=True)
+      g_map = F.softmax(g_logits.view(len(batch), -1), dim=-1).view_as(g_logits)
+
+      # For next state
+      next_feats = torch.from_numpy(
+          np.array([b["next_state_feature"] for b in batch], dtype=np.float32)
+      ).to(self.device)
+      hist_feats_next = torch.roll(hist_feats, shifts=-1, dims=1)
+      hist_feats_next[:, -1, :] = next_feats
+      hist_acts_next = torch.roll(hist_acts, shifts=-1, dims=1)
+      hist_acts_next[:, -1] = torch.from_numpy(
+          np.array([b["opp_action"] for b in batch], dtype=np.int64)
+      ).to(self.device)
+      hist_mask_next = torch.roll(hist_mask, shifts=-1, dims=1)
+      hist_mask_next[:, -1] = True
+      hist_next = {"state_features": hist_feats_next, "actions": hist_acts_next, "mask": hist_mask_next}
+
+      g_logits_next = self.model.inference_model(sp, hist_next, cached_features=True)
+      g_map_next = F.softmax(g_logits_next.view(len(batch), -1), dim=-1).view_as(g_logits_next)
+
+      self.model.inference_model.train()
 
     q_sa = self.q(s, g_map).gather(1, a.unsqueeze(1)).squeeze(1)
 
@@ -322,8 +353,6 @@ class FSPAgentOM:
       "true_goal_map": torch.from_numpy(np.array([b["true_goal_map"] for b in batch_list], dtype=np.float32)).to(self.device)
     }
 
-    model_loss = self.model.train_step(om_batch, cached_features=True)
-
     # 2. Update Q-Network
     q_sa, target = self.compute_targets(batch_list)
     loss = F.smooth_l1_loss(q_sa, target, reduction='mean')
@@ -337,6 +366,8 @@ class FSPAgentOM:
     with torch.no_grad():
       for param, target_param in zip(self.q.parameters(), self.q_tgt.parameters()):
         target_param.lerp_(param, self.args.tau_soft)
+
+    model_loss = self.model.train_step(om_batch, cached_features=True)
 
     return loss_val, model_loss
 
@@ -463,7 +494,6 @@ class FSPAgentOM:
           "opp_reward": float(reward[1]),
           "next_state": next_obs[0].copy(),
           "done": bool(done),
-          "rollout_goal_map": g_map.cpu().numpy(),
           "history": history_cpu
       }
       episode_transitions.append(transition)
@@ -477,6 +507,7 @@ class FSPAgentOM:
         new_feat = self.model.inference_model.get_features(state_tensor)
         opp_new_feat = self.model.inference_model.get_features(
           opp_state_tensor)
+      transition["next_state_feature"] = new_feat.squeeze(0).cpu().numpy()
 
       rolling_feats = torch.roll(rolling_feats, shifts=-1, dims=1)
       rolling_actions = torch.roll(rolling_actions, shifts=-1, dims=1)
@@ -509,7 +540,6 @@ class FSPAgentOM:
     # Hindsight Relabeling for RL Buffer
     current_true_goal_pos = None
     next_map = np.zeros((H, W), dtype=np.float32)
-    next_rollout_map = np.zeros((H, W), dtype=np.float32)
 
     if len(episode_transitions) > 0:
       final_t = episode_transitions[-1]
@@ -535,9 +565,6 @@ class FSPAgentOM:
       t["true_goal_map_next"] = next_map
       next_map = true_map.copy()
       del t["opp_reward"]
-
-      t["rollout_goal_map_next"] = next_rollout_map
-      next_rollout_map = t["rollout_goal_map"].copy()
 
     # Push to RL buffer
     for t in episode_transitions:
