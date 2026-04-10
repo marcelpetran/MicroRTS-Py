@@ -297,7 +297,7 @@ def evaluate_matchup(agent0, agent1, env, args, use_sl=False):
         a0, _ = agent0.select_sl_action(obs[0], eval=True)
       else:
         a0, _ = agent0.select_rl_action(obs[0], eval=True) if hasattr(
-          agent0, 'select_rl_action') else agent0.select_action(obs[0])
+          agent0, 'select_rl_action') else agent0.select_action(obs[0])[:2]
 
     # Agent 1 action
     if agent1_is_om:
@@ -311,7 +311,7 @@ def evaluate_matchup(agent0, agent1, env, args, use_sl=False):
         a1, _ = agent1.select_sl_action(obs[1], eval=True)
       else:
         a1, _ = agent1.select_rl_action(obs[1], eval=True) if hasattr(
-          agent1, 'select_rl_action') else agent1.select_action(obs[1])
+          agent1, 'select_rl_action') else agent1.select_action(obs[1])[:2]
 
     next_obs, rewards, done, _ = env.step({0: a0, 1: a1})
 

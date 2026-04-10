@@ -1,7 +1,6 @@
 import heapq
 
 import numpy as np
-from seaborn import heatmap
 from maps import *
 
 
