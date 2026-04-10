@@ -1,6 +1,7 @@
 import heapq
 
 import numpy as np
+from seaborn import heatmap
 from maps import *
 
 
@@ -259,7 +260,7 @@ class RandomAgent:
   def reset(self): pass
 
   def select_action(self, observation, eval=False):
-    return np.random.randint(0, 4), None
+    return np.random.randint(0, 4), None, np.zeros((observation.shape[0], observation.shape[1]), dtype=np.float32)
 
 
 class SimpleAgent:
@@ -273,9 +274,30 @@ class SimpleAgent:
     self.cached_path = []
     self.current_target = None
 
+  def get_subgoal_heatmap(self, observation):
+    h, w = observation.shape[:2]
+    heatmap = np.zeros((h, w), dtype=np.float32)
+    food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
+
+    if not food_positions:
+      return heatmap
+
+    if self.current_target in food_positions:
+      # Target locked
+      heatmap[self.current_target[0], self.current_target[1]] = 1.0
+    else:
+      # Uniform over all choices since it hasn't picked yet
+      prob = 1.0 / len(food_positions)
+      for f in food_positions:
+        heatmap[f[0], f[1]] = prob
+        
+    return heatmap
+
   def select_action(self, observation, eval=False):
     my_channel = 2
     opp_channel = 3
+
+    heatmap = self.get_subgoal_heatmap(observation)
 
     agent_pos_arr = np.argwhere(observation[:, :, my_channel] == 1)
     if len(agent_pos_arr) == 0:
@@ -284,7 +306,7 @@ class SimpleAgent:
 
     food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
     if not food_positions:
-      return np.random.randint(0, 4), None
+      return np.random.randint(0, 4), None, heatmap
 
     if self.precomputed_paths is None:
       wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
@@ -310,9 +332,9 @@ class SimpleAgent:
           my_pos, self.current_target, obstacles, observation.shape[0], observation.shape[1])
 
     if self.cached_path:
-      return self.cached_path.pop(0), None
+      return self.cached_path.pop(0), None, heatmap
     else:
-      return np.random.randint(0, 4), None
+      return np.random.randint(0, 4), None, heatmap
 
 
 class GreedySwitchAgent:
@@ -330,11 +352,67 @@ class GreedySwitchAgent:
   def reset(self):
     self.cached_path = []
     self.current_target = None
+  
+  def get_subgoal_heatmap(self, observation):
+    h, w = observation.shape[:2]
+    heatmap = np.zeros((h, w), dtype=np.float32)
+
+    agent_pos_arr = np.argwhere(observation[:, :, 2] == 1)
+    opp_pos_arr = np.argwhere(observation[:, :, 3] == 1)
+    food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
+
+    if len(agent_pos_arr) == 0 or len(opp_pos_arr) == 0 or not food_positions:
+      return heatmap
+
+    my_pos, opp_pos = tuple(agent_pos_arr[0]), tuple(opp_pos_arr[0])
+
+    if self.precomputed_paths is None:
+      wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
+      self.precomputed_paths = precompute_paths(set(tuple(p) for p in wall_pos_arr), h, w)
+
+    dists = []
+    for f in food_positions:
+      my_dist = len(self.precomputed_paths.get((my_pos, f), []))
+      opp_dist = len(self.precomputed_paths.get((opp_pos, f), []))
+      dists.append((my_dist, opp_dist, f))
+
+    dists.sort(key=lambda x: x[0])
+    min_my_dist = min(d[0] for d in dists)
+    tie_foods = [d for d in dists if d[0] == min_my_dist]
+
+    target_food = None
+    for d in tie_foods:
+      if self.current_target == d[2]:
+        target_food = d[2]
+        break
+
+    if target_food is not None:
+      # It wants to stick with the current target, but verify safety logic
+      chosen_dist = next(d for d in dists if d[2] == target_food)
+      if chosen_dist[1] < chosen_dist[0]:
+        safer_foods = [d for d in dists if d[0] <= d[1]]
+        if safer_foods:
+          safer_foods.sort(key=lambda x: x[0])
+          target_food = safer_foods[0][2]
+      heatmap[target_food[0], target_food[1]] = 1.0
+    else:
+      # Distribute probability equally among all ties, evaluating safety logic for each
+      prob_per_tie = 1.0 / len(tie_foods)
+      for d in tie_foods:
+        potential_target = d[2]
+        if d[1] < d[0]:
+          safer_foods = [sd for sd in dists if sd[0] <= sd[1]]
+          if safer_foods:
+            safer_foods.sort(key=lambda x: x[0])
+            potential_target = safer_foods[0][2]
+        heatmap[potential_target[0], potential_target[1]] += prob_per_tie
+
+    return heatmap
 
   def select_action(self, observation, eval=False):
     my_channel = 2
     opp_channel = 3
-
+    heatmap = self.get_subgoal_heatmap(observation)
     agent_pos_arr = np.argwhere(observation[:, :, my_channel] == 1)
     opp_pos_arr = np.argwhere(observation[:, :, opp_channel] == 1)
 
@@ -346,7 +424,7 @@ class GreedySwitchAgent:
 
     food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
     if not food_positions:
-      return np.random.randint(0, 4), None
+      return np.random.randint(0, 4), None, heatmap
 
     if self.precomputed_paths is None:
       wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
@@ -394,9 +472,9 @@ class GreedySwitchAgent:
           my_pos, target_food, obstacles, observation.shape[0], observation.shape[1])
 
     if self.cached_path:
-      return self.cached_path.pop(0), None
+      return self.cached_path.pop(0), None, heatmap
     else:
-      return np.random.randint(0, 4), None
+      return np.random.randint(0, 4), None, heatmap
 
 
 class StalkerAgent:
@@ -413,22 +491,75 @@ class StalkerAgent:
   def reset(self):
     pass
 
+  def get_subgoal_heatmap(self, observation):
+    h, w = observation.shape[:2]
+    heatmap = np.zeros((h, w), dtype=np.float32)
+
+    my_pos_arr = np.argwhere(observation[:, :, 2] == 1)
+    enemy_pos_arr = np.argwhere(observation[:, :, 3] == 1)
+    food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
+
+    if len(my_pos_arr) == 0 or len(enemy_pos_arr) == 0 or not food_positions:
+      return heatmap
+
+    my_pos, opp_pos = tuple(my_pos_arr[0]), tuple(enemy_pos_arr[0])
+
+    if self.precomputed_paths is None:
+      wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
+      self.precomputed_paths = precompute_paths(set(tuple(p) for p in wall_pos_arr), h, w)
+
+    winnable_foods = []
+    for f in food_positions:
+      e_dist = len(self.precomputed_paths.get((opp_pos, f), [])) or float('inf')
+      s_dist = len(self.precomputed_paths.get((my_pos, f), [])) or float('inf')
+      if s_dist <= e_dist and s_dist != float('inf'):
+        winnable_foods.append((e_dist, s_dist, f))
+
+    if winnable_foods:
+      winnable_foods.sort(key=lambda x: x[0])
+      min_e_dist = winnable_foods[0][0]
+      tie_foods = [f for ed, sd, f in winnable_foods if ed == min_e_dist]
+      
+      prob = 1.0 / len(tie_foods)
+      for f in tie_foods:
+        heatmap[f[0], f[1]] += prob
+    else:
+      # Fallback to greedy distribution
+      greedy_foods = []
+      for f in food_positions:
+        s_dist = len(self.precomputed_paths.get((my_pos, f), [])) or float('inf')
+        if s_dist != float('inf'):
+          greedy_foods.append((s_dist, f))
+
+      if greedy_foods:
+        greedy_foods.sort(key=lambda x: x[0])
+        min_s_dist = greedy_foods[0][0]
+        tie_foods = [f for sd, f in greedy_foods if sd == min_s_dist]
+        
+        prob = 1.0 / len(tie_foods)
+        for f in tie_foods:
+          heatmap[f[0], f[1]] += prob
+
+    return heatmap
+
   def select_action(self, observation, eval=False):
     my_channel = 2
     opp_channel = 3
+
+    heatmap = self.get_subgoal_heatmap(observation)
 
     my_pos_arr = np.argwhere(observation[:, :, my_channel] == 1)
     enemy_pos_arr = np.argwhere(observation[:, :, opp_channel] == 1)
 
     if len(my_pos_arr) == 0 or len(enemy_pos_arr) == 0:
-      return np.random.randint(0, 4), None
+      return np.random.randint(0, 4), None, heatmap
 
     my_pos = tuple(my_pos_arr[0])
     opp_pos = tuple(enemy_pos_arr[0])
 
     food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
     if not food_positions:
-      return np.random.randint(0, 4), None
+      return np.random.randint(0, 4), None, heatmap
 
     if self.precomputed_paths is None:
       wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
@@ -473,7 +604,7 @@ class StalkerAgent:
           nr, nc = my_pos[0] + dr, my_pos[1] + dc
           if (nr, nc) in obstacles:
             return action
-        return np.random.randint(0, 4), None  # Fallback
+        return np.random.randint(0, 4), None, heatmap  # Fallback
 
     else:
       # We are losing ALL races. The enemy has cleared their side.
@@ -491,15 +622,15 @@ class StalkerAgent:
         tie_foods = [f for sd, f in greedy_foods if sd == min_s_dist]
         target_food = tie_foods[np.random.randint(len(tie_foods))]
       else:
-        return np.random.randint(0, 4), None
+        return np.random.randint(0, 4), None, heatmap
 
     # --- 4. Execution ---
     # Take a single step towards the target_food. We re-evaluate next frame.
     p_path = self.precomputed_paths.get((my_pos, target_food), [])
     if p_path:
-      return p_path[0], None
+      return p_path[0], None, heatmap
     else:
-      return np.random.randint(0, 4), None
+      return np.random.randint(0, 4), None, heatmap
 
 
 class ChameleonAgent:
@@ -516,8 +647,15 @@ class ChameleonAgent:
   def reset(self):
     self.simple_agent.reset()
     self.greedy_agent.reset()
+  
+  def get_subgoal_heatmap(self, observation):
+    # The true prior is the weighted sum of its internal heuristic choices
+    simple_hm = self.simple_agent.get_subgoal_heatmap(observation)
+    greedy_hm = self.greedy_agent.get_subgoal_heatmap(observation)
+    return (0.3 * simple_hm) + (0.7 * greedy_hm)
 
   def select_action(self, observation, eval=False):
+    heatmap = self.get_subgoal_heatmap(observation)
     # 30% chance to be Simple, 70% to be Greedy
     new_persona = "simple" if np.random.rand() < 0.3 else "greedy"
 
@@ -527,6 +665,8 @@ class ChameleonAgent:
       self.current_persona = new_persona
 
     if self.current_persona == "simple":
-      return self.simple_agent.select_action(observation, eval)
+       action, _, _ =self.simple_agent.select_action(observation, eval)
     else:
-      return self.greedy_agent.select_action(observation, eval)
+       action, _, _ = self.greedy_agent.select_action(observation, eval)
+    
+    return action, None, heatmap
