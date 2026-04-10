@@ -157,6 +157,8 @@ class QLearningAgent:
     t = min(self.global_step, self.args.tau_decay_steps)
     return self.args.tau_end + (self.args.tau_start - self.args.tau_end) * (1 - t / self.args.tau_decay_steps)
 
+  # ------------- evaluation --------------
+
   @torch.no_grad()
   def value(self, s_t: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
     """
@@ -446,7 +448,7 @@ class QLearningAgent:
 
   # ------------- rollout -------------
 
-  def run_episode(self, opponent_agent, max_steps: Optional[int] = None) -> Dict[str, float]:
+  def run_episode(self, opponent_agent, max_steps: int = 500) -> Dict[str, float]:
     """
     Gathers a trajectory, predicts subgoals, and uses Hindsight 
     to label the true subgoals at the end of the episode.
@@ -464,6 +466,9 @@ class QLearningAgent:
     ep_ret = 0.0
     opp_ret = 0.0
     ep_entropy = 0.0
+    q_losses = []
+    model_losses = []
+    opp_losses = []
 
     # History buffer for the transformer
     history_len = self.args.max_history_length
@@ -481,14 +486,14 @@ class QLearningAgent:
     # Get grid dimensions for the map
     H, W, _ = obs[0].shape
 
-    for step in range(max_steps or 500):
+    for step in range(max_steps):
       history_gpu = {
         "state_features": rolling_feats,
         "actions": rolling_actions,
         "mask": rolling_mask
       }
       a, g_map, step_entropy = self.select_action(obs[0], history_gpu)
-      a_opponent, _ = opponent_agent.select_action(obs[1])
+      a_opponent, _, _ = opponent_agent.select_action(obs[1])
       actions = {0: a, 1: a_opponent}
 
       ep_entropy += step_entropy
@@ -554,15 +559,9 @@ class QLearningAgent:
       self.global_step += 1
       Q_loss, model_loss = self.update()
 
-      if Q_loss is not None and self.global_step % 100 == 0:
-        if wandb.run is not None:
-          wandb.log({
-              "train/q_loss": Q_loss,
-              "train/model_loss": model_loss,
-              "train/opp_q_loss": opp_loss_val,
-              "train/tau": self._tau(),
-              "step": self.global_step
-          })
+      q_losses.append(Q_loss)
+      model_losses.append(model_loss)
+      opp_losses.append(opp_loss_val)
 
       if done:
         break
@@ -607,21 +606,29 @@ class QLearningAgent:
     for t in episode_transitions:
       self.replay.push(t)
 
+    valid_q_losses = [l for l in q_losses if l is not None]
+    valid_model_losses = [l for l in model_losses if l is not None]
+    valid_opp_losses = [l for l in opp_losses if l is not None]
+
     return {
       F"return": ep_ret,
       "steps": step + 1,
       "opp_return": opp_ret,
-      "avg_entropy": ep_entropy / (step + 1)
-
+      "avg_entropy": ep_entropy / (step + 1),
+      "avg_q_loss": np.mean(valid_q_losses) if valid_q_losses else 0.0,
+      "avg_model_loss": np.mean(valid_model_losses) if valid_model_losses else 0.0,
+      "avg_opp_loss": np.mean(valid_opp_losses) if valid_opp_losses else 0.0
     }
 
-  def run_test_episode(self, opponent_agent, max_steps: Optional[int] = None, render: bool = False) -> Dict[str, float]:
+  def run_test_episode(self, opponent_agent, max_steps: int = 500, render: bool = False) -> Dict[str, float]:
     obs = self.env.reset()
     opponent_agent.reset()
     done = False
     ep_ret = 0.0
     opp_ret = 0.0
     ep_entropy = 0.0
+    kd_errors = []
+    spatial_errors = []
 
     # History container for the Transformer
     history_len = self.args.max_history_length
@@ -633,7 +640,7 @@ class QLearningAgent:
       (1, history_len), dtype=torch.bool, device=self.device)
     current_seq_len = 0
 
-    for step in range(max_steps or 500):
+    for step in range(max_steps):
       history = {
         "state_features": rolling_feats,
         "actions": rolling_actions,
@@ -642,7 +649,7 @@ class QLearningAgent:
 
       a, g_map, step_entropy = self.select_action(
         obs[0], history, eval=True)
-      a_opponent, _ = opponent_agent.select_action(obs[1], eval=True)
+      a_opponent, _, opp_heatmap = opponent_agent.select_action(obs[1], eval=True)
       actions = {0: a, 1: a_opponent}
 
       if render:
@@ -652,6 +659,17 @@ class QLearningAgent:
           self.heatmap_subgoal(
             g_map, f"./diagrams/{self.args.folder_id}/gmap_step{self.global_step + step}.png")
         self.env.render()
+
+      if g_map.dim() == 2:
+        g_map = g_map.unsqueeze(0)  # (1, H, W)
+
+      # Convert to tensor (1, H, W) and move to device
+      opp_heatmap = torch.from_numpy(opp_heatmap).unsqueeze(0).to(self.device)
+
+      kl_error = self.model.heatmap_kl_divergence(g_map, opp_heatmap)
+      spatial_error = self.model.top1_spatial_error(g_map, opp_heatmap)
+      kd_errors.append(kl_error)
+      spatial_errors.append(spatial_error)
 
       next_obs, reward, done, info = self.env.step(actions)
 
@@ -684,5 +702,7 @@ class QLearningAgent:
       "return": ep_ret,
       "steps": step + 1,
       "opp_return": opp_ret,
-      "avg_entropy": ep_entropy / (step + 1)
+      "avg_entropy": ep_entropy / (step + 1),
+      "avg_kl_error": np.mean(kd_errors) if kd_errors else None,
+      "avg_spatial_error": np.mean(spatial_errors) if spatial_errors else None
     }

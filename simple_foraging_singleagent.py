@@ -117,7 +117,7 @@ elif args_parsed.opponent == 'chameleon':
   opponent_agent = ChameleonAgent(agent_id=1)
 
 num_epochs = args_parsed.episodes // args_parsed.episodes_per_epoch
-
+eval_episodes = 100
 
 # ==========================================
 # PHASE 1: TRAIN CLASSIC AGENT
@@ -125,39 +125,52 @@ num_epochs = args_parsed.episodes // args_parsed.episodes_per_epoch
 print(f"\n--- PHASE 1: Training Classic Agent vs {args_parsed.opponent.capitalize()} ---")
 agent_classic = QLearningAgentClassic(env, args=args)
 
-phase1_train_returns, phase1_eval_returns = [], []
-phase1_eval_opp_returns, phase1_eval_steps = [], []
+phase1_train_returns, phase1_train_steps, phase1_entropies, phase1_q_losses = [], [], [], []
+phase1_eval_opp_returns, phase1_eval_steps, phase1_eval_returns = [], [], []
 
 for epoch in range(num_epochs):
-  epoch_returns = []
+  epoch_returns, epoch_entropies, epoch_steps, epoch_q_losses = [], [], [], []
   
   # Training
   pbar = tqdm(range(args_parsed.episodes_per_epoch), desc=f"Phase 1 Epoch {epoch+1:02d}/{num_epochs} [Train]", leave=False)
   for ep in pbar:
     stats = agent_classic.run_episode(opponent_agent, max_steps=args.max_steps)
     epoch_returns.append(stats['return'])
-    wandb.log({"classic/train_return": stats['return'], "classic/train_steps": stats['steps']})
-      
-  avg_train_ret = sum(epoch_returns) / len(epoch_returns)
-  phase1_train_returns.append(avg_train_ret)
+    epoch_entropies.append(stats['avg_entropy'])
+    epoch_steps.append(stats['steps'])
+    epoch_q_losses.append(stats['avg_q_loss'])
 
   # Evaluation
   eval_rets, eval_opp_rets, eval_steps = [], [], []
-  for _ in range(100):
+  for _ in range(eval_episodes):
     test_stats = agent_classic.run_test_episode(opponent_agent, max_steps=args.max_steps, render=False)
     eval_rets.append(test_stats['return'])
     eval_opp_rets.append(test_stats['opp_return'])
     eval_steps.append(test_stats['steps'])
 
-  avg_eval_ret = sum(eval_rets) / 100
-  avg_eval_opp = sum(eval_opp_rets) / 100
-  avg_eval_steps = sum(eval_steps) / 100
-  
+  avg_eval_ret = sum(eval_rets) / eval_episodes
+  avg_eval_opp = sum(eval_opp_rets) / eval_episodes
+  avg_eval_steps = sum(eval_steps) / eval_episodes
+
+  avg_train_ret = sum(epoch_returns) / len(epoch_returns)
+  avg_train_steps = sum(epoch_steps) / len(epoch_steps)
+  avg_entropy = sum(epoch_entropies) / len(epoch_entropies)
+  avg_q_loss = sum(epoch_q_losses) / len(epoch_q_losses)
+
+  phase1_train_returns.append(avg_train_ret)
+  phase1_train_steps.append(avg_train_steps)
+  phase1_entropies.append(avg_entropy)
+  phase1_q_losses.append(avg_q_loss)
+
   phase1_eval_returns.append(avg_eval_ret)
   phase1_eval_opp_returns.append(avg_eval_opp)
   phase1_eval_steps.append(avg_eval_steps)
 
   wandb.log({
+      "classic/train_return": avg_train_ret,
+      "classic/train_steps": avg_train_steps,
+      "classic/train_entropy": avg_entropy,
+      "classic/avg_q_loss": avg_q_loss,
       "classic/eval_return": avg_eval_ret,
       "classic/eval_opp_return": avg_eval_opp,
       "classic/eval_steps": avg_eval_steps,
@@ -165,7 +178,7 @@ for epoch in range(num_epochs):
   })
 
   torch.save(agent_classic.q.state_dict(), f"./models/{args.folder_id}/classic_qnet_ep{epoch+1}.pth")
-  print(f"Phase 1 | Epoch {epoch+1:02d} | Train Ret: {avg_train_ret:>4.1f} | Eval Ret: {avg_eval_ret:>4.2f} | Eval Opp: {avg_eval_opp:>4.2f}")
+  print(f"Phase 1 | Epoch {epoch+1:02d} | Train Ret: {avg_train_ret:>4.1f} | Eval Ret: {avg_eval_ret:>4.2f} | Eval Opp: {avg_eval_opp:>4.2f} | Entropy: {avg_entropy:.4f}")
 
 
 # ==========================================
@@ -187,48 +200,72 @@ dataset = torch.load(dataset_path, weights_only=False)
 agent_om.model.pretrain(dataset, epochs=args_parsed.pretrain_epochs, batch_size=args_parsed.batch_size)
 del dataset
 
-phase2_train_returns, phase2_eval_returns = [], []
-phase2_eval_opp_returns, phase2_eval_steps = [], []
+phase2_train_returns, phase2_train_steps, phase2_entropies, phase2_q_losses, phase2_model_losses = [], [], [], [], []
+phase2_eval_opp_returns, phase2_eval_steps, phase2_eval_returns = [], [], []
 
 for epoch in range(num_epochs):
-  epoch_returns = []
+  epoch_returns, epoch_entropies, epoch_steps, epoch_q_losses, epoch_model_losses = [], [], [], [], []
+  epoch_eval_kl_errors, epoch_eval_spatial_errors = [], []
   
   # Training
   pbar = tqdm(range(args_parsed.episodes_per_epoch), desc=f"Phase 2 Epoch {epoch+1:02d}/{num_epochs} [Train]", leave=False)
   for ep in pbar:
     stats = agent_om.run_episode(opponent_agent, max_steps=args.max_steps)
     epoch_returns.append(stats['return'])
-    wandb.log({"om/train_return": stats['return'], "om/train_steps": stats['steps']})
-      
-  avg_train_ret = sum(epoch_returns) / len(epoch_returns)
-  phase2_train_returns.append(avg_train_ret)
+    epoch_entropies.append(stats['avg_entropy'])
+    epoch_steps.append(stats['steps'])
+    epoch_q_losses.append(stats['avg_q_loss'])
+    epoch_model_losses.append(stats['avg_model_loss'])
 
   # Evaluation
   eval_rets, eval_opp_rets, eval_steps = [], [], []
-  for _ in range(100):
+  for _ in range(eval_episodes):
     test_stats = agent_om.run_test_episode(opponent_agent, max_steps=args.max_steps, render=False)
     eval_rets.append(test_stats['return'])
     eval_opp_rets.append(test_stats['opp_return'])
     eval_steps.append(test_stats['steps'])
+    epoch_eval_kl_errors.append(test_stats['avg_kl_error'])
+    epoch_eval_spatial_errors.append(test_stats['avg_spatial_error'])
 
-  avg_eval_ret = sum(eval_rets) / 100
-  avg_eval_opp = sum(eval_opp_rets) / 100
-  avg_eval_steps = sum(eval_steps) / 100
+  avg_eval_ret = sum(eval_rets) / eval_episodes
+  avg_eval_opp = sum(eval_opp_rets) / eval_episodes
+  avg_eval_steps = sum(eval_steps) / eval_episodes
+  avg_eval_kl_error = sum(epoch_eval_kl_errors) / len(epoch_eval_kl_errors)
+  avg_eval_spatial_error = sum(epoch_eval_spatial_errors) / len(epoch_eval_spatial_errors)
+
+  avg_train_ret = sum(epoch_returns) / len(epoch_returns)
+  avg_train_steps = sum(epoch_steps) / len(epoch_steps)
+  avg_entropy = sum(epoch_entropies) / len(epoch_entropies)
+  avg_q_loss = sum(epoch_q_losses) / len(epoch_q_losses)
+  avg_model_loss = sum(epoch_model_losses) / len(epoch_model_losses)
   
   phase2_eval_returns.append(avg_eval_ret)
   phase2_eval_opp_returns.append(avg_eval_opp)
   phase2_eval_steps.append(avg_eval_steps)
 
+  phase2_train_returns.append(avg_train_ret)
+  phase2_train_steps.append(avg_train_steps)
+  phase2_entropies.append(avg_entropy)
+  phase2_q_losses.append(avg_q_loss)
+  phase2_model_losses.append(avg_model_loss)
+
   wandb.log({
+      "om/train_return": avg_train_ret,
+      "om/train_steps": avg_train_steps,
+      "om/train_entropy": avg_entropy,
+      "om/avg_q_loss": avg_q_loss,
+      "om/avg_model_loss": avg_model_loss,
       "om/eval_return": avg_eval_ret,
       "om/eval_opp_return": avg_eval_opp,
       "om/eval_steps": avg_eval_steps,
+      "om/eval_kl_error": avg_eval_kl_error,
+      "om/eval_spatial_error": avg_eval_spatial_error,
       "epoch": epoch + 1
   })
 
   torch.save(agent_om.q.state_dict(), f"./models/{args.folder_id}/om_qnet_ep{epoch+1}.pth")
   torch.save(agent_om.model.inference_model.state_dict(), f"./models/{args.folder_id}/om_inference_ep{epoch+1}.pth")
-  print(f"Phase 2 | Epoch {epoch+1:02d} | Train Ret: {avg_train_ret:>4.1f} | Eval Ret: {avg_eval_ret:>4.2f} | Eval Opp: {avg_eval_opp:>4.2f}")
+  print(f"Phase 2 | Epoch {epoch+1:02d} | Train Ret: {avg_train_ret:>4.1f} | Eval Ret: {avg_eval_ret:>4.2f} | Eval Opp: {avg_eval_opp:>4.2f} | Entropy: {avg_entropy:.4f} | Q Loss: {avg_q_loss:.4f} | Model Loss: {avg_model_loss:.4f}")
 
 
 # ==========================================

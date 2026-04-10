@@ -340,9 +340,12 @@ class QLearningAgentClassic:
     opp_ret = 0.0
     ep_entropy = 0.0
 
+    q_losses = []
+    opp_losses = []
+
     for step in range(max_steps or 500):
       a, step_entropy = self.select_action(obs[0])
-      a_opponent, _ = opponent_agent.select_action(obs[1])
+      a_opponent, _, _ = opponent_agent.select_action(obs[1])
 
       actions = {0: a, 1: a_opponent}
       ep_entropy += step_entropy
@@ -377,23 +380,22 @@ class QLearningAgentClassic:
       self.global_step += 1
       Q_loss = self.update()
 
-      if Q_loss is not None and self.global_step % 100 == 0:
-        if wandb.run is not None:
-          wandb.log({
-              "train/q_loss": Q_loss,
-              "train/opp_q_loss": opp_loss_val,
-              "train/tau": self._tau(),
-              "step": self.global_step
-          })
+      q_losses.append(Q_loss)
+      opp_losses.append(opp_loss_val)
 
       if done:
         break
+
+    valid_q_losses = [l for l in q_losses if l is not None]
+    valid_opp_losses = [l for l in opp_losses if l is not None]
 
     return {
       "return": ep_ret,
       "steps": step + 1,
       "opp_return": opp_ret,
-      "avg_entropy": ep_entropy / (step + 1)
+      "avg_entropy": ep_entropy / (step + 1),
+      "avg_q_loss": np.mean(valid_q_losses) if valid_q_losses else 0.0,
+      "avg_opp_loss": np.mean(valid_opp_losses) if valid_opp_losses else 0.0
     }
 
   def run_test_episode(self, opponent_agent, max_steps: Optional[int] = None, render: bool = False) -> Dict[str, float]:
@@ -406,7 +408,7 @@ class QLearningAgentClassic:
 
     for step in range(max_steps or 500):
       a, step_entropy = self.select_action(obs[0], eval=True)
-      a_opponent, _ = opponent_agent.select_action(obs[1], eval=True)
+      a_opponent, _, _ = opponent_agent.select_action(obs[1], eval=True)
 
       actions = {0: a, 1: a_opponent}
 
