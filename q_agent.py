@@ -633,8 +633,9 @@ class QLearningAgent:
     ep_ret = 0.0
     opp_ret = 0.0
     ep_entropy = 0.0
-    kd_errors = []
-    spatial_errors = []
+    ep_kl_errors = []
+    ep_spatial_errors = []
+    ep_opp_rewards = []
 
     # History container for the Transformer
     history_len = self.args.max_history_length
@@ -675,8 +676,8 @@ class QLearningAgent:
 
       kl_error = self.model.heatmap_kl_divergence(g_map, opp_heatmap)
       spatial_error = self.model.top1_spatial_error(g_map, opp_heatmap)
-      kd_errors.append(kl_error)
-      spatial_errors.append(spatial_error)
+      ep_kl_errors.append(kl_error)
+      ep_spatial_errors.append(spatial_error)
 
       next_obs, reward, done, info = self.env.step(actions)
 
@@ -699,11 +700,32 @@ class QLearningAgent:
 
       ep_ret += reward[0]
       opp_ret += reward[1]
+      ep_opp_rewards.append(reward[1])
       obs = next_obs
       ep_entropy += step_entropy
 
       if done:
         break
+    
+    # Post-episode analysis to compute final metrics, for cases where opponent fails to get food
+    kd_errors = []
+    spatial_errors = []
+
+    if reward[1] == 0 and reward[0] > 0:
+      last_valid_step = len(ep_opp_rewards)
+      for t in reversed(range(len(ep_opp_rewards))):
+        if ep_opp_rewards[t] > 0:
+          last_valid_step = t + 1
+          break
+      
+      if last_valid_step > 0:
+        kd_errors.extend(ep_kl_errors[:last_valid_step])
+        spatial_errors.extend(ep_spatial_errors[:last_valid_step])
+            
+    else:
+      # Normal ending (both got food, or time ran out)
+      kd_errors.extend(ep_kl_errors)
+      spatial_errors.extend(ep_spatial_errors)
 
     return {
       "return": ep_ret,
