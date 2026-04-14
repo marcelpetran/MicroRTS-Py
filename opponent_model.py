@@ -129,7 +129,7 @@ class OpponentModel(nn.Module):
     Enhanced pretraining loop with logging and progress bars.
     """
     print(f"Starting pretraining for {epochs} epochs on {self.device}...")
-
+    step = 0
     for epoch in range(epochs):
       random.shuffle(dataset)
       epoch_losses = []
@@ -144,21 +144,16 @@ class OpponentModel(nn.Module):
         om_batch = {
           "states": torch.from_numpy(np.stack([b["state"] for b in batch_data], dtype=np.float32)).to(self.device, non_blocking=True),
           "history": self.collate_history([b["history"] for b in batch_data]),
-          "true_goal_map": torch.from_numpy(np.stack([b["true_goal_map"] for b in batch_data], dtype=np.float32)).to(self.device, non_blocking=True)
+          "true_goal_map": torch.from_numpy(np.stack([b["true_goal_map"] for b in batch_data], dtype=np.float32)).to(self.device, non_blocking=True),
+          "true_opp_heatmap": torch.from_numpy(np.stack([b["true_opp_heatmap"] for b in batch_data], dtype=np.float32)).to(self.device, non_blocking=True),
         }
 
-        loss = self.train_step(om_batch, cached_features=False)
+        loss = self.train_step(om_batch, cached_features=False, log_metrics=True, step=step)
         epoch_losses.append(loss)
+        step += 1
 
         # Update progress bar suffix with current loss
         pbar.set_postfix({"loss": f"{loss:.4f}"})
-
-        # Log individual steps if using wandb or TB
-        step = epoch * (len(dataset) // batch_size) + (i // batch_size)
-        wandb.log({
-          "train/batch_loss": loss,
-          "step": step
-        })
 
       avg_loss = sum(epoch_losses) / len(epoch_losses)
       print(f"  => Average Loss: {avg_loss:.6f}")
@@ -219,7 +214,7 @@ class OpponentModel(nn.Module):
 
     return soft_targets.squeeze(1)  # Return to (B, H, W)
 
-  def train_step(self, batch, cached_features=True):
+  def train_step(self, batch, cached_features=True, log_metrics=False, step=0):
     x = batch['states']
     history = batch['history']
     # (B, H, W) Ground Truth from Hindsight
@@ -237,5 +232,17 @@ class OpponentModel(nn.Module):
     self.optimizer.zero_grad()
     loss.backward()
     self.optimizer.step()
+
+    if log_metrics:
+      g_map = F.softmax(pred_logits.view(len(batch), -1),
+                        dim=-1).view_as(pred_logits) # (B, H, W)
+      kl_div = self.heatmap_kl_divergence(g_map, target_map)
+      spatial_error = self.top1_spatial_error(pred_logits, target_map)
+      wandb.log({
+        "train/batch_loss": loss_val,
+        "train/kl_divergence": kl_div,
+        "train/top1_spatial_error": spatial_error,
+        "step": step
+      })
 
     return loss_val

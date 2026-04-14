@@ -54,12 +54,12 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
 
       H, W, _ = obs[0].shape
 
-      for step in range(args.max_steps or 500):
+      for step in range(args.max_steps):
         current_history = {k: list(v) for k, v in history.items()}
 
         # Both agents act using pure heuristics
-        a_0, _ = agent0.select_action(obs[0])
-        a_1, _ = agent1.select_action(obs[1])
+        a_0, _, _ = agent0.select_action(obs[0])
+        a_1, _, true_opp_heatmap = agent1.select_action(obs[1])
         actions = {0: a_0, 1: a_1}
 
         next_obs, reward, done, info = env.step(actions)
@@ -73,6 +73,7 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
             "next_state": next_obs[0].copy(),
             "done": bool(done),
             "history": {k: [np.copy(item) if isinstance(item, np.ndarray) else item for item in v] for k, v in current_history.items()},
+            "true_opp_heatmap": true_opp_heatmap.copy(),
         }
         episode_transitions.append(transition)
 
@@ -84,22 +85,35 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
           break
 
       current_true_goal_pos = None
-
-      if len(episode_transitions) > 0:
-        final_t = episode_transitions[-1]
-
-        if final_t["opp_reward"] == 0:
-          opp_pos_arr = np.argwhere(final_t["state"][:, :, 3] == 1)
-
-          if len(opp_pos_arr) > 0:
-            current_true_goal_pos = tuple(opp_pos_arr[0])
+      next_map = np.zeros((H, W), dtype=np.float32)
+      last_distance = -1
 
       for t in reversed(episode_transitions):
+
+        # Did the opponent get a reward this step? (New goal achieved)
         if t["opp_reward"] > 0:
           opp_pos_indices = np.argwhere(t["next_state"][:, :, 3] == 1)
           if len(opp_pos_indices) > 0:
             current_true_goal_pos = tuple(opp_pos_indices[0])
+            last_distance = 0 # Reset distance tracker for the new goal
 
+        # Assign the goal to this step, BUT check if they changed their mind
+        if current_true_goal_pos is not None:
+          opp_pos_now = np.argwhere(t["state"][:, :, 3] == 1)
+          if len(opp_pos_now) > 0:
+            pos_now = tuple(opp_pos_now[0])
+            current_dist = abs(pos_now[0] - current_true_goal_pos[0]) + abs(pos_now[1] - current_true_goal_pos[1])
+            
+            WIGGLE = 1 # Increase for maps with heavy corridors/obstacles
+            
+            if last_distance != -1 and current_dist < last_distance - WIGGLE:
+              # They changed their mind! Stop labeling and wipe state.
+              current_true_goal_pos = None 
+              last_distance = -1 
+            else:
+              last_distance = current_dist
+
+        # Apply the label (or zeros if we cut it off)
         if current_true_goal_pos is not None:
           true_map = np.zeros((H, W), dtype=np.float32)
           true_map[current_true_goal_pos[0], current_true_goal_pos[1]] = 1.0
@@ -107,6 +121,9 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
         else:
           true_map = np.zeros((H, W), dtype=np.float32)
           t["true_goal_map"] = true_map
+
+        t["true_goal_map_next"] = next_map
+        next_map = true_map.copy()
 
         del t["opp_reward"]
         del t["reward"]
@@ -136,8 +153,8 @@ def run_episode(agent0, agent1, env, args, render=False):
     if render:
       env.render()
 
-    a_0, _ = agent0.select_action(obs[0])
-    a_1, _ = agent1.select_action(obs[1])
+    a_0, _, _ = agent0.select_action(obs[0])
+    a_1, _, _ = agent1.select_action(obs[1])
     actions = {0: a_0, 1: a_1}
 
     next_obs, reward, done, info = env.step(actions)

@@ -8,7 +8,7 @@ class OMGArgs:
   gamma: float = 0.985
   lr: float = 3e-4
   batch_size: int = 128
-  capacity: int = 5_000
+  capacity: int = 250_000
   sl_capacity: int = 500_000
   min_replay: int = 256
   train_every: int = 4
