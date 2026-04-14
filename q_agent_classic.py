@@ -1,10 +1,8 @@
-from math import e
-from typing import Deque, Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 import random
-from collections import deque
 from omg_args import OMGArgs
-
-from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv
+from buffers import ReplayBuffer
+from networks import QNetClassic
 
 import numpy as np
 import torch
@@ -13,98 +11,6 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 import matplotlib.pyplot as plt
 import wandb
-
-
-# ------ helpers ------
-def to_tensor(x, device):
-  if isinstance(x, torch.Tensor):
-    return x.to(device)
-  return torch.tensor(x, dtype=torch.float32, device=device)
-
-
-def flatten_state(obs: np.ndarray) -> torch.Tensor:
-  # obs: (H, W, F) -> (F, H, W) for Conv, or keep (H*W*F) for MLP.
-  # return torch.from_numpy(obs).float().permute(2, 0, 1)  # (F, H, W) for Conv
-  return torch.from_numpy(obs).float()
-
-
-class QNetClassic(nn.Module):
-  """
-  Simple MLP Q-network for Q(s, a)
-  state_shape: (H, W, F)
-  latent_dim: dimension of latent opponent representation
-  action_dim: number of discrete actions
-  Returns Q-values for all actions.
-  """
-
-  def __init__(self, args: OMGArgs):
-    super().__init__()
-    H, W, F_dim = args.state_shape
-    self.state_dim = H * W * F_dim
-    self.action_dim = args.action_dim
-    cnn_hidden = args.cnn_hidden
-    self.flat_dim = cnn_hidden * H * W
-    self.cnn = nn.Sequential(
-        nn.Conv2d(F_dim, 32, kernel_size=3, padding=1),
-        nn.ReLU(),
-        nn.Conv2d(32, cnn_hidden, kernel_size=3, padding=1),
-        nn.ReLU(),
-        nn.Conv2d(cnn_hidden, cnn_hidden, kernel_size=3, padding=1),
-        nn.ReLU(),
-        nn.Flatten()
-    )
-
-    # Heads (Dueling)
-    self.advantage_head = nn.Sequential(
-        nn.Linear(self.flat_dim, args.qnet_hidden),
-        nn.ReLU(),
-        nn.Linear(args.qnet_hidden, self.action_dim)
-    )
-
-    self.value_head = nn.Sequential(
-        nn.Linear(self.flat_dim, args.qnet_hidden),
-        nn.ReLU(),
-        nn.Linear(args.qnet_hidden, 1)
-    )
-    self.apply(self._init_weights)
-
-  def _init_weights(self, m):
-    if isinstance(m, nn.Linear):
-      nn.init.xavier_uniform_(m.weight)
-      if m.bias is not None:
-        nn.init.constant_(m.bias, 0.01)
-
-  def forward(self, batch: torch.Tensor) -> torch.Tensor:
-    # Batch shape: (B, H, W, F) -> Permute to (B, F, H, W) for Conv2d
-    s = batch.permute(0, 3, 1, 2)
-    features = self.cnn(s)
-
-    # Dueling Heads
-    adv = self.advantage_head(features)
-    val = self.value_head(features)
-    q_vals = val + adv - adv.mean(dim=1, keepdim=True)
-
-    return q_vals
-
-
-class ReplayBuffer:
-  """
-  Simple FIFO experience replay buffer for Q-learning.
-  """
-
-  def __init__(self, capacity: int):
-    self.capacity = capacity
-    self.buf: Deque[Dict] = deque(maxlen=capacity)
-
-  def push(self, item: Dict):
-    self.buf.append(item)
-
-  def sample(self, batch_size: int) -> List[Dict]:
-    return random.sample(self.buf, batch_size)
-
-  def __len__(self):
-    return len(self.buf)
-
 
 class QLearningAgentClassic:
   """
@@ -322,7 +228,7 @@ class QLearningAgentClassic:
 
   # ------------- rollout -------------
 
-  def run_episode(self, opponent_agent, max_steps: Optional[int] = None) -> Dict[str, float]:
+  def run_episode(self, opponent_agent, max_steps: int = 500) -> Dict[str, float]:
     """
     Gathers a trajectory and trains the Q-network.
     """
@@ -343,7 +249,7 @@ class QLearningAgentClassic:
     q_losses = []
     opp_losses = []
 
-    for step in range(max_steps or 500):
+    for step in range(max_steps):
       a, step_entropy = self.select_action(obs[0])
       a_opponent, _, _ = opponent_agent.select_action(obs[1])
 
@@ -398,7 +304,7 @@ class QLearningAgentClassic:
       "avg_opp_loss": np.mean(valid_opp_losses) if valid_opp_losses else 0.0
     }
 
-  def run_test_episode(self, opponent_agent, max_steps: Optional[int] = None, render: bool = False) -> Dict[str, float]:
+  def run_test_episode(self, opponent_agent, max_steps: int = 500, render: bool = False) -> Dict[str, float]:
     obs = self.env.reset()
     opponent_agent.reset()
     done = False
@@ -406,7 +312,7 @@ class QLearningAgentClassic:
     opp_ret = 0.0
     ep_entropy = 0.0
 
-    for step in range(max_steps or 500):
+    for step in range(max_steps):
       a, step_entropy = self.select_action(obs[0], eval=True)
       a_opponent, _, _ = opponent_agent.select_action(obs[1], eval=True)
 

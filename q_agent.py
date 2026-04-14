@@ -1,10 +1,10 @@
-from typing import Deque, Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 import random
-from collections import deque
 
 from omg_args import OMGArgs
 
-from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv
+from buffers import ReplayBuffer
+from networks import QNet
 
 import numpy as np
 import torch
@@ -14,109 +14,9 @@ from torch.distributions import Categorical
 import matplotlib.pyplot as plt
 import wandb
 
-
-class QNet(nn.Module):
-  """
-  Simple MLP Q-network for Q(s, g, a)
-  state_shape: (H, W, F)
-  latent_dim: dimension of latent opponent representation
-  action_dim: number of discrete actions
-  Returns Q-values for all actions.
-
-  """
-
-  def __init__(self, args: OMGArgs):
-    super().__init__()
-    H, W, F_dim = args.state_shape
-    self.state_dim = H * W * F_dim
-    self.action_dim = args.action_dim
-    cnn_hidden = args.cnn_hidden
-
-    self.flat_dim = cnn_hidden * H * W
-    input_channels = F_dim + 1
-
-    self.cnn = nn.Sequential(
-        nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
-        nn.ReLU(),
-        nn.Conv2d(32, cnn_hidden, kernel_size=3, padding=1),
-        nn.ReLU(),
-        nn.Conv2d(cnn_hidden, cnn_hidden, kernel_size=3, padding=1),
-        nn.ReLU(),
-        nn.Flatten()
-    )
-
-    # Heads (Dueling)
-    self.advantage_head = nn.Sequential(
-        nn.Linear(self.flat_dim, args.qnet_hidden),
-        nn.ReLU(),
-        nn.Linear(args.qnet_hidden, self.action_dim)
-    )
-
-    self.value_head = nn.Sequential(
-        nn.Linear(self.flat_dim, args.qnet_hidden),
-        nn.ReLU(),
-        nn.Linear(args.qnet_hidden, 1)
-    )
-
-    # Initialize weights to small values to prevent initial explosion
-    self.apply(self._init_weights)
-
-  def _init_weights(self, m):
-    if isinstance(m, nn.Linear):
-      nn.init.xavier_uniform_(m.weight)
-      if m.bias is not None:
-        nn.init.constant_(m.bias, 0.01)
-
-  def forward(self, batch: torch.Tensor, g_map: torch.Tensor) -> torch.Tensor:
-    """
-    Args:
-        batch: Game state (B, H, W, F)
-        g_map: Heatmap of inferred opponent subgoal (B, H, W)
-        return_aux: Whether to return auxiliary prediction (used during training)
-    """
-    # Batch shape: (B, H, W, F)
-    # Permute to (B, F, H, W) for PyTorch Conv2d
-    s = batch.permute(0, 3, 1, 2)
-    # (B, 1, H, W) - broadcast latent g across spatial dimensions
-    g = g_map.unsqueeze(1)
-
-    x = torch.cat([s, g], dim=1)
-    features = self.cnn(x)
-
-    # Dueling Heads
-    adv = self.advantage_head(features)
-    val = self.value_head(features)
-    q_vals = val + adv - adv.mean(dim=1, keepdim=True)
-
-    return q_vals
-
-
-class ReplayBuffer:
-  """
-  Simple FIFO experience replay buffer for Q-learning.
-  """
-
-  def __init__(self, capacity: int):
-    self.capacity = capacity
-    self.buf: Deque[Dict] = deque(maxlen=capacity)
-
-  def push(self, item: Dict):
-    self.buf.append(item)
-
-  def sample(self, batch_size: int) -> List[Dict]:
-    return random.sample(self.buf, batch_size)
-
-  def __len__(self):
-    return len(self.buf)
-
-
 class QLearningAgent:
   """
-  Q(s, g, a) OMG agent that:
-    • 
-
-  Expected OpponentModel API:
-    - 
+  Q-learning agent with Hindsight Experience Replay and subgoal inference for opponent modeling.
   """
 
   def __init__(self, env, opponent_model, args: OMGArgs = OMGArgs()):

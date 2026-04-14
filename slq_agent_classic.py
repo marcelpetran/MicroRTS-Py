@@ -1,7 +1,5 @@
-from math import e
-from typing import Deque, Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 import random
-from collections import deque
 import numpy as np
 import torch
 import torch.nn as nn
@@ -11,162 +9,8 @@ import matplotlib.pyplot as plt
 import wandb
 
 from omg_args import OMGArgs
-from simple_foraging_env import SimpleAgent, RandomAgent, SimpleForagingEnv
-
-# ==========================================
-# NETWORKS
-# ==========================================
-
-
-class QNetClassic(nn.Module):
-  """
-  RL Network: Q(s, a)
-  Learns the Best Response to the opponent's average strategy.
-  """
-
-  def __init__(self, args: OMGArgs):
-    super().__init__()
-    H, W, F_dim = args.state_shape
-    self.state_dim = H * W * F_dim
-    self.action_dim = args.action_dim
-    cnn_hidden = args.cnn_hidden
-    self.flat_dim = cnn_hidden * H * W
-
-    self.cnn = nn.Sequential(
-        nn.Conv2d(F_dim, 32, kernel_size=3, padding=1),
-        nn.ReLU(),
-        nn.Conv2d(32, cnn_hidden, kernel_size=3, padding=1),
-        nn.ReLU(),
-        nn.Conv2d(cnn_hidden, cnn_hidden, kernel_size=3, padding=1),
-        nn.ReLU(),
-        nn.Flatten()
-    )
-
-    # Heads (Dueling)
-    self.advantage_head = nn.Sequential(
-        nn.Linear(self.flat_dim, args.qnet_hidden),
-        nn.ReLU(),
-        nn.Linear(args.qnet_hidden, self.action_dim)
-    )
-
-    self.value_head = nn.Sequential(
-        nn.Linear(self.flat_dim, args.qnet_hidden),
-        nn.ReLU(),
-        nn.Linear(args.qnet_hidden, 1)
-    )
-    self.apply(self._init_weights)
-
-  def _init_weights(self, m):
-    if isinstance(m, nn.Linear):
-      nn.init.xavier_uniform_(m.weight)
-      if m.bias is not None:
-        nn.init.constant_(m.bias, 0.01)
-
-  def forward(self, batch: torch.Tensor) -> torch.Tensor:
-    # Batch shape: (B, H, W, F) -> Permute to (B, F, H, W) for Conv2d
-    s = batch.permute(0, 3, 1, 2)
-    features = self.cnn(s)
-
-    # Dueling Heads
-    adv = self.advantage_head(features)
-    val = self.value_head(features)
-    q_vals = val + adv - adv.mean(dim=1, keepdim=True)
-
-    return q_vals
-
-
-class SLnet(nn.Module):
-  """
-  SL Network: Pi(a | s)
-  Learns the agent's own average historical strategy.
-  """
-
-  def __init__(self, args: OMGArgs):
-    super().__init__()
-    H, W, F_dim = args.state_shape
-    self.state_dim = H * W * F_dim
-    self.action_dim = args.action_dim
-    cnn_hidden = args.cnn_hidden
-    self.flat_dim = cnn_hidden * H * W
-
-    self.cnn = nn.Sequential(
-        nn.Conv2d(F_dim, 32, kernel_size=3, padding=1),
-        nn.ReLU(),
-        nn.Conv2d(32, cnn_hidden, kernel_size=3, padding=1),
-        nn.ReLU(),
-        nn.Conv2d(cnn_hidden, cnn_hidden, kernel_size=3, padding=1),
-        nn.ReLU(),
-        nn.Flatten()
-    )
-
-    self.value_head = nn.Sequential(
-        nn.Linear(self.flat_dim, args.qnet_hidden),
-        nn.ReLU(),
-        nn.Linear(args.qnet_hidden, self.action_dim)
-    )
-    self.apply(self._init_weights)
-
-  def _init_weights(self, m):
-    if isinstance(m, nn.Linear):
-      nn.init.xavier_uniform_(m.weight)
-      if m.bias is not None:
-        nn.init.constant_(m.bias, 0.01)
-
-  def forward(self, batch: torch.Tensor) -> torch.Tensor:
-    s = batch.permute(0, 3, 1, 2)
-    features = self.cnn(s)
-    logits = self.value_head(features)
-    return logits
-
-# ==========================================
-# BUFFERS
-# ==========================================
-
-
-class ReplayBuffer:
-  """Standard FIFO buffer for Q-learning (requires recent data)."""
-
-  def __init__(self, capacity: int):
-    self.capacity = capacity
-    self.buf: Deque[Dict] = deque(maxlen=capacity)
-
-  def push(self, item: Dict):
-    self.buf.append(item)
-
-  def sample(self, batch_size: int) -> List[Dict]:
-    return random.sample(self.buf, batch_size)
-
-  def __len__(self):
-    return len(self.buf)
-
-
-class ReservoirBuffer:
-  """Reservoir Sampler for SL (preserves uniform distribution of ALL history)."""
-
-  def __init__(self, capacity: int):
-    self.capacity = capacity
-    self.buf = []
-    self.n_seen = 0
-
-  def push(self, item: Dict):
-    if len(self.buf) < self.capacity:
-      self.buf.append(item)
-    else:
-      j = random.randint(0, self.n_seen)
-      if j < self.capacity:
-        self.buf[j] = item
-    self.n_seen += 1
-
-  def sample(self, batch_size: int) -> List[Dict]:
-    return random.sample(self.buf, batch_size)
-
-  def __len__(self):
-    return len(self.buf)
-
-# ==========================================
-# FSP CLASSIC AGENT
-# ==========================================
-
+from buffers import ReplayBuffer, ReservoirBuffer
+from networks import QNetClassic, SLnet
 
 class FSPAgentClassic:
   """
@@ -339,7 +183,7 @@ class FSPAgentClassic:
 
   # ------------- Data Generation (Rollout) -------------
 
-  def run_fsp_episode(self, opponent_agent, eta: float, max_steps: Optional[int] = None) -> Dict[str, float]:
+  def run_fsp_episode(self, opponent_agent, eta: float, max_steps: int = 500) -> Dict[str, float]:
     """
     Executes a rollout mixing RL and SL policies using eta. 
     Stores specific transitions in RL and SL buffers.
@@ -354,7 +198,7 @@ class FSPAgentClassic:
     done = False
     ep_ret, opp_ret, rl_ep_entropy, sl_ep_entropy = 0.0, 0.0, 0.0, 0.0
 
-    for step in range(max_steps or 500):
+    for step in range(max_steps):
       # 1. Compute both RL (Best Response) and SL (Average) actions
       rl_a, rl_entropy = self.select_rl_action(obs[0])
       sl_a, sl_entropy = self.select_sl_action(obs[0])
@@ -421,14 +265,14 @@ class FSPAgentClassic:
         "avg_sl_entropy": sl_ep_entropy / (step + 1)
     }
 
-  def run_test_episode(self, opponent_agent, use_sl: bool = True, max_steps: Optional[int] = None) -> Dict[str, float]:
+  def run_test_episode(self, opponent_agent, use_sl: bool = True, max_steps: int = 500) -> Dict[str, float]:
     """Evaluation rollout. Defaults to Average Strategy (SL) as per FSP standards."""
     obs = self.env.reset()
     opponent_agent.reset()
     done = False
     ep_ret, opp_ret, ep_entropy = 0.0, 0.0, 0.0
 
-    for step in range(max_steps or 500):
+    for step in range(max_steps):
       if use_sl:
         a, step_entropy = self.select_sl_action(obs[0], eval=True)
       else:
