@@ -339,9 +339,9 @@ class QLearningAgent:
       for param, target_param in zip(self.q.parameters(), self.q_tgt.parameters()):
         target_param.lerp_(param, self.args.tau_soft)
 
-    model_loss = self.model.train_step(om_batch)
+    # model_loss = self.model.train_step(om_batch) # test without traiinig the model
 
-    return loss_val, model_loss
+    return loss_val, 0.0#model_loss
 
   def load_historical_policy(self, state_dict: dict, om_state_dict: dict = None):
     """Loads frozen historical weights for Fictitious Play."""
