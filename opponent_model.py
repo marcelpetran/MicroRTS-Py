@@ -234,7 +234,7 @@ class OpponentModel(nn.Module):
     self.optimizer.step()
 
     if log_metrics:
-      g_map = F.softmax(pred_logits.view(len(batch), -1),
+      g_map = F.softmax(pred_logits.view(pred_logits.shape[0], -1),
                         dim=-1).view_as(pred_logits) # (B, H, W)
       kl_div = self.heatmap_kl_divergence(g_map, target_map)
       spatial_error = self.top1_spatial_error(pred_logits, target_map)
