@@ -339,9 +339,9 @@ class QLearningAgent:
       for param, target_param in zip(self.q.parameters(), self.q_tgt.parameters()):
         target_param.lerp_(param, self.args.tau_soft)
 
-    # model_loss = self.model.train_step(om_batch) # test without traiinig the model
+    model_loss = self.model.train_step(om_batch)
 
-    return loss_val, 0.0#model_loss
+    return loss_val, model_loss
 
   def load_historical_policy(self, state_dict: dict, om_state_dict: dict = None):
     """Loads frozen historical weights for Fictitious Play."""
@@ -570,9 +570,8 @@ class QLearningAgent:
       if render:
         self.heatmap_q_values(
           g_map, f"./diagrams/{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
-        if not self.args.oracle:
-          self.heatmap_subgoal(
-            g_map, f"./diagrams/{self.args.folder_id}/gmap_step{self.global_step + step}.png")
+        self.heatmap_subgoal(
+          g_map, f"./diagrams/{self.args.folder_id}/gmap_step{self.global_step + step}.png")
         self.env.render()
 
       if g_map.dim() == 2:
