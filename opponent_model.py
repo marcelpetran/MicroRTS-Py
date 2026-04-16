@@ -239,10 +239,11 @@ class OpponentModel(nn.Module):
     self.optimizer.step()
 
     if log_metrics:
+      opp_heatmap = torch.from_numpy(batch['true_opp_heatmap']).to(self.device)
       g_map = F.softmax(pred_logits.view(pred_logits.shape[0], -1),
                         dim=-1).view_as(pred_logits) # (B, H, W)
-      kl_div = self.heatmap_kl_divergence(g_map, target_map)
-      spatial_error = self.top1_spatial_error(pred_logits, target_map)
+      kl_div = self.heatmap_kl_divergence(g_map, opp_heatmap)
+      spatial_error = self.top1_spatial_error(pred_logits, opp_heatmap)
       wandb.log({
         "train/batch_loss": loss_val,
         "train/kl_divergence": kl_div,
