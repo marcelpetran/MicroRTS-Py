@@ -181,6 +181,10 @@ class OpponentModel(nn.Module):
   def _generate_soft_targets(self, target_map: torch.Tensor, sigma: float = 1.0):
     """
     Applies a Gaussian filter directly on the GPU using PyTorch Conv2d.
+    This makes model learn faster and maybe even avoids getting stuck in local minima 
+    as it provides a smoother gradient signal compared to a hard one-hot target. 
+    The sigma parameter controls how much smoothing is applied, 
+    with higher values creating a wider "hill" around the true target location.
     target_map: (B, H, W)
     """
     kernel_size = int(2 * math.ceil(2 * sigma) + 1)
@@ -222,6 +226,7 @@ class OpponentModel(nn.Module):
     self.inference_model.train()
     pred_logits = self.forward(x, history, cached_features)  # (B, H, W)
 
+    # Generate soft targets with Gaussian smoothing
     soft_targets = self._generate_soft_targets(target_map, sigma=1.0)
 
     loss = F.binary_cross_entropy_with_logits(
