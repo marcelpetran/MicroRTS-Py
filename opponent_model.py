@@ -1,6 +1,7 @@
 from typing import Dict, Tuple, List
 import random
 import math
+from scipy import spatial
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -133,6 +134,8 @@ class OpponentModel(nn.Module):
     for epoch in range(epochs):
       random.shuffle(dataset)
       epoch_losses = []
+      epoch_kl_divs = []
+      epoch_spatial_errors = []
 
       pbar = tqdm(range(0, len(dataset), batch_size),
                   desc=f"Epoch {epoch + 1}/{epochs}")
@@ -148,19 +151,25 @@ class OpponentModel(nn.Module):
           "true_opp_heatmap": torch.from_numpy(np.stack([b["true_opp_heatmap"] for b in batch_data], dtype=np.float32)).to(self.device, non_blocking=True),
         }
 
-        loss = self.train_step(om_batch, cached_features=False, log_metrics=True, step=step)
+        loss, kl_error, spatial_error = self.pretrain_step(om_batch, cached_features=False, log_metrics=True, step=step, epoch=epoch)
         epoch_losses.append(loss)
+        epoch_kl_divs.append(kl_error)
+        epoch_spatial_errors.append(spatial_error)
         step += 1
 
         # Update progress bar suffix with current loss
         pbar.set_postfix({"loss": f"{loss:.4f}"})
 
       avg_loss = sum(epoch_losses) / len(epoch_losses)
+      avg_kl_div = sum(epoch_kl_divs) / len(epoch_kl_divs)
+      avg_spatial_error = sum(epoch_spatial_errors) / len(epoch_spatial_errors)
       print(f"  => Average Loss: {avg_loss:.6f}")
 
       # Log epoch-level metrics
       wandb.log({
-        "train/epoch_loss": avg_loss,
+        "pretrain/epoch_loss": avg_loss,
+        "pretrain/epoch_kl_divergence": avg_kl_div,
+        "pretrain/epoch_top1_spatial_error": avg_spatial_error,
         "epoch": epoch
       })
 
@@ -217,8 +226,8 @@ class OpponentModel(nn.Module):
     soft_targets = soft_targets / max_vals.view(batch_size, 1, 1, 1)
 
     return soft_targets.squeeze(1)  # Return to (B, H, W)
-
-  def train_step(self, batch, cached_features=True, log_metrics=False, step=0):
+  
+  def pretrain_step(self, batch, cached_features=True, step=0, epoch=0):
     x = batch['states']
     history = batch['history']
     # (B, H, W) Ground Truth from Hindsight
@@ -238,17 +247,40 @@ class OpponentModel(nn.Module):
     loss.backward()
     self.optimizer.step()
 
-    if log_metrics:
-      opp_heatmap = torch.from_numpy(batch['true_opp_heatmap']).to(self.device)
-      g_map = F.softmax(pred_logits.view(pred_logits.shape[0], -1),
-                        dim=-1).view_as(pred_logits) # (B, H, W)
-      kl_div = self.heatmap_kl_divergence(g_map, opp_heatmap)
-      spatial_error = self.top1_spatial_error(pred_logits, opp_heatmap)
-      wandb.log({
-        "train/batch_loss": loss_val,
-        "train/kl_divergence": kl_div,
-        "train/top1_spatial_error": spatial_error,
-        "step": step
-      })
+    
+    opp_heatmap = batch['true_opp_heatmap'].to(self.device)
+    g_map = F.softmax(pred_logits.view(pred_logits.shape[0], -1),
+                      dim=-1).view_as(pred_logits) # (B, H, W)
+    kl_div = self.heatmap_kl_divergence(g_map, opp_heatmap)
+    spatial_error = self.top1_spatial_error(pred_logits, opp_heatmap)
+    wandb.log({
+      "train/batch_loss": loss_val,
+      "train/kl_divergence": kl_div,
+      "train/top1_spatial_error": spatial_error,
+      "step": step,
+      "epoch": epoch
+    })
+
+    return loss_val, kl_div, spatial_error
+
+  def train_step(self, batch, cached_features=True):
+    x = batch['states']
+    history = batch['history']
+    # (B, H, W) Ground Truth from Hindsight
+    target_map = batch['true_goal_map']
+    self.inference_model.train()
+    pred_logits = self.forward(x, history, cached_features)  # (B, H, W)
+
+    # Generate soft targets with Gaussian smoothing
+    soft_targets = self._generate_soft_targets(target_map, sigma=1.0)
+
+    loss = F.binary_cross_entropy_with_logits(
+        pred_logits.view(pred_logits.shape[0], -1),
+        soft_targets.view(soft_targets.shape[0], -1)
+    )
+    loss_val = loss.item()
+    self.optimizer.zero_grad()
+    loss.backward()
+    self.optimizer.step()
 
     return loss_val
