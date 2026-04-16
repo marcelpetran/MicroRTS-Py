@@ -97,7 +97,7 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
             current_true_goal_pos = tuple(opp_pos_indices[0])
             last_distance = 0 # Reset distance tracker for the new goal
 
-        # Assign the goal to this step, BUT check if they changed their mind
+        # Assign the goal to this step, but check if they changed their mind
         if current_true_goal_pos is not None:
           opp_pos_now = np.argwhere(t["state"][:, :, 3] == 1)
           if len(opp_pos_now) > 0:

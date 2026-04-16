@@ -6,7 +6,9 @@ import math
 import numpy as np
 from omg_args import OMGArgs
 from typing import Dict, List, Optional
-
+import torch
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
 
 class PositionalEncoding(nn.Module):
   """
@@ -86,6 +88,27 @@ class SpatialOpponentModel(nn.Module):
         nn.Linear(128, H * W)
     )
 
+  def visualize_action_embeddings(self):
+    # Extract the weights from the embedding layer: shape (4, d_model)
+    action_weights = self.action_embedder.weight.detach().cpu().numpy()
+    
+    # Reduce to 2 dimensions using PCA
+    pca = PCA(n_components=2)
+    actions_2d = pca.fit_transform(action_weights)
+    
+    action_labels = ['Up', 'Down', 'Left', 'Right']
+    
+    plt.figure(figsize=(6, 6))
+    plt.scatter(actions_2d[:, 0], actions_2d[:, 1], color='red', s=100)
+    
+    for i, label in enumerate(action_labels):
+        plt.annotate(label, (actions_2d[i, 0], actions_2d[i, 1]), 
+                    xytext=(5, 5), textcoords='offset points', fontsize=12)
+        
+    plt.title("PCA of Action Embeddings")
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.show()
+
   def get_features(self, x: torch.Tensor) -> torch.Tensor:
     """Helper function to extract features from a single state tensor (B, H, W, F)."""
     x_flat = x.permute(0, 3, 1, 2)
@@ -110,8 +133,8 @@ class SpatialOpponentModel(nn.Module):
       hist_feat = history['state_features']  # (B, T, d_model)
     else:
       hist_states = history['states']  # (B, T, H, W, F)
-      hist_flat = hist_states.reshape(B * T, H, W, F_dim).permute(0, 3, 1, 2)
-      hist_feat = self.feature_extractor(hist_flat).reshape(B, T, -1)
+      hist_flat = hist_states.reshape(B * T, H, W, F_dim)
+      hist_feat = self.get_features(hist_flat).reshape(B, T, -1)
 
     hist_action_feat = self.action_embedder(hist_actions)  # (B, T, d_model)
 
