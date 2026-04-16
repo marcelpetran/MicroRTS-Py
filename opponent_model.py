@@ -222,11 +222,11 @@ class OpponentModel(nn.Module):
     self.inference_model.train()
     pred_logits = self.forward(x, history, cached_features)  # (B, H, W)
 
-    # soft_targets = self._generate_soft_targets(target_map, sigma=1.0)
+    soft_targets = self._generate_soft_targets(target_map, sigma=1.0)
 
     loss = F.binary_cross_entropy_with_logits(
         pred_logits.view(pred_logits.shape[0], -1),
-        target_map.view(target_map.shape[0], -1)
+        soft_targets.view(soft_targets.shape[0], -1)
     )
     loss_val = loss.item()
     self.optimizer.zero_grad()
