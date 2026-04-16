@@ -151,7 +151,7 @@ class OpponentModel(nn.Module):
           "true_opp_heatmap": torch.from_numpy(np.stack([b["true_opp_heatmap"] for b in batch_data], dtype=np.float32)).to(self.device, non_blocking=True),
         }
 
-        loss, kl_error, spatial_error = self.pretrain_step(om_batch, cached_features=False, log_metrics=True, step=step, epoch=epoch)
+        loss, kl_error, spatial_error = self.pretrain_step(om_batch, step=step, epoch=epoch)
         epoch_losses.append(loss)
         epoch_kl_divs.append(kl_error)
         epoch_spatial_errors.append(spatial_error)
@@ -227,13 +227,13 @@ class OpponentModel(nn.Module):
 
     return soft_targets.squeeze(1)  # Return to (B, H, W)
   
-  def pretrain_step(self, batch, cached_features=True, step=0, epoch=0):
+  def pretrain_step(self, batch, step=0, epoch=0):
     x = batch['states']
     history = batch['history']
     # (B, H, W) Ground Truth from Hindsight
     target_map = batch['true_goal_map']
     self.inference_model.train()
-    pred_logits = self.forward(x, history, cached_features)  # (B, H, W)
+    pred_logits = self.forward(x, history, cached_features=False)  # (B, H, W)
 
     # Generate soft targets with Gaussian smoothing
     soft_targets = self._generate_soft_targets(target_map, sigma=1.0)
