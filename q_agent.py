@@ -268,7 +268,7 @@ class QLearningAgent:
 
       # For next state
       next_feats = torch.from_numpy(
-          np.array([b["next_state_feature"] for b in batch], dtype=np.float32)
+          np.array([b["state_feature"] for b in batch], dtype=np.float32)
       ).to(self.device)
       hist_feats_next = torch.roll(hist_feats, shifts=-1, dims=1)
       hist_feats_next[:, -1, :] = next_feats
@@ -352,11 +352,11 @@ class QLearningAgent:
     
     for i, t in enumerate(episode_transitions):
       # The current intent is just the opponent's heatmap for this exact step
-      t["true_goal_map"] = t["true_opp_heatmap"]
+      t["true_goal_map"] = t["true_opp_heatmap"].copy()
       
       # Peek ahead one step for the next_map
       if i + 1 < num_transitions:
-        t["true_goal_map_next"] = episode_transitions[i + 1]["true_opp_heatmap"]
+        t["true_goal_map_next"] = episode_transitions[i + 1]["true_opp_heatmap"].copy()
       else:
         t["true_goal_map_next"] = np.zeros((H, W), dtype=np.float32)
 
@@ -493,7 +493,7 @@ class QLearningAgent:
       with torch.no_grad():
         new_feat = self.model.inference_model.get_features(
           state_tensor)  # (1, d_model)
-      transition["next_state_feature"] = new_feat.squeeze(0).cpu().numpy()
+      transition["state_feature"] = new_feat.squeeze(0).cpu().numpy()
 
       rolling_feats = torch.roll(rolling_feats, shifts=-1, dims=1)
       rolling_actions = torch.roll(rolling_actions, shifts=-1, dims=1)
@@ -591,7 +591,7 @@ class QLearningAgent:
 
       kl_error = self.model.heatmap_kl_divergence(g_map, opp_heatmap)
       # spatial_error = self.model.top1_spatial_error(g_map, opp_heatmap)
-      spatial_error = self.expected_spatial_error(g_map, opp_heatmap)
+      spatial_error = self.model.expected_spatial_error(g_map, opp_heatmap)
       ep_kl_errors.append(kl_error)
       ep_spatial_errors.append(spatial_error)
 

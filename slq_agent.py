@@ -150,7 +150,7 @@ class FSPAgentOM:
 
       # For next state
       next_feats = torch.from_numpy(
-          np.array([b["next_state_feature"] for b in batch], dtype=np.float32)
+          np.array([b["state_feature"] for b in batch], dtype=np.float32)
       ).to(self.device)
       hist_feats_next = torch.roll(hist_feats, shifts=-1, dims=1)
       hist_feats_next[:, -1, :] = next_feats
@@ -388,7 +388,7 @@ class FSPAgentOM:
         new_feat = self.model.inference_model.get_features(state_tensor)
         opp_new_feat = self.model.inference_model.get_features(
           opp_state_tensor)
-      transition["next_state_feature"] = new_feat.squeeze(0).cpu().numpy()
+      transition["state_feature"] = new_feat.squeeze(0).cpu().numpy()
 
       rolling_feats = torch.roll(rolling_feats, shifts=-1, dims=1)
       rolling_actions = torch.roll(rolling_actions, shifts=-1, dims=1)
