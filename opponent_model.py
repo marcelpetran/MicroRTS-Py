@@ -86,9 +86,10 @@ class OpponentModel(nn.Module):
     B = g_map.shape[0]
     g_map_flat = g_map.view(B, -1)  # (B, H*W)
     true_goal_flat = true_goal_map.view(B, -1)  # (B, H*W)
+    log_g_map = torch.log(g_map_flat + 1e-8)  # Add small value to prevent log(0)
 
     # Compute KL Divergence
-    kl_div = F.kl_div(g_map_flat, true_goal_flat, reduction='batchmean')
+    kl_div = F.kl_div(log_g_map, true_goal_flat, reduction='batchmean')
 
     return kl_div.item()
 
