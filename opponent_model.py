@@ -15,7 +15,7 @@ class OpponentModel(nn.Module):
   def __init__(self, model, args: OMGArgs = OMGArgs()):
     super(OpponentModel, self).__init__()
     self.inference_model = model
-    self.inference_model = torch.compile(self.inference_model)
+    # self.inference_model = torch.compile(self.inference_model)
     self.optimizer = torch.optim.Adam(
       self.inference_model.parameters(), lr=args.lr)
     self.device = args.device
