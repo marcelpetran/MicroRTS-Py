@@ -135,8 +135,8 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
         if done:
           break
 
-      _label_true_intent(episode_transitions, H, W)
-      # _apply_hindsight_relabeling(episode_transitions, H, W)
+      _apply_hindsight_relabeling(episode_transitions, H, W)
+      # _label_true_intent(episode_transitions, H, W)
 
       master_dataset.extend(episode_transitions)
 
