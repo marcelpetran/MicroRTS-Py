@@ -8,6 +8,57 @@ from maps import *
 from omg_args import OMGArgs
 
 
+def _label_true_intent(episode_transitions: list, H: int, W: int):
+  """
+  Applies True Intent labeling (Knowledge Distillation) using the opponent's actual internal heatmap.
+  Modifies the transitions in-place to include 'true_goal_map' and 'true_goal_map_next'.
+  """
+  num_transitions = len(episode_transitions)
+  
+  for i, t in enumerate(episode_transitions):
+    t["true_goal_map"] = t["true_opp_heatmap"]
+    
+    if i + 1 < num_transitions:
+      t["true_goal_map_next"] = episode_transitions[i + 1]["true_opp_heatmap"]
+    else:
+      t["true_goal_map_next"] = np.zeros((H, W), dtype=np.float32)
+
+    if "opp_reward" in t:
+        del t["opp_reward"]
+
+def _apply_hindsight_relabeling(episode_transitions: list, H: int, W: int):
+  """
+  Applies Hindsight Experience Replay (HER) labeling to a trajectory.
+  Modifies the transitions in-place to include 'true_goal_map'.
+  """
+  current_true_goal_pos = None
+  next_map = np.zeros((H, W), dtype=np.float32)
+
+  if len(episode_transitions) > 0:
+    final_t = episode_transitions[-1]
+    
+    if final_t["opp_reward"] == 0:
+      opp_pos_arr = np.argwhere(final_t["state"][:, :, 3] == 1)
+      if len(opp_pos_arr) > 0:
+        current_true_goal_pos = tuple(opp_pos_arr[0])
+
+  for t in reversed(episode_transitions):
+    if t["opp_reward"] > 0:
+      opp_pos_indices = np.argwhere(t["next_state"][:, :, 3] == 1)
+      if len(opp_pos_indices) > 0:
+        current_true_goal_pos = tuple(opp_pos_indices[0])
+
+    true_map = np.zeros((H, W), dtype=np.float32)
+    if current_true_goal_pos is not None:
+      true_map[current_true_goal_pos[0], current_true_goal_pos[1]] = 1.0
+    
+    t["true_goal_map"] = true_map
+    t["true_goal_map_next"] = next_map
+    next_map = true_map.copy()
+    
+    del t["opp_reward"]
+
+
 def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", map_layout=MAP_1):
   args = OMGArgs()
   env = SimpleForagingEnv(max_steps=args.max_steps, map_layout=map_layout)
@@ -84,52 +135,10 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
         if done:
           break
 
-      current_true_goal_pos = None
-      next_map = np.zeros((H, W), dtype=np.float32)
-      last_distance = -1
+      _label_true_intent(episode_transitions, H, W)
+      # _apply_hindsight_relabeling(episode_transitions, H, W)
 
-      for t in reversed(episode_transitions):
-
-        # Did the opponent get a reward this step? (New goal achieved)
-        if t["opp_reward"] > 0:
-          opp_pos_indices = np.argwhere(t["next_state"][:, :, 3] == 1)
-          if len(opp_pos_indices) > 0:
-            current_true_goal_pos = tuple(opp_pos_indices[0])
-            last_distance = 0 # Reset distance tracker for the new goal
-
-        # Assign the goal to this step, but check if they changed their mind
-        if current_true_goal_pos is not None:
-          opp_pos_now = np.argwhere(t["state"][:, :, 3] == 1)
-          if len(opp_pos_now) > 0:
-            pos_now = tuple(opp_pos_now[0])
-            current_dist = abs(pos_now[0] - current_true_goal_pos[0]) + abs(pos_now[1] - current_true_goal_pos[1])
-            
-            WIGGLE = 1 # Increase for maps with heavy corridors/obstacles
-            
-            if last_distance != -1 and current_dist < last_distance - WIGGLE:
-              # They changed their mind! Stop labeling and wipe state.
-              current_true_goal_pos = None 
-              last_distance = -1 
-            else:
-              last_distance = current_dist
-
-        # Apply the label (or zeros if we cut it off)
-        if current_true_goal_pos is not None:
-          true_map = np.zeros((H, W), dtype=np.float32)
-          true_map[current_true_goal_pos[0], current_true_goal_pos[1]] = 1.0
-          t["true_goal_map"] = true_map
-        else:
-          true_map = np.zeros((H, W), dtype=np.float32)
-          t["true_goal_map"] = true_map
-
-        t["true_goal_map_next"] = next_map
-        next_map = true_map.copy()
-
-        del t["opp_reward"]
-        del t["reward"]
-        del t["next_state"]
-
-        master_dataset.append(t)
+      master_dataset.extend(episode_transitions)
 
       if (ep + 1) % 100 == 0:
         print(

@@ -238,6 +238,43 @@ class FSPAgentOM:
 
     return loss.item()
 
+  def _apply_hindsight_relabeling(self, episode_transitions: list, H: int, W: int):
+    """
+    Applies Hindsight Experience Replay (HER) labeling to a trajectory.
+    Modifies the transitions in-place to include 'true_goal_map'.
+    """
+    current_true_goal_pos = None
+    next_map = np.zeros((H, W), dtype=np.float32)
+
+    # 1. Hindsight labeling for truncated episodes
+    if len(episode_transitions) > 0:
+      final_t = episode_transitions[-1]
+      
+      if final_t["opp_reward"] == 0:
+        opp_pos_arr = np.argwhere(final_t["state"][:, :, 3] == 1)
+        if len(opp_pos_arr) > 0:
+          current_true_goal_pos = tuple(opp_pos_arr[0])
+
+    # 2. Walk backward through the episode to label goals
+    for t in reversed(episode_transitions):
+
+      # Did the opponent get a reward this step? (New true goal achieved)
+      if t["opp_reward"] > 0:
+        opp_pos_indices = np.argwhere(t["next_state"][:, :, 3] == 1)
+        if len(opp_pos_indices) > 0:
+          current_true_goal_pos = tuple(opp_pos_indices[0])
+
+      # Assign the goal to this step
+      true_map = np.zeros((H, W), dtype=np.float32)
+      if current_true_goal_pos is not None:
+        true_map[current_true_goal_pos[0], current_true_goal_pos[1]] = 1.0
+      
+      t["true_goal_map"] = true_map
+      t["true_goal_map_next"] = next_map
+      next_map = true_map.copy()
+      
+      del t["opp_reward"]
+
   # ------------- Data Generation (Rollout) -------------
 
   def run_fsp_episode(self, opponent_agent, eta: float, max_steps: int = 500) -> Dict[str, float]:
@@ -381,34 +418,7 @@ class FSPAgentOM:
       if done:
         break
 
-    # Hindsight Relabeling for RL Buffer
-    current_true_goal_pos = None
-    next_map = np.zeros((H, W), dtype=np.float32)
-
-    if len(episode_transitions) > 0:
-      final_t = episode_transitions[-1]
-      if final_t["opp_reward"] == 0:
-        opp_pos_arr = np.argwhere(final_t["state"][:, :, 3] == 1)
-        if len(opp_pos_arr) > 0:
-          current_true_goal_pos = tuple(opp_pos_arr[0])
-
-    for t in reversed(episode_transitions):
-      if t["opp_reward"] > 0:
-        opp_pos_indices = np.argwhere(t["next_state"][:, :, 3] == 1)
-        if len(opp_pos_indices) > 0:
-          current_true_goal_pos = tuple(opp_pos_indices[0])
-
-      if current_true_goal_pos is not None:
-        true_map = np.zeros((H, W), dtype=np.float32)
-        true_map[current_true_goal_pos[0], current_true_goal_pos[1]] = 1.0
-        t["true_goal_map"] = true_map
-      else:
-        true_map = np.zeros((H, W), dtype=np.float32)
-        t["true_goal_map"] = true_map
-
-      t["true_goal_map_next"] = next_map
-      next_map = true_map.copy()
-      del t["opp_reward"]
+    self._apply_hindsight_relabeling(episode_transitions, H, W)
 
     # Push to RL buffer
     for t in episode_transitions:

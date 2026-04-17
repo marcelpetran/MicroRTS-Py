@@ -342,15 +342,63 @@ class QLearningAgent:
     model_loss = self.model.train_step(om_batch)
 
     return loss_val, model_loss
+  
+  def _label_true_intent(self, episode_transitions: list, H: int, W: int):
+    """
+    Applies True Intent labeling (Knowledge Distillation) using the opponent's actual internal heatmap.
+    Modifies the transitions in-place to include 'true_goal_map' and 'true_goal_map_next'.
+    """
+    num_transitions = len(episode_transitions)
+    
+    for i, t in enumerate(episode_transitions):
+      # The current intent is just the opponent's heatmap for this exact step
+      t["true_goal_map"] = t["true_opp_heatmap"]
+      
+      # Peek ahead one step for the next_map
+      if i + 1 < num_transitions:
+        t["true_goal_map_next"] = episode_transitions[i + 1]["true_opp_heatmap"]
+      else:
+        t["true_goal_map_next"] = np.zeros((H, W), dtype=np.float32)
 
-  def load_historical_policy(self, state_dict: dict, om_state_dict: dict = None):
-    """Loads frozen historical weights for Fictitious Play."""
-    self.q.load_state_dict(state_dict)
-    self.q.eval()  # Freeze layers like BatchNorm/Dropout if you add them later
+      if "opp_reward" in t:
+          del t["opp_reward"]
 
-    if om_state_dict is not None and hasattr(self, 'model'):
-      self.model.inference_model.load_state_dict(om_state_dict)
-      self.model.inference_model.eval()
+  def _apply_hindsight_relabeling(self, episode_transitions: list, H: int, W: int):
+    """
+    Applies Hindsight Experience Replay (HER) labeling to a trajectory.
+    Modifies the transitions in-place to include 'true_goal_map'.
+    """
+    current_true_goal_pos = None
+    next_map = np.zeros((H, W), dtype=np.float32)
+
+    # 1. Hindsight labeling for truncated episodes
+    if len(episode_transitions) > 0:
+      final_t = episode_transitions[-1]
+      
+      if final_t["opp_reward"] == 0:
+        opp_pos_arr = np.argwhere(final_t["state"][:, :, 3] == 1)
+        if len(opp_pos_arr) > 0:
+          current_true_goal_pos = tuple(opp_pos_arr[0])
+
+    # 2. Walk backward through the episode to label goals
+    for t in reversed(episode_transitions):
+
+      # Did the opponent get a reward this step? (New true goal achieved)
+      if t["opp_reward"] > 0:
+        opp_pos_indices = np.argwhere(t["next_state"][:, :, 3] == 1)
+        if len(opp_pos_indices) > 0:
+          current_true_goal_pos = tuple(opp_pos_indices[0])
+
+      # Assign the goal to this step
+      true_map = np.zeros((H, W), dtype=np.float32)
+      if current_true_goal_pos is not None:
+        true_map[current_true_goal_pos[0], current_true_goal_pos[1]] = 1.0
+      
+      t["true_goal_map"] = true_map
+      t["true_goal_map_next"] = next_map
+      next_map = true_map.copy()
+      
+      del t["opp_reward"]
 
   # ------------- rollout -------------
 
@@ -399,7 +447,7 @@ class QLearningAgent:
         "mask": rolling_mask
       }
       a, g_map, step_entropy = self.select_action(obs[0], history_gpu)
-      a_opponent, _, _ = opponent_agent.select_action(obs[1])
+      a_opponent, _, opp_true_map = opponent_agent.select_action(obs[1])
       actions = {0: a, 1: a_opponent}
 
       ep_entropy += step_entropy
@@ -434,7 +482,8 @@ class QLearningAgent:
           "opp_reward": float(reward[1]),
           "next_state": next_obs[0].copy(),
           "done": bool(done),
-          "history": history_cpu  # Store the raw history for hindsight labeling later
+          "history": history_cpu,  # Store the raw history for hindsight labeling later
+          "true_opp_heatmap": opp_true_map.copy()
       }
       episode_transitions.append(transition)
 
@@ -472,50 +521,10 @@ class QLearningAgent:
       if done:
         break
 
-    current_true_goal_pos = None
-    next_map = np.zeros((H, W), dtype=np.float32)
-    last_distance = -1
+    # self._apply_hindsight_relabeling(episode_transitions, H, W)
+    self._label_true_intent(episode_transitions, H, W)
 
-    # Walk backward through the episode to label goals
-    for t in reversed(episode_transitions):
-
-      # Did the opponent get a reward this step? (New goal achieved)
-      if t["opp_reward"] > 0:
-        opp_pos_indices = np.argwhere(t["next_state"][:, :, 3] == 1)
-        if len(opp_pos_indices) > 0:
-          current_true_goal_pos = tuple(opp_pos_indices[0])
-          last_distance = 0 # Reset distance tracker for the new goal
-
-      # Assign the goal to this step, BUT check if they changed their mind
-      if current_true_goal_pos is not None:
-        
-        opp_pos_now = np.argwhere(t["state"][:, :, 3] == 1)
-        if len(opp_pos_now) > 0:
-            pos_now = tuple(opp_pos_now[0])
-            current_dist = abs(pos_now[0] - current_true_goal_pos[0]) + abs(pos_now[1] - current_true_goal_pos[1])
-            
-            WIGGLE = 1 # Increase for maps with heavy corridors/obstacles
-            
-            if last_distance != -1 and current_dist < last_distance - WIGGLE:
-                # They changed their mind! Stop labeling and wipe state.
-                current_true_goal_pos = None 
-                last_distance = -1 
-            else:
-                last_distance = current_dist
-
-      # Apply the label (or zeros if we cut it off)
-      if current_true_goal_pos is not None:
-        true_map = np.zeros((H, W), dtype=np.float32)
-        true_map[current_true_goal_pos[0], current_true_goal_pos[1]] = 1.0
-        t["true_goal_map"] = true_map
-      else:
-        true_map = np.zeros((H, W), dtype=np.float32)
-        t["true_goal_map"] = true_map
-
-      t["true_goal_map_next"] = next_map
-      next_map = true_map.copy()
-      del t["opp_reward"]
-
+    # 3. Push to replay buffer
     for t in episode_transitions:
       self.replay.push(t)
 
