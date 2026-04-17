@@ -590,7 +590,8 @@ class QLearningAgent:
       opp_heatmap = torch.from_numpy(opp_heatmap).unsqueeze(0).to(self.device)
 
       kl_error = self.model.heatmap_kl_divergence(g_map, opp_heatmap)
-      spatial_error = self.model.top1_spatial_error(g_map, opp_heatmap)
+      # spatial_error = self.model.top1_spatial_error(g_map, opp_heatmap)
+      spatial_error = self.expected_spatial_error(g_map, opp_heatmap)
       ep_kl_errors.append(kl_error)
       ep_spatial_errors.append(spatial_error)
 

@@ -80,18 +80,15 @@ class OpponentModel(nn.Module):
     using Kullback-Leibler Divergence. Lower is better (0.0 is perfect).
 
     Args:
-        g_map (torch.Tensor): Inferred subgoal heatmap as logits, shape (B, H, W)
+        g_map (torch.Tensor): Inferred subgoal heatmap (softmaxed), shape (B, H, W)
         true_goal_map (torch.Tensor): Ground truth distribution over subgoals, shape (B, H, W)
     """
     B = g_map.shape[0]
     g_map_flat = g_map.view(B, -1)  # (B, H*W)
     true_goal_flat = true_goal_map.view(B, -1)  # (B, H*W)
 
-    # Convert logits to log-probabilities for PyTorch's kl_div
-    log_probs = F.log_softmax(g_map_flat, dim=-1)
-
     # Compute KL Divergence
-    kl_div = F.kl_div(log_probs, true_goal_flat, reduction='batchmean')
+    kl_div = F.kl_div(g_map_flat, true_goal_flat, reduction='batchmean')
 
     return kl_div.item()
 
@@ -101,7 +98,7 @@ class OpponentModel(nn.Module):
     and the closest valid ground-truth target.
 
     Args:
-        g_map (torch.Tensor): Inferred subgoal heatmap as logits, shape (B, H, W)
+        g_map (torch.Tensor): Inferred subgoal heatmap (softmaxed), shape (B, H, W)
         true_goal_map (torch.Tensor): Ground truth distribution over subgoals, shape (B, H, W)
     """
     B, H, W = g_map.shape
@@ -124,6 +121,35 @@ class OpponentModel(nn.Module):
         total_error += torch.min(dists).item()
 
     return total_error / B
+  
+  def expected_spatial_error(self, g_map: torch.Tensor, true_goal_map: torch.Tensor) -> float:
+    """
+    Calculates the probability-weighted Manhattan distance to the nearest valid target.
+    
+    Args:
+        g_map: Predicted probabilities after softmax (B, H, W)
+        true_goal_map: Ground truth probabilities (B, H, W)
+    """
+    B, H, W = g_map.shape
+    total_error = 0.0
+    valid_count = 0
+
+    y, x = torch.meshgrid(torch.arange(H, device=g_map.device),
+                          torch.arange(W, device=g_map.device), indexing='ij')
+    coords_flat = torch.stack([y, x], dim=-1).view(-1, 2).float()
+
+    for b in range(B):
+        true_targets = torch.nonzero(true_goal_map[b] > 0).float()
+        if len(true_targets) == 0:
+            continue
+
+        dists = torch.abs(coords_flat.unsqueeze(1) - true_targets.unsqueeze(0)).sum(dim=-1)
+        min_dists = torch.min(dists, dim=1).values.view(H, W)
+
+        total_error += (g_map[b] * min_dists).sum().item()
+        valid_count += 1
+
+    return total_error / valid_count if valid_count > 0 else 0.0
 
   def pretrain(self, dataset, epochs=10, batch_size=128):
     """
@@ -169,7 +195,7 @@ class OpponentModel(nn.Module):
       wandb.log({
         "pretrain/epoch_loss": avg_loss,
         "pretrain/epoch_kl_divergence": avg_kl_div,
-        "pretrain/epoch_top1_spatial_error": avg_spatial_error,
+        "pretrain/epoch_spatial_error": avg_spatial_error,
         "epoch": epoch
       })
 
@@ -258,7 +284,8 @@ class OpponentModel(nn.Module):
     g_map = F.softmax(pred_logits.view(pred_logits.shape[0], -1),
                       dim=-1).view_as(pred_logits) # (B, H, W)
     kl_div = self.heatmap_kl_divergence(g_map, opp_heatmap)
-    spatial_error = self.top1_spatial_error(pred_logits, opp_heatmap)
+    # spatial_error = self.top1_spatial_error(g_map, opp_heatmap)
+    spatial_error = self.expected_spatial_error(g_map, opp_heatmap)
     wandb.log({
       "train/batch_loss": loss_val,
       "train/kl_divergence": kl_div,
@@ -288,7 +315,7 @@ class OpponentModel(nn.Module):
     log_probs = F.log_softmax(pred_logits.view(pred_logits.shape[0], -1), dim=-1)
     target_dist = target_map.view(target_map.shape[0], -1)
     loss = F.kl_div(log_probs, target_dist, reduction='batchmean')
-    
+
     loss_val = loss.item()
     self.optimizer.zero_grad()
     loss.backward()
