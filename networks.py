@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 from omg_args import OMGArgs
 
+
 class QNet(nn.Module):
   """
   RL Network Q(s, g, a) that learns best response with imbued heatmap of opponent subgoal inference.
@@ -22,7 +23,7 @@ class QNet(nn.Module):
     cnn_hidden = args.cnn_hidden
 
     self.flat_dim = cnn_hidden * H * W
-    input_channels = F_dim + 1
+    input_channels = F_dim  # + 1
 
     self.cnn = nn.Sequential(
         nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
@@ -69,7 +70,8 @@ class QNet(nn.Module):
     # (B, 1, H, W) - broadcast latent g across spatial dimensions
     g = g_map.unsqueeze(1)
 
-    x = torch.cat([s, g], dim=1)
+    # x = torch.cat([s, g], dim=1)
+    x = torch.cat([s[:, :3], g_map.unsqueeze(1), s[:, 4:]], dim=1)
     features = self.cnn(x)
 
     # Dueling Heads
@@ -78,6 +80,7 @@ class QNet(nn.Module):
     q_vals = val + adv - adv.mean(dim=1, keepdim=True)
 
     return q_vals
+
 
 class QNetClassic(nn.Module):
   """
@@ -134,6 +137,7 @@ class QNetClassic(nn.Module):
     q_vals = val + adv - adv.mean(dim=1, keepdim=True)
 
     return q_vals
+
 
 class SLnet(nn.Module):
   """
