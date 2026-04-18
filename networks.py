@@ -23,7 +23,7 @@ class QNet(nn.Module):
     cnn_hidden = args.cnn_hidden
 
     self.flat_dim = cnn_hidden * H * W
-    input_channels = F_dim  # + 1
+    input_channels = F_dim + 1
 
     self.cnn = nn.Sequential(
         nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
@@ -70,8 +70,8 @@ class QNet(nn.Module):
     # (B, 1, H, W) - broadcast latent g across spatial dimensions
     g = g_map.unsqueeze(1)
 
-    # x = torch.cat([s, g], dim=1)
-    x = torch.cat([s[:, :3], g_map.unsqueeze(1), s[:, 4:]], dim=1)
+    x = torch.cat([s, g], dim=1)
+    # x = torch.cat([s[:, :3], g_map.unsqueeze(1), s[:, 4:]], dim=1)
     features = self.cnn(x)
 
     # Dueling Heads
@@ -91,7 +91,6 @@ class QNetClassic(nn.Module):
   def __init__(self, args: OMGArgs):
     super().__init__()
     H, W, F_dim = args.state_shape
-    F_dim -= 1  # Remove opponent heatmap channel
     self.state_dim = H * W * F_dim
     self.action_dim = args.action_dim
     cnn_hidden = args.cnn_hidden
@@ -130,8 +129,7 @@ class QNetClassic(nn.Module):
   def forward(self, batch: torch.Tensor) -> torch.Tensor:
     # Batch shape: (B, H, W, F) -> Permute to (B, F, H, W) for Conv2d
     s = batch.permute(0, 3, 1, 2)
-    x = torch.cat([s[:, :3], s[:, 4:]], dim=1)
-    features = self.cnn(x)
+    features = self.cnn(s)
 
     # Dueling Heads
     adv = self.advantage_head(features)
