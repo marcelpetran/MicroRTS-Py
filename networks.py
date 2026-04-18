@@ -129,7 +129,8 @@ class QNetClassic(nn.Module):
   def forward(self, batch: torch.Tensor) -> torch.Tensor:
     # Batch shape: (B, H, W, F) -> Permute to (B, F, H, W) for Conv2d
     s = batch.permute(0, 3, 1, 2)
-    features = self.cnn(s)
+    x = torch.cat([s[:, :3], s[:, 4:]], dim=1)
+    features = self.cnn(x)
 
     # Dueling Heads
     adv = self.advantage_head(features)
