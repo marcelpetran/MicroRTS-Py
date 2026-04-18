@@ -91,6 +91,7 @@ class QNetClassic(nn.Module):
   def __init__(self, args: OMGArgs):
     super().__init__()
     H, W, F_dim = args.state_shape
+    F_dim -= 1  # Remove opponent heatmap channel
     self.state_dim = H * W * F_dim
     self.action_dim = args.action_dim
     cnn_hidden = args.cnn_hidden
