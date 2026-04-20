@@ -522,8 +522,8 @@ class QLearningAgent:
       if done:
         break
 
-    # self._apply_hindsight_relabeling(episode_transitions, H, W)
-    self._label_true_intent(episode_transitions, H, W)
+    self._apply_hindsight_relabeling(episode_transitions, H, W)
+    # self._label_true_intent(episode_transitions, H, W)
 
     # 3. Push to replay buffer
     for t in episode_transitions:

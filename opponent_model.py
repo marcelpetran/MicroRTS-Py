@@ -308,18 +308,18 @@ class OpponentModel(nn.Module):
     pred_logits = self.forward(x, history, cached_features)  # (B, H, W)
 
     # Generate soft targets with Gaussian smoothing
-    # soft_targets = self._generate_soft_targets(target_map, sigma=1.0)
+    soft_targets = self._generate_soft_targets(target_map, sigma=1.0)
 
-    # loss = F.binary_cross_entropy_with_logits(
-    #     pred_logits.view(pred_logits.shape[0], -1),
-    #     soft_targets.view(soft_targets.shape[0], -1)
-    # )
+    loss = F.binary_cross_entropy_with_logits(
+        pred_logits.view(pred_logits.shape[0], -1),
+        soft_targets.view(soft_targets.shape[0], -1)
+    )
 
     # when using opp heatmap as target TODO: maybe use flag
-    log_probs = F.log_softmax(
-      pred_logits.view(pred_logits.shape[0], -1), dim=-1)
-    target_dist = target_map.view(target_map.shape[0], -1)
-    loss = F.kl_div(log_probs, target_dist, reduction='batchmean')
+    # log_probs = F.log_softmax(
+    #   pred_logits.view(pred_logits.shape[0], -1), dim=-1)
+    # target_dist = target_map.view(target_map.shape[0], -1)
+    # loss = F.kl_div(log_probs, target_dist, reduction='batchmean')
 
     loss_val = loss.item()
     self.optimizer.zero_grad()
