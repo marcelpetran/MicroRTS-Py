@@ -14,6 +14,7 @@ from torch.distributions import Categorical
 import matplotlib.pyplot as plt
 import wandb
 
+
 class QLearningAgent:
   """
   Q-learning agent with Hindsight Experience Replay and subgoal inference for opponent modeling.
@@ -342,18 +343,18 @@ class QLearningAgent:
     model_loss = self.model.train_step(om_batch)
 
     return loss_val, model_loss
-  
+
   def _label_true_intent(self, episode_transitions: list, H: int, W: int):
     """
     Applies True Intent labeling (Knowledge Distillation) using the opponent's actual internal heatmap.
     Modifies the transitions in-place to include 'true_goal_map' and 'true_goal_map_next'.
     """
     num_transitions = len(episode_transitions)
-    
+
     for i, t in enumerate(episode_transitions):
       # The current intent is just the opponent's heatmap for this exact step
       t["true_goal_map"] = t["true_opp_heatmap"].copy()
-      
+
       # Peek ahead one step for the next_map
       if i + 1 < num_transitions:
         t["true_goal_map_next"] = episode_transitions[i + 1]["true_opp_heatmap"].copy()
@@ -361,7 +362,7 @@ class QLearningAgent:
         t["true_goal_map_next"] = np.zeros((H, W), dtype=np.float32)
 
       if "opp_reward" in t:
-          del t["opp_reward"]
+        del t["opp_reward"]
 
   def _apply_hindsight_relabeling(self, episode_transitions: list, H: int, W: int):
     """
@@ -374,7 +375,7 @@ class QLearningAgent:
     # 1. Hindsight labeling for truncated episodes
     if len(episode_transitions) > 0:
       final_t = episode_transitions[-1]
-      
+
       if final_t["opp_reward"] == 0:
         opp_pos_arr = np.argwhere(final_t["state"][:, :, 3] == 1)
         if len(opp_pos_arr) > 0:
@@ -393,11 +394,11 @@ class QLearningAgent:
       true_map = np.zeros((H, W), dtype=np.float32)
       if current_true_goal_pos is not None:
         true_map[current_true_goal_pos[0], current_true_goal_pos[1]] = 1.0
-      
+
       t["true_goal_map"] = true_map
       t["true_goal_map_next"] = next_map
       next_map = true_map.copy()
-      
+
       del t["opp_reward"]
 
   # ------------- rollout -------------
@@ -521,8 +522,8 @@ class QLearningAgent:
       if done:
         break
 
-    self._apply_hindsight_relabeling(episode_transitions, H, W)
-    # self._label_true_intent(episode_transitions, H, W)
+    # self._apply_hindsight_relabeling(episode_transitions, H, W)
+    self._label_true_intent(episode_transitions, H, W)
 
     # 3. Push to replay buffer
     for t in episode_transitions:
@@ -622,7 +623,7 @@ class QLearningAgent:
 
       if done:
         break
-    
+
     # Post-episode analysis to compute final metrics, for cases where opponent fails to get food
     kd_errors = []
     spatial_errors = []
@@ -633,11 +634,11 @@ class QLearningAgent:
         if ep_opp_rewards[t] > 0:
           last_valid_step = t + 1
           break
-      
+
       if last_valid_step > 0:
         kd_errors.extend(ep_kl_errors[:last_valid_step])
         spatial_errors.extend(ep_spatial_errors[:last_valid_step])
-            
+
     else:
       # Normal ending (both got food, or time ran out)
       kd_errors.extend(ep_kl_errors)

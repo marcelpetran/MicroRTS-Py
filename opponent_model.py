@@ -86,7 +86,8 @@ class OpponentModel(nn.Module):
     B = g_map.shape[0]
     g_map_flat = g_map.view(B, -1)  # (B, H*W)
     true_goal_flat = true_goal_map.view(B, -1)  # (B, H*W)
-    log_g_map = torch.log(g_map_flat + 1e-8)  # Add small value to prevent log(0)
+    # Add small value to prevent log(0)
+    log_g_map = torch.log(g_map_flat + 1e-8)
 
     # Compute KL Divergence
     kl_div = F.kl_div(log_g_map, true_goal_flat, reduction='batchmean')
@@ -122,11 +123,11 @@ class OpponentModel(nn.Module):
         total_error += torch.min(dists).item()
 
     return total_error / B
-  
+
   def expected_spatial_error(self, g_map: torch.Tensor, true_goal_map: torch.Tensor) -> float:
     """
     Calculates the probability-weighted Manhattan distance to the nearest valid target.
-    
+
     Args:
         g_map: Predicted probabilities after softmax (B, H, W)
         true_goal_map: Ground truth probabilities (B, H, W)
@@ -140,15 +141,16 @@ class OpponentModel(nn.Module):
     coords_flat = torch.stack([y, x], dim=-1).view(-1, 2).float()
 
     for b in range(B):
-        true_targets = torch.nonzero(true_goal_map[b] > 0).float()
-        if len(true_targets) == 0:
-            continue
+      true_targets = torch.nonzero(true_goal_map[b] > 0).float()
+      if len(true_targets) == 0:
+        continue
 
-        dists = torch.abs(coords_flat.unsqueeze(1) - true_targets.unsqueeze(0)).sum(dim=-1)
-        min_dists = torch.min(dists, dim=1).values.view(H, W)
+      dists = torch.abs(coords_flat.unsqueeze(
+        1) - true_targets.unsqueeze(0)).sum(dim=-1)
+      min_dists = torch.min(dists, dim=1).values.view(H, W)
 
-        total_error += (g_map[b] * min_dists).sum().item()
-        valid_count += 1
+      total_error += (g_map[b] * min_dists).sum().item()
+      valid_count += 1
 
     return total_error / valid_count if valid_count > 0 else 0.0
 
@@ -178,7 +180,8 @@ class OpponentModel(nn.Module):
           "true_opp_heatmap": torch.from_numpy(np.stack([b["true_opp_heatmap"] for b in batch_data], dtype=np.float32)).to(self.device, non_blocking=True),
         }
 
-        loss, kl_error, spatial_error = self.pretrain_step(om_batch, step=step, epoch=epoch)
+        loss, kl_error, spatial_error = self.pretrain_step(
+          om_batch, step=step, epoch=epoch)
         epoch_losses.append(loss)
         epoch_kl_divs.append(kl_error)
         epoch_spatial_errors.append(spatial_error)
@@ -253,7 +256,7 @@ class OpponentModel(nn.Module):
     soft_targets = soft_targets / max_vals.view(batch_size, 1, 1, 1)
 
     return soft_targets.squeeze(1)  # Return to (B, H, W)
-  
+
   def pretrain_step(self, batch, step=0, epoch=0):
     x = batch['states']
     history = batch['history']
@@ -280,10 +283,9 @@ class OpponentModel(nn.Module):
     loss.backward()
     self.optimizer.step()
 
-    
     opp_heatmap = batch['true_opp_heatmap'].to(self.device)
     g_map = F.softmax(pred_logits.view(pred_logits.shape[0], -1),
-                      dim=-1).view_as(pred_logits) # (B, H, W)
+                      dim=-1).view_as(pred_logits)  # (B, H, W)
     kl_div = self.heatmap_kl_divergence(g_map, opp_heatmap)
     # spatial_error = self.top1_spatial_error(g_map, opp_heatmap)
     spatial_error = self.expected_spatial_error(g_map, opp_heatmap)
@@ -306,17 +308,18 @@ class OpponentModel(nn.Module):
     pred_logits = self.forward(x, history, cached_features)  # (B, H, W)
 
     # Generate soft targets with Gaussian smoothing
-    soft_targets = self._generate_soft_targets(target_map, sigma=1.0)
+    # soft_targets = self._generate_soft_targets(target_map, sigma=1.0)
 
-    loss = F.binary_cross_entropy_with_logits(
-        pred_logits.view(pred_logits.shape[0], -1),
-        soft_targets.view(soft_targets.shape[0], -1)
-    )
+    # loss = F.binary_cross_entropy_with_logits(
+    #     pred_logits.view(pred_logits.shape[0], -1),
+    #     soft_targets.view(soft_targets.shape[0], -1)
+    # )
 
     # when using opp heatmap as target TODO: maybe use flag
-    # log_probs = F.log_softmax(pred_logits.view(pred_logits.shape[0], -1), dim=-1)
-    # target_dist = target_map.view(target_map.shape[0], -1)
-    # loss = F.kl_div(log_probs, target_dist, reduction='batchmean')
+    log_probs = F.log_softmax(
+      pred_logits.view(pred_logits.shape[0], -1), dim=-1)
+    target_dist = target_map.view(target_map.shape[0], -1)
+    loss = F.kl_div(log_probs, target_dist, reduction='batchmean')
 
     loss_val = loss.item()
     self.optimizer.zero_grad()
