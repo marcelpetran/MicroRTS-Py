@@ -149,7 +149,7 @@ class SpatialOpponentModel(nn.Module):
 
     # Positional encoding
     seq_feats = seq_feats * np.sqrt(self.args.d_model)
-    seq_feats = self.pos_encoder(seq_feats)
+    seq_feats = self.pos_encoder(seq_feats) # (B, 1 + T, d_model)
 
     # Transformer pass
     # src_key_padding_mask expects True for PADDING
@@ -158,7 +158,7 @@ class SpatialOpponentModel(nn.Module):
       seq_feats, src_key_padding_mask=src_key_padding_mask)
 
     # Extract summary and predict
-    final_memory = memory[:, 0, :]
+    final_memory = memory[:, 0, :] # (B, d_model) - summary token corresponding to current state
 
     logits = self.spatial_head(final_memory)  # (B, H*W)
     heatmap_logits = logits.view(B, H, W)

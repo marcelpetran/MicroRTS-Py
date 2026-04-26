@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Tuple
 
+from sympy import true
+
 
 @dataclass
 class OMGArgs:
@@ -19,6 +21,7 @@ class OMGArgs:
   max_steps: int = 50
   seed: int = 0
   folder_id: int = 0
+  true_intent: bool = False
 
   oracle: bool = False
   tau_soft: float = 0.001

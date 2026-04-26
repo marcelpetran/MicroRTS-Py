@@ -67,6 +67,8 @@ parser.add_argument('--seed', type=int, default=0,
                     help='Random seed for reproducibility')
 parser.add_argument('--folder_id', type=int, default=0,
                     help='Folder ID for saving models and diagrams')
+parser.add_argument('--true_intent', action='store_true', default=False,
+                    help='Whether to include true intent map in the state input for the OM agent')
 args_parsed = parser.parse_args()
 
 # Setup directories
@@ -107,6 +109,7 @@ args = OMGArgs(
     d_model=args_parsed.d_model, nhead=args_parsed.nhead,
     num_encoder_layers=args_parsed.num_encoder_layers,
     dim_feedforward=args_parsed.dim_feedforward, dropout=args_parsed.dropout,
+    true_intent=args_parsed.true_intent
 )
 
 # Initialize Heuristic Opponent
@@ -202,7 +205,7 @@ dataset_path = f"./dataset/dataset_map_{args_parsed.map}.pt"
 if not os.path.exists(dataset_path):
   print("Collecting Offline Data for OM Pretraining...")
   collect_offline_data(num_episodes=500, save_path=dataset_path,
-                       map_layout=map_layouts[args_parsed.map - 1])
+                       map_layout=map_layouts[args_parsed.map - 1], om_args=args)
 
 print("Loading dataset and pretraining OM...")
 dataset = torch.load(dataset_path, weights_only=False)
