@@ -60,8 +60,8 @@ def _apply_hindsight_relabeling(episode_transitions: list, H: int, W: int):
     del t["opp_reward"]
 
 
-def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", map_layout=MAP_1):
-  args = OMGArgs()
+def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", map_layout=MAP_1, om_args=OMGArgs()):
+  args = om_args
   env = SimpleForagingEnv(max_steps=args.max_steps, map_layout=map_layout)
   obs = env.reset()
   agent_0 = SimpleAgent(0)
@@ -135,9 +135,10 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
         obs = next_obs
         if done:
           break
-
-      _apply_hindsight_relabeling(episode_transitions, H, W)
-      # _label_true_intent(episode_transitions, H, W)
+      if args.true_intent:
+        _label_true_intent(episode_transitions, H, W)
+      else:
+        _apply_hindsight_relabeling(episode_transitions, H, W)
 
       master_dataset.extend(episode_transitions)
 
