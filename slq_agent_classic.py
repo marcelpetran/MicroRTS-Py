@@ -162,7 +162,8 @@ class FSPAgentClassic:
 
   def update_sl(self):
     """Updates the SL Average Strategy network."""
-    if len(self.sl_replay) < self.args.min_replay:
+    SL_BURN_IN = 25_000
+    if len(self.sl_replay) < SL_BURN_IN: # self.args.min_replay:
       return None
 
     batch = self.sl_replay.sample(self.args.batch_size)

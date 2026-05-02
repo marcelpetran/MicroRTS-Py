@@ -12,6 +12,7 @@ from omg_args import OMGArgs
 from buffers import ReplayBuffer, ReservoirBuffer
 from networks import QNet, SLnet
 
+
 class FSPAgentOM:
   """
   Unified Fictitious Self-Play Agent with Opponent Modeling.
@@ -135,7 +136,8 @@ class FSPAgentOM:
       self.model.inference_model.eval()
 
       hist_feats = torch.from_numpy(
-          np.array([b["history"]["state_features"][0] for b in batch], dtype=np.float32)
+          np.array([b["history"]["state_features"][0]
+                   for b in batch], dtype=np.float32)
       ).to(self.device)
       hist_acts = torch.from_numpy(
           np.array([b["history"]["actions"][0] for b in batch], dtype=np.int64)
@@ -143,10 +145,12 @@ class FSPAgentOM:
       hist_mask = torch.from_numpy(
           np.array([b["history"]["mask"][0] for b in batch])
       ).to(self.device)
-      hist = {"state_features": hist_feats, "actions": hist_acts, "mask": hist_mask}
+      hist = {"state_features": hist_feats,
+              "actions": hist_acts, "mask": hist_mask}
 
       g_logits = self.model.inference_model(s, hist, cached_features=True)
-      g_map = F.softmax(g_logits.view(len(batch), -1), dim=-1).view_as(g_logits)
+      g_map = F.softmax(g_logits.view(len(batch), -1),
+                        dim=-1).view_as(g_logits)
 
       # For next state
       next_feats = torch.from_numpy(
@@ -160,10 +164,13 @@ class FSPAgentOM:
       ).to(self.device)
       hist_mask_next = torch.roll(hist_mask, shifts=-1, dims=1)
       hist_mask_next[:, -1] = True
-      hist_next = {"state_features": hist_feats_next, "actions": hist_acts_next, "mask": hist_mask_next}
+      hist_next = {"state_features": hist_feats_next,
+                   "actions": hist_acts_next, "mask": hist_mask_next}
 
-      g_logits_next = self.model.inference_model(sp, hist_next, cached_features=True)
-      g_map_next = F.softmax(g_logits_next.view(len(batch), -1), dim=-1).view_as(g_logits_next)
+      g_logits_next = self.model.inference_model(
+        sp, hist_next, cached_features=True)
+      g_map_next = F.softmax(g_logits_next.view(
+        len(batch), -1), dim=-1).view_as(g_logits_next)
 
       self.model.inference_model.train()
 
@@ -219,7 +226,8 @@ class FSPAgentOM:
 
   def update_sl(self):
     """Updates the SL Average Strategy network."""
-    if len(self.sl_replay) < self.args.min_replay:
+    SL_BURN_IN = 25_000
+    if len(self.sl_replay) < SL_BURN_IN:  # self.args.min_replay:
       return None
 
     batch = self.sl_replay.sample(self.args.batch_size)
@@ -249,7 +257,7 @@ class FSPAgentOM:
     # 1. Hindsight labeling for truncated episodes
     if len(episode_transitions) > 0:
       final_t = episode_transitions[-1]
-      
+
       if final_t["opp_reward"] == 0:
         opp_pos_arr = np.argwhere(final_t["state"][:, :, 3] == 1)
         if len(opp_pos_arr) > 0:
@@ -268,11 +276,11 @@ class FSPAgentOM:
       true_map = np.zeros((H, W), dtype=np.float32)
       if current_true_goal_pos is not None:
         true_map[current_true_goal_pos[0], current_true_goal_pos[1]] = 1.0
-      
+
       t["true_goal_map"] = true_map
       t["true_goal_map_next"] = next_map
       next_map = true_map.copy()
-      
+
       del t["opp_reward"]
 
   # ------------- Data Generation (Rollout) -------------
