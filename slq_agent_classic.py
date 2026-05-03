@@ -12,6 +12,7 @@ from omg_args import OMGArgs
 from buffers import ReplayBuffer, ReservoirBuffer
 from networks import QNetClassic, SLnet
 
+
 class FSPAgentClassic:
   """
   Unified Fictitious Self-Play Agent using classic Q-Learning.
@@ -162,8 +163,7 @@ class FSPAgentClassic:
 
   def update_sl(self):
     """Updates the SL Average Strategy network."""
-    SL_BURN_IN = 25_000
-    if len(self.sl_replay) < SL_BURN_IN: # self.args.min_replay:
+    if len(self.sl_replay) < self.args.min_replay:
       return None
 
     batch = self.sl_replay.sample(self.args.batch_size)

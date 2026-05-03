@@ -115,7 +115,9 @@ phase1_returns, phase1_opp_returns, phase1_rl_entropies, phase1_sl_entropies, ph
 
 for epoch in range(num_epochs):
   # Calculate mixing parameter
-  eta = 0.1
+  # Linear decay from 1.0 to 0.1 over the course of training
+  eta = max(0.1, 1.0 - (epoch * args_parsed.episodes_per_epoch) /
+            (num_epochs * args_parsed.episodes_per_epoch))
   epoch_returns, epoch_opp_returns, epoch_rl_entropies, epoch_sl_entropies, epoch_steps = [], [], [], [], []
 
   # 1. DATA GENERATION PHASE
@@ -190,7 +192,9 @@ del dataset
 phase2_returns, phase2_opp_returns, phase2_rl_entropies, phase2_sl_entropies, phase2_steps = [], [], [], [], []
 
 for epoch in range(num_epochs):
-  eta = 0.1
+  # Linear decay from 1.0 to 0.1 over the course of training
+  eta = max(0.1, 1.0 - (epoch * args_parsed.episodes_per_epoch) /
+            (num_epochs * args_parsed.episodes_per_epoch))
   epoch_returns, epoch_opp_returns, epoch_rl_entropies, epoch_sl_entropies, epoch_steps = [], [], [], [], []
 
   # 1. DATA GENERATION PHASE

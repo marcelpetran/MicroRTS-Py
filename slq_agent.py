@@ -226,8 +226,7 @@ class FSPAgentOM:
 
   def update_sl(self):
     """Updates the SL Average Strategy network."""
-    SL_BURN_IN = 25_000
-    if len(self.sl_replay) < SL_BURN_IN:  # self.args.min_replay:
+    if len(self.sl_replay) < self.args.min_replay:
       return None
 
     batch = self.sl_replay.sample(self.args.batch_size)
