@@ -157,7 +157,8 @@ for epoch in range(num_epochs):
       "phase1/avg_steps": avg_steps,
       "phase1/rl_entropy": avg_rl_ent,
       "phase1/sl_entropy": avg_sl_ent,
-      "phase1/eta": eta
+      "phase1/eta": eta,
+      "epoch": epoch + 1
   })
 
   torch.save(agent_classic.q.state_dict(),
@@ -234,7 +235,8 @@ for epoch in range(num_epochs):
       "phase2/avg_steps": avg_steps,
       "phase2/rl_entropy": avg_rl_ent,
       "phase2/sl_entropy": avg_sl_ent,
-      "phase2/eta": eta
+      "phase2/eta": eta,
+      "epoch": epoch + 1
   })
 
   torch.save(agent_om.q.state_dict(),
