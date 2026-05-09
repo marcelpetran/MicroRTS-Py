@@ -606,7 +606,7 @@ class StalkerAgent:
         for action, (dr, dc) in enumerate([(-1, 0), (1, 0), (0, -1), (0, 1)]):
           nr, nc = my_pos[0] + dr, my_pos[1] + dc
           if (nr, nc) in obstacles:
-            return action
+            return action, None, heatmap
         return np.random.randint(0, 4), None, heatmap  # Fallback
 
     else:
