@@ -10,6 +10,7 @@ import torch
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 
+
 class PositionalEncoding(nn.Module):
   """
   Standard positional encoding as used in the original Transformer paper.
@@ -88,25 +89,26 @@ class SpatialOpponentModel(nn.Module):
         nn.Linear(128, H * W)
     )
 
-  def visualize_action_embeddings(self):
+  def visualize_action_embeddings(self, filename: str = "action_embeddings.png"):
     # Extract the weights from the embedding layer: shape (4, d_model)
     action_weights = self.action_embedder.weight.detach().cpu().numpy()
-    
+
     # Reduce to 2 dimensions using PCA
     pca = PCA(n_components=2)
     actions_2d = pca.fit_transform(action_weights)
-    
+
     action_labels = ['Up', 'Down', 'Left', 'Right']
-    
+
     plt.figure(figsize=(6, 6))
     plt.scatter(actions_2d[:, 0], actions_2d[:, 1], color='red', s=100)
-    
+
     for i, label in enumerate(action_labels):
-        plt.annotate(label, (actions_2d[i, 0], actions_2d[i, 1]), 
-                    xytext=(5, 5), textcoords='offset points', fontsize=12)
-        
+      plt.annotate(label, (actions_2d[i, 0], actions_2d[i, 1]),
+                   xytext=(5, 5), textcoords='offset points', fontsize=12)
+
     plt.title("PCA of Action Embeddings")
     plt.grid(True, linestyle='--', alpha=0.7)
+    plt.savefig(filename)
     plt.show()
 
   def get_features(self, x: torch.Tensor) -> torch.Tensor:
@@ -149,7 +151,7 @@ class SpatialOpponentModel(nn.Module):
 
     # Positional encoding
     seq_feats = seq_feats * np.sqrt(self.args.d_model)
-    seq_feats = self.pos_encoder(seq_feats) # (B, 1 + T, d_model)
+    seq_feats = self.pos_encoder(seq_feats)  # (B, 1 + T, d_model)
 
     # Transformer pass
     # src_key_padding_mask expects True for PADDING
@@ -158,7 +160,8 @@ class SpatialOpponentModel(nn.Module):
       seq_feats, src_key_padding_mask=src_key_padding_mask)
 
     # Extract summary and predict
-    final_memory = memory[:, 0, :] # (B, d_model) - summary token corresponding to current state
+    # (B, d_model) - summary token corresponding to current state
+    final_memory = memory[:, 0, :]
 
     logits = self.spatial_head(final_memory)  # (B, H*W)
     heatmap_logits = logits.view(B, H, W)
