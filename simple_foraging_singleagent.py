@@ -19,7 +19,7 @@ from omg_args import OMGArgs
 from q_agent import QLearningAgent
 from q_agent_classic import QLearningAgentClassic
 
-# matplotlib.use('Agg')  # Prevents memory leak on headless clusters
+matplotlib.use('Agg')  # Prevents memory leak on headless clusters
 torch.set_float32_matmul_precision('high')
 
 map_layouts = [getattr(maps, m) for m in dir(maps) if m.startswith("MAP_")]
