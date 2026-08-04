@@ -39,13 +39,13 @@ def _apply_hindsight_relabeling(episode_transitions: list, H: int, W: int):
     final_t = episode_transitions[-1]
 
     if final_t["opp_reward"] == 0:
-      opp_pos_arr = np.argwhere(final_t["state"][:, :, 3] == 1)
+      opp_pos_arr = np.argwhere(final_t["global_state"][:, :, 3] == 1)
       if len(opp_pos_arr) > 0:
         current_true_goal_pos = tuple(opp_pos_arr[0])
 
   for t in reversed(episode_transitions):
     if t["opp_reward"] > 0:
-      opp_pos_indices = np.argwhere(t["next_state"][:, :, 3] == 1)
+      opp_pos_indices = np.argwhere(t["next_global_state"][:, :, 3] == 1)
       if len(opp_pos_indices) > 0:
         current_true_goal_pos = tuple(opp_pos_indices[0])
 
@@ -114,15 +114,19 @@ def collect_offline_data(num_episodes=1000, save_path="./dataset/dataset.pt", ma
         a_1, _, true_opp_heatmap = agent1.select_action(obs[1])
         actions = {0: a_0, 1: a_1}
 
+        global_state = env.get_global_state()
         next_obs, reward, done, info = env.step(actions)
+        next_global_state = env.get_global_state()
 
         transition = {
             "state": obs[0].copy(),
+            "global_state": global_state.copy(),
             "action": a_0,
             "opp_action": a_1,
             "reward": float(reward[0]),
             "opp_reward": float(reward[1]),
             "next_state": next_obs[0].copy(),
+            "next_global_state": next_global_state.copy(),
             "done": bool(done),
             "history": {k: [np.copy(item) if isinstance(item, np.ndarray) else item for item in v] for k, v in current_history.items()},
             "true_opp_heatmap": true_opp_heatmap.copy(),
@@ -183,7 +187,7 @@ def run_episode(agent0, agent1, env, args, render=False):
 if __name__ == "__main__":
   # collect_offline_data(num_episodes=10)
   args = OMGArgs()
-  env = SimpleForagingEnv(max_steps=args.max_steps, map_layout=MAP_5)
+  env = SimpleForagingEnv(max_steps=args.max_steps, map_layout=MAP_4)
   obs = env.reset()
   agent_0 = SimpleAgent(0)
   _ = agent_0.select_action(obs[0])
@@ -196,4 +200,4 @@ if __name__ == "__main__":
 
   for ep in range(2):
     print(f"Episode {ep + 1}")
-    run_episode(agent_0, agent_5, env, args, render=True)
+    run_episode(agent_2, agent_3, env, args, render=True)
