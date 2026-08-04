@@ -258,7 +258,7 @@ class FSPAgentOM:
       final_t = episode_transitions[-1]
 
       if final_t["opp_reward"] == 0:
-        opp_pos_arr = np.argwhere(final_t["state"][:, :, 3] == 1)
+        opp_pos_arr = np.argwhere(final_t["global_state"][:, :, 3] == 1)
         if len(opp_pos_arr) > 0:
           current_true_goal_pos = tuple(opp_pos_arr[0])
 
@@ -267,7 +267,7 @@ class FSPAgentOM:
 
       # Did the opponent get a reward this step? (New true goal achieved)
       if t["opp_reward"] > 0:
-        opp_pos_indices = np.argwhere(t["next_state"][:, :, 3] == 1)
+        opp_pos_indices = np.argwhere(t["next_global_state"][:, :, 3] == 1)
         if len(opp_pos_indices) > 0:
           current_true_goal_pos = tuple(opp_pos_indices[0])
 
@@ -360,7 +360,9 @@ class FSPAgentOM:
 
       actions = {0: a, 1: a_opponent}
 
+      global_state = self.env.get_global_state()
       next_obs, reward, done, info = self.env.step(actions)
+      next_global_state = self.env.get_global_state()
 
       # Store in SL Buffer only if the action was a Best Response (NFSP Standard)
       if is_rl:
@@ -376,11 +378,13 @@ class FSPAgentOM:
 
       transition = {
           "state": obs[0].copy(),
+          "global_state": global_state.copy(),
           "action": a,
           "opp_action": a_opponent,
           "reward": float(reward[0]),
           "opp_reward": float(reward[1]),
           "next_state": next_obs[0].copy(),
+          "next_global_state": next_global_state.copy(),
           "done": bool(done),
           "history": history_cpu
       }

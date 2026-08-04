@@ -5,14 +5,15 @@ from maps import *
 
 
 class SimpleForagingEnv:
-  def __init__(self, max_steps=50, map_layout=MAP_1):
+  def __init__(self, max_steps=50, map_layout=MAP_1, vision_radius=2):
     self.map_layout = map_layout
     self.height = len(map_layout)
     self.width = len(map_layout[0])
     self.num_agents = 2
-    # 0: empty, 1: food, 2: agent1, 3: agent2, 4: wall
-    self.features = 5
+    # 0: empty, 1: food, 2: agent1, 3: agent2, 4: wall, 5: vis_mask
+    self.features = 6
     self.max_steps = max_steps
+    self.vision_radius = vision_radius
     self.action_space = self._get_action_space()
 
     self._initial_agents = {0: None, 1: None}
@@ -40,6 +41,8 @@ class SimpleForagingEnv:
     for r, c in self.walls:
       self.base_obs[r, c, 0] = 0
       self.base_obs[r, c, 4] = 1
+      
+    self._precompute_visibility_cache()
     self.reset()
 
   def reset(self):
@@ -72,6 +75,59 @@ class SimpleForagingEnv:
   def _get_wall_positions(self):
     return list(self.walls)
 
+  def _has_line_of_sight(self, r0, c0, r1, c1):
+    if (r0, c0) == (r1, c1):
+      return True
+    steps = max(abs(r1 - r0), abs(c1 - c0)) * 5
+    for i in range(1, steps):
+      t = i / steps
+      r = r0 + 0.5 + t * (r1 - r0)
+      c = c0 + 0.5 + t * (c1 - c0)
+      tile_r, tile_c = int(np.floor(r)), int(np.floor(c))
+      if (tile_r, tile_c) == (r1, c1):
+        return True
+      if (tile_r, tile_c) != (r0, c0) and (tile_r, tile_c) in self.walls:
+        return False
+    return True
+
+  def _precompute_visibility_cache(self):
+    self._vis_cache = {}
+    for r_agent in range(self.height):
+      for c_agent in range(self.width):
+        vis_map = np.zeros((self.height, self.width), dtype=np.int8)
+        if (r_agent, c_agent) not in self.walls:
+          for r in range(self.height):
+            for c in range(self.width):
+              if max(abs(r - r_agent), abs(c - c_agent)) <= self.vision_radius:
+                if self._has_line_of_sight(r_agent, c_agent, r, c):
+                  vis_map[r, c] = 1
+        self._vis_cache[(r_agent, c_agent)] = vis_map
+
+  def get_visibility_map(self, agent_id):
+    r_agent, c_agent = self.agents[agent_id]
+    if r_agent is not None and c_agent is not None:
+      return self._vis_cache[(r_agent, c_agent)].copy()
+    return np.zeros((self.height, self.width), dtype=np.int8)
+
+  def get_global_state(self):
+    obs = np.zeros((self.height, self.width, self.features), dtype=np.int8)
+    obs[:, :, 5] = 1  # All cells visible in global state
+    for r, c in self.walls:
+      obs[r, c, 4] = 1
+    for r, c in self.food_positions:
+      obs[r, c, 1] = 1
+    if self.agents[0] is not None:
+      r0, c0 = self.agents[0]
+      obs[r0, c0, 2] = 1
+    if self.agents[1] is not None:
+      r1, c1 = self.agents[1]
+      obs[r1, c1, 3] = 1
+    for r in range(self.height):
+      for c in range(self.width):
+        if obs[r, c, 1] == 0 and obs[r, c, 2] == 0 and obs[r, c, 3] == 0 and obs[r, c, 4] == 0:
+          obs[r, c, 0] = 1
+    return obs
+
   def swap_agents(self):
     self.agents[0] = self._initial_agents[1]
     self.agents[1] = self._initial_agents[0]
@@ -100,19 +156,36 @@ class SimpleForagingEnv:
   def _get_observations(self):
     observations = {}
     for agent_id in self.agents:
-      obs = self.base_obs.copy()
+      obs = np.zeros((self.height, self.width, self.features), dtype=np.int8)
+      vis_map = self.get_visibility_map(agent_id)
+      obs[:, :, 5] = vis_map
 
+      # Walls (known)
+      for r, c in self.walls:
+        obs[r, c, 4] = 1
+
+      # Visible food
       for r, c in self.food_positions:
-        obs[r, c, 0] = 0
-        obs[r, c, 1] = 1
+        if vis_map[r, c] == 1:
+          obs[r, c, 1] = 1
 
-      r0, c0 = self.agents[0]
-      obs[r0, c0, 0] = 0
-      obs[r0, c0, 2] = 1
+      # Visible Agent 0
+      if self.agents[0] is not None:
+        r0, c0 = self.agents[0]
+        if vis_map[r0, c0] == 1:
+          obs[r0, c0, 2] = 1
 
-      r1, c1 = self.agents[1]
-      obs[r1, c1, 0] = 0
-      obs[r1, c1, 3] = 1
+      # Visible Agent 1
+      if self.agents[1] is not None:
+        r1, c1 = self.agents[1]
+        if vis_map[r1, c1] == 1:
+          obs[r1, c1, 3] = 1
+
+      # Empty visible tiles
+      for r in range(self.height):
+        for c in range(self.width):
+          if vis_map[r, c] == 1 and obs[r, c, 1] == 0 and obs[r, c, 2] == 0 and obs[r, c, 3] == 0 and obs[r, c, 4] == 0:
+            obs[r, c, 0] = 1
 
       observations[agent_id] = obs
     return observations
@@ -174,25 +247,32 @@ class SimpleForagingEnv:
   @staticmethod
   def render_from_obs(obs):
     h, w = obs.shape[0], obs.shape[1]
+    has_fog = obs.shape[2] >= 6
     render_grid = np.full((h, w), '.', dtype=str)
     for i in range(h):
       for j in range(w):
-        if obs[i, j, 4] == 1:
+        if has_fog and obs[i, j, 5] == 0:
+          render_grid[i, j] = '?'  # Fog of War / Unobserved
+        elif obs[i, j, 4] == 1:
           render_grid[i, j] = '#'  # Wall
         elif obs[i, j, 1] == 1:
           render_grid[i, j] = 'F'  # Food
         elif obs[i, j, 2] == 1 and obs[i, j, 3] == 1:
           render_grid[i, j] = 'X'  # Both agents
         elif obs[i, j, 2] == 1:
-          render_grid[i, j] = 'A'  # Agent 1
+          render_grid[i, j] = 'A'  # Agent 1 (Self)
         elif obs[i, j, 3] == 1:
-          render_grid[i, j] = 'B'  # Agent 2
+          render_grid[i, j] = 'B'  # Agent 2 (Opponent)
     for row in render_grid:
       print(' '.join(row))
     print()
 
-  def render(self):
-    obs = self._get_observations()[0]
+  def render(self, agent_id=0):
+    obs = self._get_ego_centric_obs()[agent_id]
+    self.render_from_obs(obs)
+
+  def render_global(self):
+    obs = self.get_global_state()
     self.render_from_obs(obs)
 
 
@@ -256,27 +336,78 @@ class RandomAgent:
   def __init__(self, agent_id):
     self.agent_id = agent_id
 
-  def reset(self): pass
+  def reset(self, initial_food=None, initial_opp_pos=None): pass
+
+  def update_belief(self, observation): pass
 
   def select_action(self, observation, eval=False):
     return np.random.randint(0, 4), None, np.zeros((observation.shape[0], observation.shape[1]), dtype=np.float32)
 
 
+def _parse_map_for_agent(agent_id, map_layout):
+  if map_layout is None:
+    map_layout = MAP_1
+  initial_food = set()
+  initial_opp_pos = None
+  for r, row in enumerate(map_layout):
+    for c, char in enumerate(row):
+      if char == 'o':
+        initial_food.add((r, c))
+      elif char == 'A' and agent_id == 1:
+        initial_opp_pos = (r, c)
+      elif char == 'B' and agent_id == 0:
+        initial_opp_pos = (r, c)
+  return initial_food, initial_opp_pos
+
+
 class SimpleAgent:
-  def __init__(self, agent_id, precomputed_paths=None):
+  def __init__(self, agent_id, precomputed_paths=None, map_layout=None):
     self.agent_id = agent_id
     self.cached_path = []
     self.current_target = None
     self.precomputed_paths = precomputed_paths
+    self.initial_food, self.initial_opp_pos = _parse_map_for_agent(agent_id, map_layout)
+    self.belief_food = None
+    self.belief_opp_pos = None
 
-  def reset(self):
+  def reset(self, initial_food=None, initial_opp_pos=None):
     self.cached_path = []
     self.current_target = None
+    self.belief_food = set(initial_food) if initial_food is not None else set(self.initial_food)
+    self.belief_opp_pos = initial_opp_pos if initial_opp_pos is not None else self.initial_opp_pos
+
+  def update_belief(self, observation):
+    vis_map = observation[:, :, 5] if observation.shape[2] >= 6 else np.ones(observation.shape[:2], dtype=np.int8)
+
+    if self.belief_food is None:
+      self.belief_food = set()
+      food_pos_arr = np.argwhere(observation[:, :, 1] == 1)
+      for p in food_pos_arr:
+        self.belief_food.add(tuple(p))
+
+    # Update food belief inside visible tiles
+    visible_indices = np.argwhere(vis_map == 1)
+    for r, c in visible_indices:
+      pos = (r, c)
+      if observation[r, c, 1] == 1:
+        self.belief_food.add(pos)
+      else:
+        self.belief_food.discard(pos)
+
+    # Update opponent belief
+    opp_pos_arr = np.argwhere(observation[:, :, 3] == 1)
+    if len(opp_pos_arr) > 0:
+      self.belief_opp_pos = tuple(opp_pos_arr[0])
+    elif self.belief_opp_pos is not None:
+      r_opp, c_opp = self.belief_opp_pos
+      if vis_map[r_opp, c_opp] == 1:
+        self.belief_opp_pos = None
 
   def get_subgoal_heatmap(self, observation):
+    self.update_belief(observation)
     h, w = observation.shape[:2]
     heatmap = np.zeros((h, w), dtype=np.float32)
-    food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
+    food_positions = list(self.belief_food)
 
     if not food_positions:
       return heatmap
@@ -285,7 +416,7 @@ class SimpleAgent:
       # Target locked
       heatmap[self.current_target[0], self.current_target[1]] = 1.0
     else:
-      # Uniform over all choices since it hasn't picked yet
+      # Uniform over choices in belief_food
       prob = 1.0 / len(food_positions)
       for f in food_positions:
         heatmap[f[0], f[1]] = prob
@@ -294,16 +425,15 @@ class SimpleAgent:
 
   def select_action(self, observation, eval=False):
     my_channel = 2
-    opp_channel = 3
-
+    self.update_belief(observation)
     heatmap = self.get_subgoal_heatmap(observation)
 
     agent_pos_arr = np.argwhere(observation[:, :, my_channel] == 1)
     if len(agent_pos_arr) == 0:
-      return np.random.randint(0, 4), None
+      return np.random.randint(0, 4), None, heatmap
     my_pos = tuple(agent_pos_arr[0])
 
-    food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
+    food_positions = list(self.belief_food)
     if not food_positions:
       return np.random.randint(0, 4), None, heatmap
 
@@ -319,12 +449,10 @@ class SimpleAgent:
       self.cached_path = []
 
     if not self.cached_path:
-
       if (my_pos, self.current_target) in self.precomputed_paths:
         self.cached_path = self.precomputed_paths[(
           my_pos, self.current_target)].copy()
       else:
-        # Fallback to on-the-fly A*
         wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
         obstacles = set(tuple(p) for p in wall_pos_arr)
         self.cached_path = a_star_path(
@@ -338,32 +466,63 @@ class SimpleAgent:
 
 class GreedySwitchAgent:
   """
-  An advanced opponent. It goes for the absolute closest food. 
-  If it realizes the other agent is closer to that food, it abandons it and switches to another.
+  An advanced opponent. It goes for the absolute closest food in its belief map. 
+  If it knows/sees the other agent is closer to that food, it abandons it and switches to another.
   """
 
-  def __init__(self, agent_id, precomputed_paths=None):
+  def __init__(self, agent_id, precomputed_paths=None, map_layout=None):
     self.agent_id = agent_id
     self.cached_path = []
     self.current_target = None
     self.precomputed_paths = precomputed_paths
+    self.initial_food, self.initial_opp_pos = _parse_map_for_agent(agent_id, map_layout)
+    self.belief_food = None
+    self.belief_opp_pos = None
 
-  def reset(self):
+  def reset(self, initial_food=None, initial_opp_pos=None):
     self.cached_path = []
     self.current_target = None
+    self.belief_food = set(initial_food) if initial_food is not None else set(self.initial_food)
+    self.belief_opp_pos = initial_opp_pos if initial_opp_pos is not None else self.initial_opp_pos
+
+  def update_belief(self, observation):
+    vis_map = observation[:, :, 5] if observation.shape[2] >= 6 else np.ones(observation.shape[:2], dtype=np.int8)
+
+    if self.belief_food is None:
+      self.belief_food = set()
+      food_pos_arr = np.argwhere(observation[:, :, 1] == 1)
+      for p in food_pos_arr:
+        self.belief_food.add(tuple(p))
+
+    visible_indices = np.argwhere(vis_map == 1)
+    for r, c in visible_indices:
+      pos = (r, c)
+      if observation[r, c, 1] == 1:
+        self.belief_food.add(pos)
+      else:
+        self.belief_food.discard(pos)
+
+    opp_pos_arr = np.argwhere(observation[:, :, 3] == 1)
+    if len(opp_pos_arr) > 0:
+      self.belief_opp_pos = tuple(opp_pos_arr[0])
+    elif self.belief_opp_pos is not None:
+      r_opp, c_opp = self.belief_opp_pos
+      if vis_map[r_opp, c_opp] == 1:
+        self.belief_opp_pos = None
 
   def get_subgoal_heatmap(self, observation):
+    self.update_belief(observation)
     h, w = observation.shape[:2]
     heatmap = np.zeros((h, w), dtype=np.float32)
 
     agent_pos_arr = np.argwhere(observation[:, :, 2] == 1)
-    opp_pos_arr = np.argwhere(observation[:, :, 3] == 1)
-    food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
+    food_positions = list(self.belief_food)
 
-    if len(agent_pos_arr) == 0 or len(opp_pos_arr) == 0 or not food_positions:
+    if len(agent_pos_arr) == 0 or not food_positions:
       return heatmap
 
-    my_pos, opp_pos = tuple(agent_pos_arr[0]), tuple(opp_pos_arr[0])
+    my_pos = tuple(agent_pos_arr[0])
+    opp_pos = self.belief_opp_pos
 
     if self.precomputed_paths is None:
       wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
@@ -373,7 +532,10 @@ class GreedySwitchAgent:
     dists = []
     for f in food_positions:
       my_dist = len(self.precomputed_paths.get((my_pos, f), []))
-      opp_dist = len(self.precomputed_paths.get((opp_pos, f), []))
+      if opp_pos is not None:
+        opp_dist = len(self.precomputed_paths.get((opp_pos, f), []))
+      else:
+        opp_dist = float('inf')
       dists.append((my_dist, opp_dist, f))
 
     dists.sort(key=lambda x: x[0])
@@ -387,7 +549,6 @@ class GreedySwitchAgent:
         break
 
     if target_food is not None:
-      # It wants to stick with the current target, but verify safety logic
       chosen_dist = next(d for d in dists if d[2] == target_food)
       if chosen_dist[1] < chosen_dist[0]:
         safer_foods = [d for d in dists if d[0] <= d[1]]
@@ -396,7 +557,6 @@ class GreedySwitchAgent:
           target_food = safer_foods[0][2]
       heatmap[target_food[0], target_food[1]] = 1.0
     else:
-      # Distribute probability equally among all ties, evaluating safety logic for each
       prob_per_tie = 1.0 / len(tie_foods)
       for d in tie_foods:
         potential_target = d[2]
@@ -411,18 +571,17 @@ class GreedySwitchAgent:
 
   def select_action(self, observation, eval=False):
     my_channel = 2
-    opp_channel = 3
+    self.update_belief(observation)
     heatmap = self.get_subgoal_heatmap(observation)
     agent_pos_arr = np.argwhere(observation[:, :, my_channel] == 1)
-    opp_pos_arr = np.argwhere(observation[:, :, opp_channel] == 1)
 
-    if len(agent_pos_arr) == 0 or len(opp_pos_arr) == 0:
-      return np.random.randint(0, 4), None
+    if len(agent_pos_arr) == 0:
+      return np.random.randint(0, 4), None, heatmap
 
     my_pos = tuple(agent_pos_arr[0])
-    opp_pos = tuple(opp_pos_arr[0])
+    opp_pos = self.belief_opp_pos
 
-    food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
+    food_positions = list(self.belief_food)
     if not food_positions:
       return np.random.randint(0, 4), None, heatmap
 
@@ -432,11 +591,13 @@ class GreedySwitchAgent:
       self.precomputed_paths = precompute_paths(
         obstacles, observation.shape[0], observation.shape[1])
 
-    # Compute distances to all food and sort by my distance
     dists = []
     for f in food_positions:
       my_dist = len(self.precomputed_paths.get((my_pos, f), []))
-      opp_dist = len(self.precomputed_paths.get((opp_pos, f), []))
+      if opp_pos is not None:
+        opp_dist = len(self.precomputed_paths.get((opp_pos, f), []))
+      else:
+        opp_dist = float('inf')
       dists.append((my_dist, opp_dist, f))
 
     dists.sort(key=lambda x: x[0])
@@ -459,13 +620,11 @@ class GreedySwitchAgent:
         safer_foods.sort(key=lambda x: x[0])
         target_food = safer_foods[0][2]
 
-    # recompute path to the chosen target food only when needed
     if self.current_target != target_food or not self.cached_path:
       self.current_target = target_food
       if (my_pos, target_food) in self.precomputed_paths:
         self.cached_path = self.precomputed_paths[(my_pos, target_food)].copy()
       else:
-        # Fallback to on-the-fly A*
         wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
         obstacles = set(tuple(p) for p in wall_pos_arr)
         self.cached_path = a_star_path(
@@ -479,40 +638,98 @@ class GreedySwitchAgent:
 
 class StalkerAgent:
   """
-  A Hyper-Reactive Interceptor. It never chases lost races. It identifies the nearest 
-  food where it has a positional advantage over the opponent, races there, and loiters 
-  1 tile away to steal it at the last second.
+  A Hyper-Reactive Interceptor. It identifies the nearest food in its belief map 
+  where it has a positional advantage over the opponent, races there, and loiters 1 tile away.
   """
 
-  def __init__(self, agent_id, precomputed_paths=None):
+  def __init__(self, agent_id, precomputed_paths=None, map_layout=None):
     self.agent_id = agent_id
     self.precomputed_paths = precomputed_paths
+    self.initial_food, self.initial_opp_pos = _parse_map_for_agent(agent_id, map_layout)
+    self.belief_food = None
+    self.belief_opp_pos = None
 
-  def reset(self):
-    pass
+  def reset(self, initial_food=None, initial_opp_pos=None):
+    self.belief_food = set(initial_food) if initial_food is not None else set(self.initial_food)
+    self.belief_opp_pos = initial_opp_pos if initial_opp_pos is not None else self.initial_opp_pos
+
+  def update_belief(self, observation):
+    vis_map = observation[:, :, 5] if observation.shape[2] >= 6 else np.ones(observation.shape[:2], dtype=np.int8)
+
+    if self.belief_food is None:
+      self.belief_food = set()
+      food_pos_arr = np.argwhere(observation[:, :, 1] == 1)
+      for p in food_pos_arr:
+        self.belief_food.add(tuple(p))
+
+    visible_indices = np.argwhere(vis_map == 1)
+    for r, c in visible_indices:
+      pos = (r, c)
+      if observation[r, c, 1] == 1:
+        self.belief_food.add(pos)
+      else:
+        self.belief_food.discard(pos)
+
+    opp_pos_arr = np.argwhere(observation[:, :, 3] == 1)
+    if len(opp_pos_arr) > 0:
+      self.belief_opp_pos = tuple(opp_pos_arr[0])
+    elif self.belief_opp_pos is not None:
+      r_opp, c_opp = self.belief_opp_pos
+      if vis_map[r_opp, c_opp] == 1:
+        self.belief_opp_pos = None
 
   def get_subgoal_heatmap(self, observation):
+    self.update_belief(observation)
     h, w = observation.shape[:2]
     heatmap = np.zeros((h, w), dtype=np.float32)
 
     my_pos_arr = np.argwhere(observation[:, :, 2] == 1)
-    enemy_pos_arr = np.argwhere(observation[:, :, 3] == 1)
-    food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
+    food_positions = list(self.belief_food)
 
-    if len(my_pos_arr) == 0 or len(enemy_pos_arr) == 0 or not food_positions:
+    if len(my_pos_arr) == 0 or not food_positions:
       return heatmap
 
-    my_pos, opp_pos = tuple(my_pos_arr[0]), tuple(enemy_pos_arr[0])
+    my_pos = tuple(my_pos_arr[0])
+    opp_pos = self.belief_opp_pos
 
     if self.precomputed_paths is None:
       wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
       self.precomputed_paths = precompute_paths(
         set(tuple(p) for p in wall_pos_arr), h, w)
 
+    if opp_pos is None:
+      unseen_pos_arr = np.argwhere(observation[:, :, 5] == 0)
+      if len(unseen_pos_arr) > 0:
+        unseen_dists = []
+        for p in unseen_pos_arr:
+          pt = tuple(p)
+          s_path = self.precomputed_paths.get((my_pos, pt), [])
+          if len(s_path) > 0:
+            unseen_dists.append((len(s_path), pt))
+        if unseen_dists:
+          min_s_dist = min(d[0] for d in unseen_dists)
+          tie_unseen = [pt for sd, pt in unseen_dists if sd == min_s_dist]
+          prob = 1.0 / len(tie_unseen)
+          for pt in tie_unseen:
+            heatmap[pt[0], pt[1]] = prob
+          return heatmap
+      
+      greedy_foods = []
+      for f in food_positions:
+        s_dist = len(self.precomputed_paths.get((my_pos, f), [])) or float('inf')
+        if s_dist != float('inf'):
+          greedy_foods.append((s_dist, f))
+      if greedy_foods:
+        min_s_dist = min(d[0] for d in greedy_foods)
+        tie_foods = [f for sd, f in greedy_foods if sd == min_s_dist]
+        prob = 1.0 / len(tie_foods)
+        for f in tie_foods:
+          heatmap[f[0], f[1]] += prob
+      return heatmap
+
     winnable_foods = []
     for f in food_positions:
-      e_dist = len(self.precomputed_paths.get(
-        (opp_pos, f), [])) or float('inf')
+      e_dist = len(self.precomputed_paths.get((opp_pos, f), [])) or float('inf')
       s_dist = len(self.precomputed_paths.get((my_pos, f), [])) or float('inf')
       if s_dist <= e_dist and s_dist != float('inf'):
         winnable_foods.append((e_dist, s_dist, f))
@@ -526,11 +743,9 @@ class StalkerAgent:
       for f in tie_foods:
         heatmap[f[0], f[1]] += prob
     else:
-      # Fallback to greedy distribution
       greedy_foods = []
       for f in food_positions:
-        s_dist = len(self.precomputed_paths.get(
-          (my_pos, f), [])) or float('inf')
+        s_dist = len(self.precomputed_paths.get((my_pos, f), [])) or float('inf')
         if s_dist != float('inf'):
           greedy_foods.append((s_dist, f))
 
@@ -547,20 +762,17 @@ class StalkerAgent:
 
   def select_action(self, observation, eval=False):
     my_channel = 2
-    opp_channel = 3
-
+    self.update_belief(observation)
     heatmap = self.get_subgoal_heatmap(observation)
 
     my_pos_arr = np.argwhere(observation[:, :, my_channel] == 1)
-    enemy_pos_arr = np.argwhere(observation[:, :, opp_channel] == 1)
-
-    if len(my_pos_arr) == 0 or len(enemy_pos_arr) == 0:
+    if len(my_pos_arr) == 0:
       return np.random.randint(0, 4), None, heatmap
 
     my_pos = tuple(my_pos_arr[0])
-    opp_pos = tuple(enemy_pos_arr[0])
+    opp_pos = self.belief_opp_pos
 
-    food_positions = [tuple(p) for p in np.argwhere(observation[:, :, 1] == 1)]
+    food_positions = list(self.belief_food)
     if not food_positions:
       return np.random.randint(0, 4), None, heatmap
 
@@ -570,48 +782,66 @@ class StalkerAgent:
       self.precomputed_paths = precompute_paths(
         obstacles, observation.shape[0], observation.shape[1])
 
-    # --- 1. Filter Unwinnable Races & Find Advantage ---
+    if opp_pos is None:
+      unseen_pos_arr = np.argwhere(observation[:, :, 5] == 0)
+      if len(unseen_pos_arr) > 0:
+        unseen_dists = []
+        for p in unseen_pos_arr:
+          pt = tuple(p)
+          s_path = self.precomputed_paths.get((my_pos, pt), [])
+          if len(s_path) > 0:
+            unseen_dists.append((len(s_path), pt, s_path))
+        if unseen_dists:
+          unseen_dists.sort(key=lambda x: x[0])
+          min_s_dist = unseen_dists[0][0]
+          tie_unseen = [d for d in unseen_dists if d[0] == min_s_dist]
+          chosen = tie_unseen[np.random.randint(len(tie_unseen))]
+          return chosen[2][0], None, heatmap
+      
+      greedy_foods = []
+      for f in food_positions:
+        s_path = self.precomputed_paths.get((my_pos, f), [])
+        s_dist = len(s_path) if len(s_path) > 0 else float('inf')
+        if s_dist != float('inf'):
+          greedy_foods.append((s_dist, f, s_path))
+      if greedy_foods:
+        greedy_foods.sort(key=lambda x: x[0])
+        min_s_dist = greedy_foods[0][0]
+        tie_foods = [d for d in greedy_foods if d[0] == min_s_dist]
+        chosen = tie_foods[np.random.randint(len(tie_foods))]
+        return chosen[2][0], None, heatmap
+      return np.random.randint(0, 4), None, heatmap
+
     winnable_foods = []
     for f in food_positions:
       e_path = self.precomputed_paths.get((opp_pos, f), [])
-      s_path = self.precomputed_paths.get((my_pos, f), [])
       e_dist = len(e_path) if len(e_path) > 0 else float('inf')
+      s_path = self.precomputed_paths.get((my_pos, f), [])
       s_dist = len(s_path) if len(s_path) > 0 else float('inf')
 
-      # Only target foods where we can beat or tie the opponent
       if s_dist <= e_dist and s_dist != float('inf'):
         winnable_foods.append((e_dist, s_dist, f))
 
-    # --- 2. Select Target ---
     if winnable_foods:
-      # Sort by Enemy Distance ascending. We want to intercept them as soon as possible.
       winnable_foods.sort(key=lambda x: x[0])
       min_e_dist = winnable_foods[0][0]
 
-      # Stochastic tie-breaking
       tie_foods = [f for ed, sd, f in winnable_foods if ed == min_e_dist]
       target_food = tie_foods[np.random.randint(len(tie_foods))]
 
-      # --- 3. AMBUSH / LOITER CHECK ---
       s_path = self.precomputed_paths.get((my_pos, target_food), [])
       s_dist = len(s_path)
 
       if s_dist == 1 and min_e_dist > 2:
-        # We are exactly 1 tile away, and the enemy is not close enough yet.
-        # LOITER: Intentionally bump a wall to skip our turn and wait.
         wall_pos_arr = np.argwhere(observation[:, :, 4] == 1)
         obstacles = set(tuple(p) for p in wall_pos_arr)
 
-        # 0: Up, 1: Down, 2: Left, 3: Right
         for action, (dr, dc) in enumerate([(-1, 0), (1, 0), (0, -1), (0, 1)]):
           nr, nc = my_pos[0] + dr, my_pos[1] + dc
           if (nr, nc) in obstacles:
             return action, None, heatmap
-        return np.random.randint(0, 4), None, heatmap  # Fallback
-
+        return np.random.randint(0, 4), None, heatmap
     else:
-      # We are losing ALL races. The enemy has cleared their side.
-      # Fallback to pure greedy to secure whatever points are left.
       greedy_foods = []
       for f in food_positions:
         s_path = self.precomputed_paths.get((my_pos, f), [])
@@ -627,8 +857,6 @@ class StalkerAgent:
       else:
         return np.random.randint(0, 4), None, heatmap
 
-    # --- 4. Execution ---
-    # Take a single step towards the target_food. We re-evaluate next frame.
     p_path = self.precomputed_paths.get((my_pos, target_food), [])
     if p_path:
       return p_path[0], None, heatmap
@@ -641,30 +869,34 @@ class ChameleonAgent:
   Opponent that switches between Simple and Greedy.
   """
 
-  def __init__(self, agent_id, precomputed_paths=None):
+  def __init__(self, agent_id, precomputed_paths=None, map_layout=None):
     self.agent_id = agent_id
-    self.simple_agent = SimpleAgent(agent_id, precomputed_paths)
-    self.greedy_agent = GreedySwitchAgent(agent_id, precomputed_paths)
+    self.simple_agent = SimpleAgent(agent_id, precomputed_paths, map_layout)
+    self.greedy_agent = GreedySwitchAgent(agent_id, precomputed_paths, map_layout)
     self.current_persona = "greedy"
 
-  def reset(self):
-    self.simple_agent.reset()
-    self.greedy_agent.reset()
+  def reset(self, initial_food=None, initial_opp_pos=None):
+    self.simple_agent.reset(initial_food, initial_opp_pos)
+    self.greedy_agent.reset(initial_food, initial_opp_pos)
+
+  def update_belief(self, observation):
+    self.simple_agent.update_belief(observation)
+    self.greedy_agent.update_belief(observation)
 
   def get_subgoal_heatmap(self, observation):
-    # The true prior is the weighted sum of its internal heuristic choices
     simple_hm = self.simple_agent.get_subgoal_heatmap(observation)
     greedy_hm = self.greedy_agent.get_subgoal_heatmap(observation)
     return (0.3 * simple_hm) + (0.7 * greedy_hm)
 
   def select_action(self, observation, eval=False):
     heatmap = self.get_subgoal_heatmap(observation)
-    # 30% chance to be Simple, 70% to be Greedy
     new_persona = "simple" if np.random.rand() < 0.3 else "greedy"
 
     if new_persona != self.current_persona:
-      self.simple_agent.reset()
-      self.greedy_agent.reset()
+      b_food = self.greedy_agent.belief_food if self.current_persona == "greedy" else self.simple_agent.belief_food
+      b_opp = self.greedy_agent.belief_opp_pos if self.current_persona == "greedy" else self.simple_agent.belief_opp_pos
+      self.simple_agent.reset(b_food, b_opp)
+      self.greedy_agent.reset(b_food, b_opp)
       self.current_persona = new_persona
 
     if self.current_persona == "simple":
@@ -673,3 +905,4 @@ class ChameleonAgent:
       action, _, _ = self.greedy_agent.select_action(observation, eval)
 
     return action, None, heatmap
+

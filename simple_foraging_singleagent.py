@@ -19,7 +19,7 @@ from omg_args import OMGArgs
 from q_agent import QLearningAgent
 from q_agent_classic import QLearningAgentClassic
 
-matplotlib.use('Agg')  # Prevents memory leak on headless clusters
+# matplotlib.use('Agg')  # Prevents memory leak on headless clusters
 torch.set_float32_matmul_precision('high')
 
 map_layouts = [getattr(maps, m) for m in dir(maps) if m.startswith("MAP_")]
@@ -69,6 +69,8 @@ parser.add_argument('--folder_id', type=int, default=0,
                     help='Folder ID for saving models and diagrams')
 parser.add_argument('--true_intent', action='store_true', default=False,
                     help='Whether to include true intent map in the state input for the OM agent')
+parser.add_argument('--render', action='store_true', default=False,
+                    help='Watch the global state, shrouded maps, and OM predictions in real-time')
 args_parsed = parser.parse_args()
 
 # Setup directories
@@ -235,7 +237,7 @@ for epoch in range(num_epochs):
   eval_rets, eval_opp_rets, eval_steps = [], [], []
   for _ in range(eval_episodes):
     test_stats = agent_om.run_test_episode(
-      opponent_agent, max_steps=args.max_steps, render=False)
+      opponent_agent, max_steps=args.max_steps, render=args_parsed.render)
     eval_rets.append(test_stats['return'])
     eval_opp_rets.append(test_stats['opp_return'])
     eval_steps.append(test_stats['steps'])

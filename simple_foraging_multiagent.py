@@ -20,7 +20,7 @@ from omg_args import OMGArgs
 from slq_agent import FSPAgentOM
 from slq_agent_classic import FSPAgentClassic
 
-matplotlib.use('Agg')  # Prevents memory leak on headless clusters
+# matplotlib.use('Agg')  # Prevents memory leak on headless clusters
 torch.set_float32_matmul_precision('high')
 
 map_layouts = [getattr(maps, m) for m in dir(maps) if m.startswith("MAP_")]
