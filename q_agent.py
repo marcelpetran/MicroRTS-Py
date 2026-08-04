@@ -9,6 +9,7 @@ from networks import QNet
 import numpy as np
 import torch
 import torch.nn as nn
+from renderer import RealtimeRenderer
 import torch.nn.functional as F
 from torch.distributions import Categorical
 import matplotlib.pyplot as plt
@@ -377,7 +378,7 @@ class QLearningAgent:
       final_t = episode_transitions[-1]
 
       if final_t["opp_reward"] == 0:
-        opp_pos_arr = np.argwhere(final_t["state"][:, :, 3] == 1)
+        opp_pos_arr = np.argwhere(final_t["global_state"][:, :, 3] == 1)
         if len(opp_pos_arr) > 0:
           current_true_goal_pos = tuple(opp_pos_arr[0])
 
@@ -386,7 +387,7 @@ class QLearningAgent:
 
       # Did the opponent get a reward this step? (New true goal achieved)
       if t["opp_reward"] > 0:
-        opp_pos_indices = np.argwhere(t["next_state"][:, :, 3] == 1)
+        opp_pos_indices = np.argwhere(t["next_global_state"][:, :, 3] == 1)
         if len(opp_pos_indices) > 0:
           current_true_goal_pos = tuple(opp_pos_indices[0])
 
@@ -453,7 +454,9 @@ class QLearningAgent:
 
       ep_entropy += step_entropy
 
+      global_state = self.env.get_global_state()
       next_obs, reward, done, info = self.env.step(actions)
+      next_global_state = self.env.get_global_state()
 
       if hasattr(opponent_agent, 'replay'):
         opp_step_info = {
@@ -477,11 +480,13 @@ class QLearningAgent:
       # Store the step without the true label
       transition = {
           "state": obs[0].copy(),
+          "global_state": global_state.copy(),
           "action": a,
           "opp_action": a_opponent,
           "reward": float(reward[0]),
           "opp_reward": float(reward[1]),
           "next_state": next_obs[0].copy(),
+          "next_global_state": next_global_state.copy(),
           "done": bool(done),
           "history": history_cpu,  # Store the raw history for hindsight labeling later
           "true_opp_heatmap": opp_true_map.copy()
@@ -548,6 +553,7 @@ class QLearningAgent:
     obs = self.env.reset()
     opponent_agent.reset()
     done = False
+    renderer = RealtimeRenderer() if render else None
     ep_ret = 0.0
     opp_ret = 0.0
     ep_entropy = 0.0
@@ -579,11 +585,8 @@ class QLearningAgent:
       actions = {0: a, 1: a_opponent}
 
       if render:
-        self.heatmap_q_values(
-          g_map, f"./diagrams/{self.args.folder_id}/q_heatmap_step{self.global_step + step}.png")
-        self.heatmap_subgoal(
-          g_map, f"./diagrams/{self.args.folder_id}/gmap_step{self.global_step + step}.png")
-        self.env.render()
+        global_state = self.env.get_global_state()
+        renderer.render(global_state, obs[0], obs[1], g_map)
 
       if g_map.dim() == 2:
         g_map = g_map.unsqueeze(0)  # (1, H, W)
@@ -645,8 +648,11 @@ class QLearningAgent:
       kd_errors.extend(ep_kl_errors)
       spatial_errors.extend(ep_spatial_errors)
 
+    if render and renderer is not None:
+      renderer.close()
+
     return {
-      "return": ep_ret,
+        "return": ep_ret,
       "steps": step + 1,
       "opp_return": opp_ret,
       "avg_entropy": ep_entropy / (step + 1),
