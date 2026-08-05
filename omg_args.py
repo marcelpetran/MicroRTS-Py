@@ -33,7 +33,7 @@ class OMGArgs:
   state_shape: Tuple[int, int, int] = None  # (H, W, F)
   H: int = 7  # grid height
   W: int = 7  # grid width
-  action_dim: int = 4
+  action_dim: int = 5
   d_model: int = 64
   nhead: int = 4
   num_encoder_layers: int = 1

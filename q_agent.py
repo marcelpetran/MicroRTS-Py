@@ -450,6 +450,10 @@ class QLearningAgent:
       }
       a, g_map, step_entropy = self.select_action(obs[0], history_gpu)
       a_opponent, _, opp_true_map = opponent_agent.select_action(obs[1])
+      
+      opponent_visible = np.any(obs[0][:, :, 3] == 1)
+      observed_a_opponent = a_opponent if opponent_visible else 4
+      
       actions = {0: a, 1: a_opponent}
 
       ep_entropy += step_entropy
@@ -482,7 +486,8 @@ class QLearningAgent:
           "state": obs[0].copy(),
           "global_state": global_state.copy(),
           "action": a,
-          "opp_action": a_opponent,
+          "opp_action": observed_a_opponent,
+          "true_opp_action": a_opponent,
           "reward": float(reward[0]),
           "opp_reward": float(reward[1]),
           "next_state": next_obs[0].copy(),
@@ -506,7 +511,7 @@ class QLearningAgent:
       rolling_mask = torch.roll(rolling_mask, shifts=-1, dims=1)
 
       rolling_feats[:, -1, :] = new_feat
-      rolling_actions[:, -1] = a_opponent
+      rolling_actions[:, -1] = observed_a_opponent
 
       if current_seq_len < history_len:
         current_seq_len += 1
@@ -582,6 +587,10 @@ class QLearningAgent:
         obs[0], history, eval=True)
       a_opponent, _, opp_heatmap = opponent_agent.select_action(
         obs[1], eval=True)
+        
+      opponent_visible = np.any(obs[0][:, :, 3] == 1)
+      observed_a_opponent = a_opponent if opponent_visible else 4
+        
       actions = {0: a, 1: a_opponent}
 
       if render:
@@ -613,7 +622,7 @@ class QLearningAgent:
       rolling_mask = torch.roll(rolling_mask, shifts=-1, dims=1)
 
       rolling_feats[:, -1, :] = new_feat
-      rolling_actions[:, -1] = a_opponent
+      rolling_actions[:, -1] = observed_a_opponent
 
       if current_seq_len < history_len:
         current_seq_len += 1

@@ -358,6 +358,12 @@ class FSPAgentOM:
           a_opponent = opp_sl_a
           opp_is_rl = False
 
+      opponent_visible = np.any(obs[0][:, :, 3] == 1)
+      observed_a_opponent = a_opponent if opponent_visible else 4
+      
+      agent_visible = np.any(obs[1][:, :, 3] == 1)
+      observed_a = a if agent_visible else 4
+
       actions = {0: a, 1: a_opponent}
 
       global_state = self.env.get_global_state()
@@ -380,7 +386,8 @@ class FSPAgentOM:
           "state": obs[0].copy(),
           "global_state": global_state.copy(),
           "action": a,
-          "opp_action": a_opponent,
+          "opp_action": observed_a_opponent,
+          "true_opp_action": a_opponent,
           "reward": float(reward[0]),
           "opp_reward": float(reward[1]),
           "next_state": next_obs[0].copy(),
@@ -411,10 +418,10 @@ class FSPAgentOM:
       opp_rolling_mask = torch.roll(opp_rolling_mask, shifts=-1, dims=1)
 
       rolling_feats[:, -1, :] = new_feat
-      rolling_actions[:, -1] = a_opponent
+      rolling_actions[:, -1] = observed_a_opponent
 
       opp_rolling_feats[:, -1, :] = opp_new_feat
-      opp_rolling_actions[:, -1] = a
+      opp_rolling_actions[:, -1] = observed_a
 
       if current_seq_len < history_len:
         current_seq_len += 1
@@ -493,6 +500,12 @@ class FSPAgentOM:
         else:
           a_opponent, _ = opponent_agent.select_action(obs[1], eval=True)
 
+      opponent_visible = np.any(obs[0][:, :, 3] == 1)
+      observed_a_opponent = a_opponent if opponent_visible else 4
+      
+      agent_visible = np.any(obs[1][:, :, 3] == 1)
+      observed_a = a if agent_visible else 4
+      
       actions = {0: a, 1: a_opponent}
       next_obs, reward, done, info = self.env.step(actions)
 
@@ -514,10 +527,10 @@ class FSPAgentOM:
       opp_rolling_mask = torch.roll(opp_rolling_mask, shifts=-1, dims=1)
 
       rolling_feats[:, -1, :] = new_feat
-      rolling_actions[:, -1] = a_opponent
+      rolling_actions[:, -1] = observed_a_opponent
 
       opp_rolling_feats[:, -1, :] = opp_new_feat
-      opp_rolling_actions[:, -1] = a
+      opp_rolling_actions[:, -1] = observed_a
 
       if current_seq_len < history_len:
         current_seq_len += 1
