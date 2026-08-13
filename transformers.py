@@ -60,13 +60,15 @@ class SpatialOpponentModel(nn.Module):
     # CNN feature extractor to embed each (H, W, F) state into a d_model vector
     # Projects (H, W, F) -> d_model
     self.feature_extractor = nn.Sequential(
-        nn.Conv2d(F_dim, 16, kernel_size=3, padding=1),
+        nn.Conv2d(F_dim, 32, kernel_size=3, padding=1),
+        nn.ReLU(),
+        nn.Conv2d(32, 32, kernel_size=3, padding=1),
+        nn.ReLU(),
+        nn.Conv2d(32, 64, kernel_size=3, padding=1),
         nn.ReLU(),
         nn.Flatten(),
-        nn.Linear(16 * H * W, args.d_model)
+        nn.Linear(64 * H * W, args.d_model)
     )
-
-    self.action_embedder = nn.Embedding(args.action_dim, args.d_model)
 
     self.pos_encoder = PositionalEncoding(
       args.d_model, seq_len=args.max_history_length + 1, dropout=args.dropout)
@@ -89,28 +91,6 @@ class SpatialOpponentModel(nn.Module):
         nn.Linear(128, H * W)
     )
 
-  def visualize_action_embeddings(self, filename: str = "action_embeddings.png"):
-    # Extract the weights from the embedding layer: shape (4, d_model)
-    action_weights = self.action_embedder.weight.detach().cpu().numpy()
-
-    # Reduce to 2 dimensions using PCA
-    pca = PCA(n_components=2)
-    actions_2d = pca.fit_transform(action_weights)
-
-    action_labels = ['Up', 'Down', 'Left', 'Right']
-
-    plt.figure(figsize=(6, 6))
-    plt.scatter(actions_2d[:, 0], actions_2d[:, 1], color='red', s=100)
-
-    for i, label in enumerate(action_labels):
-      plt.annotate(label, (actions_2d[i, 0], actions_2d[i, 1]),
-                   xytext=(5, 5), textcoords='offset points', fontsize=12)
-
-    plt.title("PCA of Action Embeddings")
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.savefig(filename)
-    plt.show()
-
   def get_features(self, x: torch.Tensor) -> torch.Tensor:
     """Helper function to extract features from a single state tensor (B, H, W, F)."""
     x_flat = x.permute(0, 3, 1, 2)
@@ -127,9 +107,8 @@ class SpatialOpponentModel(nn.Module):
     x_feat = self.get_features(x).unsqueeze(1)  # (B, 1, d_model)
 
     # Embed History
-    hist_actions = history['actions']  # (B, T)
     hist_mask = history['mask']      # (B, T) True for valid tokens
-    T = hist_actions.shape[1]
+    T = hist_mask.shape[1]
 
     if cached_features:
       hist_feat = history['state_features']  # (B, T, d_model)
@@ -137,10 +116,6 @@ class SpatialOpponentModel(nn.Module):
       hist_states = history['states']  # (B, T, H, W, F)
       hist_flat = hist_states.reshape(B * T, H, W, F_dim)
       hist_feat = self.get_features(hist_flat).reshape(B, T, -1)
-
-    hist_action_feat = self.action_embedder(hist_actions)  # (B, T, d_model)
-
-    hist_feat = hist_feat + hist_action_feat  # (B, T, d_model)
 
     # Prepend current state
     seq_feats = torch.cat([x_feat, hist_feat], dim=1)  # (B, 1 + T, d_model)

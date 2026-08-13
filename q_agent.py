@@ -251,40 +251,15 @@ class QLearningAgent:
     with torch.no_grad():
       self.model.inference_model.eval()
 
-      hist_feats = torch.from_numpy(
-          np.array([b["history"]["state_features"][0]
-                   for b in batch], dtype=np.float32)
-      ).to(self.device)
-      hist_acts = torch.from_numpy(
-          np.array([b["history"]["actions"][0] for b in batch], dtype=np.int64)
-      ).to(self.device)
-      hist_mask = torch.from_numpy(
-          np.array([b["history"]["mask"][0] for b in batch])
-      ).to(self.device)
-      hist = {"state_features": hist_feats,
-              "actions": hist_acts, "mask": hist_mask}
-
-      g_logits = self.model.inference_model(s, hist, cached_features=True)
+      # history BEFORE the current state -> g for s
+      hist = self.model.collate_history(batch)
+      g_logits = self.model.inference_model(s, hist, cached_features=False)
       g_map = F.softmax(g_logits.view(len(batch), -1),
                         dim=-1).view_as(g_logits)
 
-      # For next state
-      next_feats = torch.from_numpy(
-          np.array([b["state_feature"] for b in batch], dtype=np.float32)
-      ).to(self.device)
-      hist_feats_next = torch.roll(hist_feats, shifts=-1, dims=1)
-      hist_feats_next[:, -1, :] = next_feats
-      hist_acts_next = torch.roll(hist_acts, shifts=-1, dims=1)
-      hist_acts_next[:, -1] = torch.from_numpy(
-          np.array([b["opp_action"] for b in batch], dtype=np.int64)
-      ).to(self.device)
-      hist_mask_next = torch.roll(hist_mask, shifts=-1, dims=1)
-      hist_mask_next[:, -1] = True
-      hist_next = {"state_features": hist_feats_next,
-                   "actions": hist_acts_next, "mask": hist_mask_next}
-
+      hist_next = self.model.collate_history(batch, extra=1)
       g_logits_next = self.model.inference_model(
-        sp, hist_next, cached_features=True)
+        sp, hist_next, cached_features=False)
       g_map_next = F.softmax(g_logits_next.view(
         len(batch), -1), dim=-1).view_as(g_logits_next)
 
@@ -318,12 +293,8 @@ class QLearningAgent:
     # --- Update the Opponent Model Transformer ---
     om_batch = {
         "states": torch.from_numpy(np.array([b["state"] for b in batch_list], dtype=np.float32)).to(self.device),
-        "history": {
-            "state_features": torch.from_numpy(np.array([b["history"]["state_features"][0] for b in batch_list], dtype=np.float32)).to(self.device),
-            "actions": torch.from_numpy(np.array([b["history"]["actions"][0] for b in batch_list], dtype=np.int64)).to(self.device),
-            "mask": torch.from_numpy(np.array([b["history"]["mask"][0] for b in batch_list], dtype=np.bool_)).to(self.device)
-        },
-        "true_goal_map": torch.from_numpy(np.array([b["true_goal_map"] for b in batch_list], dtype=np.float32)).to(self.device)
+        "history": self.model.collate_history(batch_list),
+        "true_goal_map": torch.from_numpy(np.array([b["true_goal_map"] for b in batch_list], dtype=np.float32)).to(self.device),
     }
 
     # --- Update the Q-Network ---
@@ -341,7 +312,7 @@ class QLearningAgent:
       for param, target_param in zip(self.q.parameters(), self.q_tgt.parameters()):
         target_param.lerp_(param, self.args.tau_soft)
 
-    model_loss = self.model.train_step(om_batch)
+    model_loss = self.model.train_step(om_batch, cached_features=False)
 
     return loss_val, model_loss
 
@@ -356,12 +327,6 @@ class QLearningAgent:
       # The current intent is just the opponent's heatmap for this exact step
       t["true_goal_map"] = t["true_opp_heatmap"].copy()
 
-      # Peek ahead one step for the next_map
-      if i + 1 < num_transitions:
-        t["true_goal_map_next"] = episode_transitions[i + 1]["true_opp_heatmap"].copy()
-      else:
-        t["true_goal_map_next"] = np.zeros((H, W), dtype=np.float32)
-
       if "opp_reward" in t:
         del t["opp_reward"]
 
@@ -371,7 +336,6 @@ class QLearningAgent:
     Modifies the transitions in-place to include 'true_goal_map'.
     """
     current_true_goal_pos = None
-    next_map = np.zeros((H, W), dtype=np.float32)
 
     # 1. Hindsight labeling for truncated episodes
     if len(episode_transitions) > 0:
@@ -397,8 +361,6 @@ class QLearningAgent:
         true_map[current_true_goal_pos[0], current_true_goal_pos[1]] = 1.0
 
       t["true_goal_map"] = true_map
-      t["true_goal_map_next"] = next_map
-      next_map = true_map.copy()
 
       del t["opp_reward"]
 
@@ -430,14 +392,13 @@ class QLearningAgent:
     history_len = self.args.max_history_length
     rolling_feats = torch.zeros(
       (1, history_len, self.args.d_model), device=self.device)
-    rolling_actions = torch.zeros(
-      (1, history_len), dtype=torch.long, device=self.device)
     rolling_mask = torch.zeros(
       (1, history_len), dtype=torch.bool, device=self.device)
     current_seq_len = 0
 
     # Temporary list to hold the episode before hindsight labeling
     episode_transitions = []
+    ep_states = []
 
     # Get grid dimensions for the map
     H, W, _ = obs[0].shape
@@ -445,15 +406,12 @@ class QLearningAgent:
     for step in range(max_steps):
       history_gpu = {
         "state_features": rolling_feats,
-        "actions": rolling_actions,
         "mask": rolling_mask
       }
+
       a, g_map, step_entropy = self.select_action(obs[0], history_gpu)
       a_opponent, _, opp_true_map = opponent_agent.select_action(obs[1])
-      
-      opponent_visible = np.any(obs[0][:, :, 3] == 1)
-      observed_a_opponent = a_opponent if opponent_visible else 4
-      
+
       actions = {0: a, 1: a_opponent}
 
       ep_entropy += step_entropy
@@ -475,27 +433,22 @@ class QLearningAgent:
         if opp_loss is not None:
           opp_loss_val = opp_loss
 
-      history_cpu = {
-          "state_features": rolling_feats.cpu().numpy(),
-          "actions": rolling_actions.cpu().numpy(),
-          "mask": rolling_mask.cpu().numpy()
-      }
-
       # Store the step without the true label
       transition = {
           "state": obs[0].copy(),
           "global_state": global_state.copy(),
           "action": a,
-          "opp_action": observed_a_opponent,
-          "true_opp_action": a_opponent,
           "reward": float(reward[0]),
           "opp_reward": float(reward[1]),
           "next_state": next_obs[0].copy(),
           "next_global_state": next_global_state.copy(),
           "done": bool(done),
-          "history": history_cpu,  # Store the raw history for hindsight labeling later
-          "true_opp_heatmap": opp_true_map.copy()
+          "true_opp_heatmap": opp_true_map.copy(),
+          "hist_len": len(ep_states)
       }
+
+      ep_states.append(obs[0].copy())
+
       episode_transitions.append(transition)
 
       # Update history
@@ -504,14 +457,11 @@ class QLearningAgent:
       with torch.no_grad():
         new_feat = self.model.inference_model.get_features(
           state_tensor)  # (1, d_model)
-      transition["state_feature"] = new_feat.squeeze(0).cpu().numpy()
 
       rolling_feats = torch.roll(rolling_feats, shifts=-1, dims=1)
-      rolling_actions = torch.roll(rolling_actions, shifts=-1, dims=1)
       rolling_mask = torch.roll(rolling_mask, shifts=-1, dims=1)
 
       rolling_feats[:, -1, :] = new_feat
-      rolling_actions[:, -1] = observed_a_opponent
 
       if current_seq_len < history_len:
         current_seq_len += 1
@@ -537,7 +487,9 @@ class QLearningAgent:
       self._apply_hindsight_relabeling(episode_transitions, H, W)
 
     # 3. Push to replay buffer
+    states_arr = np.stack(ep_states)
     for t in episode_transitions:
+      t["history"] = {"states": states_arr}  # shared reference
       self.replay.push(t)
 
     valid_q_losses = [l for l in q_losses if l is not None]
@@ -570,8 +522,6 @@ class QLearningAgent:
     history_len = self.args.max_history_length
     rolling_feats = torch.zeros(
       (1, history_len, self.args.d_model), device=self.device)
-    rolling_actions = torch.zeros(
-      (1, history_len), dtype=torch.long, device=self.device)
     rolling_mask = torch.zeros(
       (1, history_len), dtype=torch.bool, device=self.device)
     current_seq_len = 0
@@ -579,7 +529,6 @@ class QLearningAgent:
     for step in range(max_steps):
       history = {
         "state_features": rolling_feats,
-        "actions": rolling_actions,
         "mask": rolling_mask
       }
 
@@ -587,10 +536,7 @@ class QLearningAgent:
         obs[0], history, eval=True)
       a_opponent, _, opp_heatmap = opponent_agent.select_action(
         obs[1], eval=True)
-        
-      opponent_visible = np.any(obs[0][:, :, 3] == 1)
-      observed_a_opponent = a_opponent if opponent_visible else 4
-        
+
       actions = {0: a, 1: a_opponent}
 
       if render:
@@ -618,11 +564,9 @@ class QLearningAgent:
           state_tensor)  # (1, d_model)
 
       rolling_feats = torch.roll(rolling_feats, shifts=-1, dims=1)
-      rolling_actions = torch.roll(rolling_actions, shifts=-1, dims=1)
       rolling_mask = torch.roll(rolling_mask, shifts=-1, dims=1)
 
       rolling_feats[:, -1, :] = new_feat
-      rolling_actions[:, -1] = observed_a_opponent
 
       if current_seq_len < history_len:
         current_seq_len += 1
@@ -641,7 +585,7 @@ class QLearningAgent:
     kd_errors = []
     spatial_errors = []
 
-    if reward[1] == 0 and reward[0] > 0:
+    if opp_ret == 0 and ep_ret > 0:
       last_valid_step = len(ep_opp_rewards)
       for t in reversed(range(len(ep_opp_rewards))):
         if ep_opp_rewards[t] > 0:
@@ -662,9 +606,9 @@ class QLearningAgent:
 
     return {
         "return": ep_ret,
-      "steps": step + 1,
-      "opp_return": opp_ret,
-      "avg_entropy": ep_entropy / (step + 1),
-      "avg_kl_error": np.mean(kd_errors) if kd_errors else None,
-      "avg_spatial_error": np.mean(spatial_errors) if spatial_errors else None
+        "steps": step + 1,
+        "opp_return": opp_ret,
+        "avg_entropy": ep_entropy / (step + 1),
+        "avg_kl_error": np.mean(kd_errors) if kd_errors else None,
+        "avg_spatial_error": np.mean(spatial_errors) if spatial_errors else None
     }

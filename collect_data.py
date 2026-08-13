@@ -13,15 +13,9 @@ def _label_true_intent(episode_transitions: list, H: int, W: int):
   Applies True Intent labeling (Knowledge Distillation) using the opponent's actual internal heatmap.
   Modifies the transitions in-place to include 'true_goal_map' and 'true_goal_map_next'.
   """
-  num_transitions = len(episode_transitions)
 
   for i, t in enumerate(episode_transitions):
     t["true_goal_map"] = t["true_opp_heatmap"].copy()
-
-    if i + 1 < num_transitions:
-      t["true_goal_map_next"] = episode_transitions[i + 1]["true_opp_heatmap"].copy()
-    else:
-      t["true_goal_map_next"] = np.zeros((H, W), dtype=np.float32)
 
     if "opp_reward" in t:
       del t["opp_reward"]
@@ -54,8 +48,6 @@ def _apply_hindsight_relabeling(episode_transitions: list, H: int, W: int):
       true_map[current_true_goal_pos[0], current_true_goal_pos[1]] = 1.0
 
     t["true_goal_map"] = true_map
-    t["true_goal_map_next"] = next_map
-    next_map = true_map.copy()
 
     del t["opp_reward"]
 

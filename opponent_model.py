@@ -20,59 +20,26 @@ class OpponentModel(nn.Module):
       self.inference_model.parameters(), lr=args.lr)
     self.device = args.device
     self.args = args
+    self.sigma = 1.0  # Standard deviation for Gaussian smoothing of targets
 
-  def collate_history(self, histories: List[Dict]) -> Dict[str, torch.Tensor]:
-    """
-    Pads history sequences to max_len within the batch.
-    """
-    if not histories:
-      return {}
-
-    true_lengths = [len(h.get("states", [])) for h in histories]
+  def collate_history(self, items, extra: int = 0):
     max_len = self.args.max_history_length
-
-    if max_len == 0:
-      return {
-          "states": torch.empty(0).to(self.device),
-          "actions": torch.empty(0).to(self.device),
-          "mask": torch.empty(0).to(self.device)
-      }
-
-    B = len(histories)
+    B = len(items)
     H, W, F_dim = self.args.state_shape
-
-    padded_states_np = np.zeros((B, max_len, H, W, F_dim), dtype=np.float32)
-    padded_actions_np = np.zeros((B, max_len), dtype=np.int64)
-
-    for i, h in enumerate(histories):
-      state_seq = h.get("states", [])
-      action_seq = h.get("actions", [])
-
-      s_len = len(state_seq)
-      if s_len > 0:
-        padded_states_np[i, -s_len:] = state_seq
-
-      a_len = len(action_seq)
-      if a_len > 0:
-        flat_actions = np.array(action_seq, dtype=np.int64).flatten()
-        valid_len = min(len(flat_actions), max_len)
-        padded_actions_np[i, -valid_len:] = flat_actions[-valid_len:]
-
-    final_padded_states = torch.from_numpy(padded_states_np).to(self.device)
-    final_padded_actions = torch.from_numpy(padded_actions_np).to(self.device)
-
-    # Fast mask generation (driven by state length, which is mathematically correct)
-    true_lengths_np = np.array(true_lengths, dtype=np.int64)
-    lengths_tensor = torch.from_numpy(
-      true_lengths_np).to(self.device).unsqueeze(1)
-    mask = torch.arange(max_len, device=self.device).expand(
-      B, max_len) >= (max_len - lengths_tensor)
-
-    return {
-        "states": final_padded_states,
-        "actions": final_padded_actions,
-        "mask": mask
-    }
+    states = torch.zeros((B, max_len, H, W, F_dim),
+                         dtype=torch.float32, device=self.device)
+    mask = torch.zeros((B, max_len), dtype=torch.bool, device=self.device)
+    for i, t in enumerate(items):
+      # frames [0, end) are this transition's history
+      end = t["hist_len"] + extra
+      L = min(end, max_len)
+      if L <= 0:
+        continue
+      start = end - L
+      states[i, -L:] = torch.from_numpy(t["history"]
+                                        ["states"][start:end]).float()
+      mask[i, -L:] = True
+    return {"states": states, "mask": mask}
 
   def heatmap_kl_divergence(self, g_map: torch.Tensor, true_goal_map: torch.Tensor) -> float:
     """
@@ -93,36 +60,6 @@ class OpponentModel(nn.Module):
     kl_div = F.kl_div(log_g_map, true_goal_flat, reduction='batchmean')
 
     return kl_div.item()
-
-  def top1_spatial_error(self, g_map: torch.Tensor, true_goal_map: torch.Tensor) -> float:
-    """
-    Measures the Manhattan distance between the model's most confident prediction 
-    and the closest valid ground-truth target.
-
-    Args:
-        g_map (torch.Tensor): Inferred subgoal heatmap (softmaxed), shape (B, H, W)
-        true_goal_map (torch.Tensor): Ground truth distribution over subgoals, shape (B, H, W)
-    """
-    B, H, W = g_map.shape
-    g_map_flat = g_map.view(B, -1)
-
-    # Get coordinates of highest predicted probability
-    pred_idx = torch.argmax(g_map_flat, dim=-1)
-    pred_r, pred_c = pred_idx // W, pred_idx % W
-
-    total_error = 0.0
-    for b in range(B):
-        # Get all valid true targets for this batch item (where probability > 0)
-      true_targets = torch.nonzero(true_goal_map[b] > 0)
-
-      if len(true_targets) > 0:
-        # Calculate Manhattan distances from the predicted point to all valid true targets
-        dists = torch.abs(
-          true_targets[:, 0] - pred_r[b]) + torch.abs(true_targets[:, 1] - pred_c[b])
-        # Distance to the nearest valid target
-        total_error += torch.min(dists).item()
-
-    return total_error / B
 
   def expected_spatial_error(self, g_map: torch.Tensor, true_goal_map: torch.Tensor) -> float:
     """
@@ -175,7 +112,10 @@ class OpponentModel(nn.Module):
         # Prepare batch data
         om_batch = {
           "states": torch.from_numpy(np.stack([b["state"] for b in batch_data], dtype=np.float32)).to(self.device, non_blocking=True),
-          "history": self.collate_history([b["history"] for b in batch_data]),
+          "history": self.collate_history([
+              {"hist_len": len(h.get("states", [])), "history": h}
+              for h in (b["history"] for b in batch_data)
+          ]),
           "true_goal_map": torch.from_numpy(np.stack([b["true_goal_map"] for b in batch_data], dtype=np.float32)).to(self.device, non_blocking=True),
           "true_opp_heatmap": torch.from_numpy(np.stack([b["true_opp_heatmap"] for b in batch_data], dtype=np.float32)).to(self.device, non_blocking=True),
         }
@@ -217,7 +157,7 @@ class OpponentModel(nn.Module):
     """
     return self.inference_model(x, history, cached_features=cached_features)
 
-  def _generate_soft_targets(self, target_map: torch.Tensor, sigma: float = 1.0):
+  def _generate_soft_targets(self, target_map: torch.Tensor):
     """
     Applies a Gaussian filter directly on the GPU using PyTorch Conv2d.
     This makes model learn faster and maybe even avoids getting stuck in local minima 
@@ -226,13 +166,13 @@ class OpponentModel(nn.Module):
     with higher values creating a wider "hill" around the true target location.
     target_map: (B, H, W)
     """
-    kernel_size = int(2 * math.ceil(2 * sigma) + 1)
+    kernel_size = int(2 * math.ceil(2 * self.sigma) + 1)
 
     # Create 1D Gaussian kernel
     x = torch.arange(kernel_size, dtype=torch.float32,
                      device=target_map.device)
     x = x - kernel_size // 2
-    kernel_1d = torch.exp(-x**2 / (2 * sigma**2))
+    kernel_1d = torch.exp(-x**2 / (2 * self.sigma**2))
     kernel_1d = kernel_1d / kernel_1d.sum()
 
     # Create 2D Gaussian kernel via outer product
@@ -265,10 +205,9 @@ class OpponentModel(nn.Module):
     self.inference_model.train()
     pred_logits = self.forward(x, history, cached_features=False)  # (B, H, W)
 
-    # when using true intent heatmap as target, use KL divergence loss
     if not self.args.true_intent:
       # Generate soft targets with Gaussian smoothing
-      soft_targets = self._generate_soft_targets(target_map, sigma=1.0)
+      soft_targets = self._generate_soft_targets(target_map)
     log_probs = F.log_softmax(
       pred_logits.view(pred_logits.shape[0], -1), dim=-1)
     target_dist = soft_targets.view(soft_targets.shape[0], -1)
@@ -283,12 +222,11 @@ class OpponentModel(nn.Module):
     g_map = F.softmax(pred_logits.view(pred_logits.shape[0], -1),
                       dim=-1).view_as(pred_logits)  # (B, H, W)
     kl_div = self.heatmap_kl_divergence(g_map, opp_heatmap)
-    # spatial_error = self.top1_spatial_error(g_map, opp_heatmap)
     spatial_error = self.expected_spatial_error(g_map, opp_heatmap)
     wandb.log({
       "train/batch_loss": loss_val,
       "train/kl_divergence": kl_div,
-      "train/top1_spatial_error": spatial_error,
+      "train/expected_spatial_error": spatial_error,
       "step": step,
       "epoch": epoch
     })
@@ -303,21 +241,13 @@ class OpponentModel(nn.Module):
     self.inference_model.train()
     pred_logits = self.forward(x, history, cached_features)  # (B, H, W)
 
-    
-
-    # when using opp heatmap as target
-    if self.args.true_intent:
-      log_probs = F.log_softmax(
-        pred_logits.view(pred_logits.shape[0], -1), dim=-1)
-      target_dist = target_map.view(target_map.shape[0], -1)
-      loss = F.kl_div(log_probs, target_dist, reduction='batchmean')
-    else:
+    if not self.args.true_intent:
       # Generate soft targets with Gaussian smoothing
-      soft_targets = self._generate_soft_targets(target_map, sigma=1.0)
-      loss = F.binary_cross_entropy_with_logits(
-          pred_logits.view(pred_logits.shape[0], -1),
-          soft_targets.view(soft_targets.shape[0], -1)
-      )
+      soft_targets = self._generate_soft_targets(target_map)
+    log_probs = F.log_softmax(
+      pred_logits.view(pred_logits.shape[0], -1), dim=-1)
+    target_dist = soft_targets.view(soft_targets.shape[0], -1)
+    loss = F.kl_div(log_probs, target_dist, reduction='batchmean')
 
     loss_val = loss.item()
     self.optimizer.zero_grad()
