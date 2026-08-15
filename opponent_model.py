@@ -1,257 +1,295 @@
-from typing import Dict, Tuple, List
-import random
 import math
-from scipy import spatial
+import random
+from typing import Dict, List, Tuple
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from omg_args import OMGArgs
 from tqdm import tqdm
+
 import wandb
+from omg_args import OMGArgs
+from transformers import SpatialOpponentModel
 
 
 class OpponentModel(nn.Module):
-  def __init__(self, model, args: OMGArgs = OMGArgs()):
-    super(OpponentModel, self).__init__()
-    self.inference_model = model
-    # self.inference_model = torch.compile(self.inference_model)
-    self.optimizer = torch.optim.Adam(
-      self.inference_model.parameters(), lr=args.lr)
-    self.device = args.device
-    self.args = args
-    self.sigma = 1.0  # Standard deviation for Gaussian smoothing of targets
+    def __init__(self, model: SpatialOpponentModel, args: OMGArgs = OMGArgs()):
+        super(OpponentModel, self).__init__()
+        self.inference_model = model
+        # self.inference_model = torch.compile(self.inference_model)
+        self.optimizer = torch.optim.Adam(self.inference_model.parameters(), lr=args.lr)
+        self.device = args.device
+        self.args = args
+        self.sigma = 1.0  # Standard deviation for Gaussian smoothing of targets
 
-  def collate_history(self, items, extra: int = 0):
-    max_len = self.args.max_history_length
-    B = len(items)
-    H, W, F_dim = self.args.state_shape
-    states = torch.zeros((B, max_len, H, W, F_dim),
-                         dtype=torch.float32, device=self.device)
-    mask = torch.zeros((B, max_len), dtype=torch.bool, device=self.device)
-    for i, t in enumerate(items):
-      # frames [0, end) are this transition's history
-      end = t["hist_len"] + extra
-      L = min(end, max_len)
-      if L <= 0:
-        continue
-      start = end - L
-      states[i, -L:] = torch.from_numpy(t["history"]
-                                        ["states"][start:end]).float()
-      mask[i, -L:] = True
-    return {"states": states, "mask": mask}
+    def collate_history(self, items, extra: int = 0) -> Dict[str, torch.Tensor]:
+        max_len = self.args.max_history_length
+        B = len(items)
+        H, W, F_dim = self.args.state_shape
+        states = torch.zeros(
+            (B, max_len, H, W, F_dim), dtype=torch.float32, device=self.device
+        )
+        mask = torch.zeros((B, max_len), dtype=torch.bool, device=self.device)
+        for i, t in enumerate(items):
+            seq = t["history"]["states"]
+            if not isinstance(seq, np.ndarray):
+                seq = np.stack(seq)
+            end = min(t["hist_len"] + extra, len(seq))
+            L = min(end, max_len)
+            if L <= 0:
+                continue
+            start = end - L
+            states[i, -L:] = torch.from_numpy(seq[start:end]).float()
+            mask[i, -L:] = True
+        return {"states": states, "mask": mask}
 
-  def heatmap_kl_divergence(self, g_map: torch.Tensor, true_goal_map: torch.Tensor) -> float:
-    """
-    Evaluates how closely the inferred subgoal distribution matches the true intent distribution
-    using Kullback-Leibler Divergence. Lower is better (0.0 is perfect).
+    def heatmap_kl_divergence(
+        self, g_map: torch.Tensor, true_goal_map: torch.Tensor
+    ) -> float:
+        """
+        Evaluates how closely the inferred subgoal distribution matches the true intent distribution
+        using Kullback-Leibler Divergence. Lower is better (0.0 is perfect).
 
-    Args:
-        g_map (torch.Tensor): Inferred subgoal heatmap (softmaxed), shape (B, H, W)
-        true_goal_map (torch.Tensor): Ground truth distribution over subgoals, shape (B, H, W)
-    """
-    B = g_map.shape[0]
-    g_map_flat = g_map.view(B, -1)  # (B, H*W)
-    true_goal_flat = true_goal_map.view(B, -1)  # (B, H*W)
-    # Add small value to prevent log(0)
-    log_g_map = torch.log(g_map_flat + 1e-8)
+        Args:
+            g_map (torch.Tensor): Inferred subgoal heatmap (softmaxed), shape (B, H, W)
+            true_goal_map (torch.Tensor): Ground truth distribution over subgoals, shape (B, H, W)
+        """
+        B = g_map.shape[0]
+        g_map_flat = g_map.view(B, -1)  # (B, H*W)
+        true_goal_flat = true_goal_map.view(B, -1)  # (B, H*W)
+        # Add small value to prevent log(0)
+        log_g_map = torch.log(g_map_flat + 1e-8)
 
-    # Compute KL Divergence
-    kl_div = F.kl_div(log_g_map, true_goal_flat, reduction='batchmean')
+        # Compute KL Divergence
+        kl_div = F.kl_div(log_g_map, true_goal_flat, reduction="batchmean")
 
-    return kl_div.item()
+        return kl_div.item()
 
-  def expected_spatial_error(self, g_map: torch.Tensor, true_goal_map: torch.Tensor) -> float:
-    """
-    Calculates the probability-weighted Manhattan distance to the nearest valid target.
+    def expected_spatial_error(
+        self, g_map: torch.Tensor, true_goal_map: torch.Tensor
+    ) -> float:
+        """
+        Calculates the probability-weighted Manhattan distance to the nearest valid target.
 
-    Args:
-        g_map: Predicted probabilities after softmax (B, H, W)
-        true_goal_map: Ground truth probabilities (B, H, W)
-    """
-    B, H, W = g_map.shape
-    total_error = 0.0
-    valid_count = 0
+        Args:
+            g_map: Predicted probabilities after softmax (B, H, W)
+            true_goal_map: Ground truth probabilities (B, H, W)
+        """
+        B, H, W = g_map.shape
+        total_error = 0.0
+        valid_count = 0
 
-    y, x = torch.meshgrid(torch.arange(H, device=g_map.device),
-                          torch.arange(W, device=g_map.device), indexing='ij')
-    coords_flat = torch.stack([y, x], dim=-1).view(-1, 2).float()
+        y, x = torch.meshgrid(
+            torch.arange(H, device=g_map.device),
+            torch.arange(W, device=g_map.device),
+            indexing="ij",
+        )
+        coords_flat = torch.stack([y, x], dim=-1).view(-1, 2).float()
 
-    for b in range(B):
-      true_targets = torch.nonzero(true_goal_map[b] > 0).float()
-      if len(true_targets) == 0:
-        continue
+        for b in range(B):
+            true_targets = torch.nonzero(true_goal_map[b] > 0).float()
+            if len(true_targets) == 0:
+                continue
 
-      dists = torch.abs(coords_flat.unsqueeze(
-        1) - true_targets.unsqueeze(0)).sum(dim=-1)
-      min_dists = torch.min(dists, dim=1).values.view(H, W)
+            dists = torch.abs(coords_flat.unsqueeze(1) - true_targets.unsqueeze(0)).sum(
+                dim=-1
+            )
+            min_dists = torch.min(dists, dim=1).values.view(H, W)
 
-      total_error += (g_map[b] * min_dists).sum().item()
-      valid_count += 1
+            total_error += (g_map[b] * min_dists).sum().item()
+            valid_count += 1
 
-    return total_error / valid_count if valid_count > 0 else 0.0
+        return total_error / valid_count if valid_count > 0 else 0.0
 
-  def pretrain(self, dataset, epochs=10, batch_size=128):
-    """
-    Enhanced pretraining loop with logging and progress bars.
-    """
-    print(f"Starting pretraining for {epochs} epochs on {self.device}...")
-    step = 0
-    for epoch in range(epochs):
-      random.shuffle(dataset)
-      epoch_losses = []
-      epoch_kl_divs = []
-      epoch_spatial_errors = []
+    def pretrain(self, dataset, epochs=10, batch_size=128):
+        """
+        Enhanced pretraining loop with logging and progress bars.
+        """
+        print(f"Starting pretraining for {epochs} epochs on {self.device}...")
+        step = 0
+        for epoch in range(epochs):
+            random.shuffle(dataset)
+            epoch_losses = []
+            epoch_kl_divs = []
+            epoch_spatial_errors = []
 
-      pbar = tqdm(range(0, len(dataset), batch_size),
-                  desc=f"Epoch {epoch + 1}/{epochs}")
+            pbar = tqdm(
+                range(0, len(dataset), batch_size), desc=f"Epoch {epoch + 1}/{epochs}"
+            )
 
-      for i in pbar:
-        batch_data = dataset[i: i + batch_size]
+            for i in pbar:
+                batch_data = dataset[i : i + batch_size]
 
-        # Prepare batch data
-        om_batch = {
-          "states": torch.from_numpy(np.stack([b["state"] for b in batch_data], dtype=np.float32)).to(self.device, non_blocking=True),
-          "history": self.collate_history([
-              {"hist_len": len(h.get("states", [])), "history": h}
-              for h in (b["history"] for b in batch_data)
-          ]),
-          "true_goal_map": torch.from_numpy(np.stack([b["true_goal_map"] for b in batch_data], dtype=np.float32)).to(self.device, non_blocking=True),
-          "true_opp_heatmap": torch.from_numpy(np.stack([b["true_opp_heatmap"] for b in batch_data], dtype=np.float32)).to(self.device, non_blocking=True),
-        }
+                # Prepare batch data
+                om_batch = {
+                    "states": torch.from_numpy(
+                        np.stack([b["state"] for b in batch_data], dtype=np.float32)
+                    ).to(self.device, non_blocking=True),
+                    "history": self.collate_history(batch_data),
+                    "true_goal_map": torch.from_numpy(
+                        np.stack(
+                            [b["true_goal_map"] for b in batch_data], dtype=np.float32
+                        )
+                    ).to(self.device, non_blocking=True),
+                    "true_opp_heatmap": torch.from_numpy(
+                        np.stack(
+                            [b["true_opp_heatmap"] for b in batch_data],
+                            dtype=np.float32,
+                        )
+                    ).to(self.device, non_blocking=True),
+                }
 
-        loss, kl_error, spatial_error = self.pretrain_step(
-          om_batch, step=step, epoch=epoch)
-        epoch_losses.append(loss)
-        epoch_kl_divs.append(kl_error)
-        epoch_spatial_errors.append(spatial_error)
-        step += 1
+                loss, kl_error, spatial_error = self.pretrain_step(
+                    om_batch, step=step, epoch=epoch
+                )
+                epoch_losses.append(loss)
+                epoch_kl_divs.append(kl_error)
+                epoch_spatial_errors.append(spatial_error)
+                step += 1
 
-        # Update progress bar suffix with current loss
-        pbar.set_postfix({"loss": f"{loss:.4f}"})
+                # Update progress bar suffix with current loss
+                pbar.set_postfix({"loss": f"{loss:.4f}"})
 
-      avg_loss = sum(epoch_losses) / len(epoch_losses)
-      avg_kl_div = sum(epoch_kl_divs) / len(epoch_kl_divs)
-      avg_spatial_error = sum(epoch_spatial_errors) / len(epoch_spatial_errors)
-      print(f"  => Average Loss: {avg_loss:.6f}")
+            avg_loss = sum(epoch_losses) / len(epoch_losses)
+            avg_kl_div = sum(epoch_kl_divs) / len(epoch_kl_divs)
+            avg_spatial_error = sum(epoch_spatial_errors) / len(epoch_spatial_errors)
+            print(f"  => Average Loss: {avg_loss:.6f}")
 
-      # Log epoch-level metrics
-      wandb.log({
-        "pretrain/epoch_loss": avg_loss,
-        "pretrain/epoch_kl_divergence": avg_kl_div,
-        "pretrain/epoch_spatial_error": avg_spatial_error,
-        "epoch": epoch
-      })
+            # Log epoch-level metrics
+            wandb.log(
+                {
+                    "pretrain/epoch_loss": avg_loss,
+                    "pretrain/epoch_kl_divergence": avg_kl_div,
+                    "pretrain/epoch_spatial_error": avg_spatial_error,
+                    "epoch": epoch,
+                }
+            )
 
-  def forward(self, x: torch.Tensor, history: Dict, cached_features=True) -> torch.Tensor:
-    """
-    Calculates the forward pass, using the inference model 
-    to predict the opponent's subgoal.
+    def forward(
+        self, x: torch.Tensor, history: Dict, cached_features=True
+    ) -> torch.Tensor:
+        """
+        Calculates the forward pass, using the inference model
+        to predict the opponent's subgoal.
 
-    Args:
-        x (Tensor): Current state s_t (B, H, W, F).
-        history (Dict): Historical trajectory (states/opp_actions).
+        Args:
+            x (Tensor): Current state s_t (B, H, W, F).
+            history (Dict): Historical trajectory (states/opp_actions).
 
-    Returns:
-        Heatmap (B, H, W) of the predicted subgoal location.
-    """
-    return self.inference_model(x, history, cached_features=cached_features)
+        Returns:
+            Heatmap (B, H, W) of the predicted subgoal location.
+        """
+        return self.inference_model(x, history, cached_features=cached_features)
 
-  def _generate_soft_targets(self, target_map: torch.Tensor):
-    """
-    Applies a Gaussian filter directly on the GPU using PyTorch Conv2d.
-    This makes model learn faster and maybe even avoids getting stuck in local minima 
-    as it provides a smoother gradient signal compared to a hard one-hot target. 
-    The sigma parameter controls how much smoothing is applied, 
-    with higher values creating a wider "hill" around the true target location.
-    target_map: (B, H, W)
-    """
-    kernel_size = int(2 * math.ceil(2 * self.sigma) + 1)
+    def _generate_soft_targets(self, target_map: torch.Tensor):
+        """
+        Applies a Gaussian filter directly on the GPU using PyTorch Conv2d.
+        This makes model learn faster and maybe even avoids getting stuck in local minima
+        as it provides a smoother gradient signal compared to a hard one-hot target.
+        The sigma parameter controls how much smoothing is applied,
+        with higher values creating a wider "hill" around the true target location.
+        target_map: (B, H, W)
+        """
+        kernel_size = int(2 * math.ceil(2 * self.sigma) + 1)
 
-    # Create 1D Gaussian kernel
-    x = torch.arange(kernel_size, dtype=torch.float32,
-                     device=target_map.device)
-    x = x - kernel_size // 2
-    kernel_1d = torch.exp(-x**2 / (2 * self.sigma**2))
-    kernel_1d = kernel_1d / kernel_1d.sum()
+        # Create 1D Gaussian kernel
+        x = torch.arange(kernel_size, dtype=torch.float32, device=target_map.device)
+        x = x - kernel_size // 2
+        kernel_1d = torch.exp(-(x**2) / (2 * self.sigma**2))
+        kernel_1d = kernel_1d / kernel_1d.sum()
 
-    # Create 2D Gaussian kernel via outer product
-    kernel_2d = kernel_1d.unsqueeze(1) @ kernel_1d.unsqueeze(0)
-    kernel_2d = kernel_2d.unsqueeze(0).unsqueeze(0)  # (1, 1, K, K)
+        # Create 2D Gaussian kernel via outer product
+        kernel_2d = kernel_1d.unsqueeze(1) @ kernel_1d.unsqueeze(0)
+        kernel_2d = kernel_2d.unsqueeze(0).unsqueeze(0)  # (1, 1, K, K)
 
-    # Reshape target map for convolution: (B, C, H, W) where C=1
-    target_reshaped = target_map.unsqueeze(1)
+        # Reshape target map for convolution: (B, C, H, W) where C=1
+        target_reshaped = target_map.unsqueeze(1)
 
-    # Apply padding to maintain spatial dimensions
-    padding = kernel_size // 2
-    soft_targets = F.conv2d(target_reshaped, kernel_2d, padding=padding)
+        # Apply padding to maintain spatial dimensions
+        padding = kernel_size // 2
+        soft_targets = F.conv2d(target_reshaped, kernel_2d, padding=padding)
+        soft_targets = torch.clamp(soft_targets, min=0.0)
 
-    # Re-normalize each map in the batch so the peak is exactly 1.0
-    # Flatten spatial dims to find max per batch item
-    batch_size = soft_targets.shape[0]
-    max_vals = soft_targets.view(batch_size, -1).max(dim=1)[0]
+        # Re-normalize each map in the batch so the peak is exactly 1.0
+        # Flatten spatial dims to find max per batch item
+        batch_size = soft_targets.shape[0]
+        max_vals = soft_targets.view(batch_size, -1).max(dim=1)[0]
 
-    # Avoid division by zero for empty targets
-    max_vals = torch.clamp(max_vals, min=1e-8)
-    soft_targets = soft_targets / max_vals.view(batch_size, 1, 1, 1)
+        # Avoid division by zero for empty targets
+        max_vals = torch.clamp(max_vals, min=1e-8)
+        soft_targets = soft_targets / max_vals.view(batch_size, 1, 1, 1)
 
-    return soft_targets.squeeze(1)  # Return to (B, H, W)
+        return soft_targets.squeeze(1)  # Return to (B, H, W)
 
-  def pretrain_step(self, batch, step=0, epoch=0):
-    x = batch['states']
-    history = batch['history']
-    # (B, H, W) Ground Truth from Hindsight
-    target_map = batch['true_goal_map']
-    self.inference_model.train()
-    pred_logits = self.forward(x, history, cached_features=False)  # (B, H, W)
+    def pretrain_step(self, batch, step=0, epoch=0):
+        x = batch["states"]
+        history = batch["history"]
+        # (B, H, W) Ground Truth from Hindsight
+        target_map = batch["true_goal_map"]
+        self.inference_model.train()
+        pred_logits = self.forward(x, history, cached_features=False)  # (B, H, W)
 
-    if not self.args.true_intent:
-      # Generate soft targets with Gaussian smoothing
-      soft_targets = self._generate_soft_targets(target_map)
-    log_probs = F.log_softmax(
-      pred_logits.view(pred_logits.shape[0], -1), dim=-1)
-    target_dist = soft_targets.view(soft_targets.shape[0], -1)
-    loss = F.kl_div(log_probs, target_dist, reduction='batchmean')
+        # Generate soft targets with Gaussian smoothing
+        soft_targets = self._generate_soft_targets(target_map)
+        log_probs = F.log_softmax(pred_logits.view(pred_logits.shape[0], -1), dim=-1)
+        target_dist = soft_targets.view(soft_targets.shape[0], -1)
+        loss = F.kl_div(log_probs, target_dist, reduction="batchmean")
 
-    loss_val = loss.item()
-    self.optimizer.zero_grad()
-    loss.backward()
-    self.optimizer.step()
+        loss_val = loss.item()
+        self.optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.inference_model.parameters(), 1.0)
+        self.optimizer.step()
 
-    opp_heatmap = batch['true_opp_heatmap'].to(self.device)
-    g_map = F.softmax(pred_logits.view(pred_logits.shape[0], -1),
-                      dim=-1).view_as(pred_logits)  # (B, H, W)
-    kl_div = self.heatmap_kl_divergence(g_map, opp_heatmap)
-    spatial_error = self.expected_spatial_error(g_map, opp_heatmap)
-    wandb.log({
-      "train/batch_loss": loss_val,
-      "train/kl_divergence": kl_div,
-      "train/expected_spatial_error": spatial_error,
-      "step": step,
-      "epoch": epoch
-    })
+        opp_heatmap = batch["true_opp_heatmap"].to(self.device)
+        g_map = F.softmax(pred_logits.view(pred_logits.shape[0], -1), dim=-1).view_as(
+            pred_logits
+        )  # (B, H, W)
+        kl_div = self.heatmap_kl_divergence(g_map, opp_heatmap)
+        spatial_error = self.expected_spatial_error(g_map, opp_heatmap)
+        wandb.log(
+            {
+                "train/batch_loss": loss_val,
+                "train/kl_divergence": kl_div,
+                "train/expected_spatial_error": spatial_error,
+                "step": step,
+                "epoch": epoch,
+            }
+        )
 
-    return loss_val, kl_div, spatial_error
+        return loss_val, kl_div, spatial_error
 
-  def train_step(self, batch, cached_features=True):
-    x = batch['states']
-    history = batch['history']
-    # (B, H, W) Ground Truth from Hindsight
-    target_map = batch['true_goal_map']
-    self.inference_model.train()
-    pred_logits = self.forward(x, history, cached_features)  # (B, H, W)
+    def train_step(self, batch, cached_features=False):
+        x = batch["states"]
+        history = batch["history"]
+        # (B, H, W) Ground Truth from Hindsight
+        target_map = batch["true_goal_map"]
+        self.inference_model.train()
+        pred_logits = self.forward(x, history, cached_features)  # (B, H, W)
 
-    if not self.args.true_intent:
-      # Generate soft targets with Gaussian smoothing
-      soft_targets = self._generate_soft_targets(target_map)
-    log_probs = F.log_softmax(
-      pred_logits.view(pred_logits.shape[0], -1), dim=-1)
-    target_dist = soft_targets.view(soft_targets.shape[0], -1)
-    loss = F.kl_div(log_probs, target_dist, reduction='batchmean')
+        # Generate soft targets with Gaussian smoothing
+        soft_targets = self._generate_soft_targets(target_map)
+        log_probs = F.log_softmax(pred_logits.view(pred_logits.shape[0], -1), dim=-1)
+        target_dist = soft_targets.view(soft_targets.shape[0], -1)
+        loss = F.kl_div(log_probs, target_dist, reduction="batchmean")
 
-    loss_val = loss.item()
-    self.optimizer.zero_grad()
-    loss.backward()
-    self.optimizer.step()
+        loss_val = loss.item()
+        self.optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.inference_model.parameters(), 1.0)
+        self.optimizer.step()
 
-    return loss_val
+        return loss_val
+
+
+if __name__ == "__main__":
+    wandb.init(mode="disabled", project="om-test")
+    model = OpponentModel(SpatialOpponentModel(OMGArgs()), OMGArgs())
+    dataset_path = f"./dataset/dataset_map_3.pt"
+
+    print("Loading dataset and pretraining OM...")
+    dataset = torch.load(dataset_path, weights_only=False)
+    model.pretrain(dataset, epochs=10, batch_size=128)
+    del dataset
+    wandb.finish()

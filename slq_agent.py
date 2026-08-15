@@ -245,7 +245,7 @@ class FSPAgentOM:
 
     return loss.item()
 
-  def _apply_hindsight_relabeling(self, episode_transitions: list, H: int, W: int):
+  def _apply_hindsight_relabeling(self, episode_transitions: List, H: int, W: int):
     """
     Applies Hindsight Experience Replay (HER) labeling to a trajectory.
     Modifies the transitions in-place to include 'true_goal_map'.
