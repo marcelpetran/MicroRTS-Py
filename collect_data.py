@@ -7,6 +7,7 @@ import torch
 
 from maps import *
 from omg_args import OMGArgs
+from renderer import RealtimeRenderer
 from simple_foraging_env import (
     ChameleonAgent,
     GreedySwitchAgent,
@@ -55,16 +56,24 @@ def collect_offline_data(
     args = om_args
     env = SimpleForagingEnv(max_steps=args.max_steps, map_layout=map_layout)
     obs = env.reset()
-    agent_0 = SimpleAgent(0)
+    agent_0 = SimpleAgent(0, map_layout=map_layout)
     # precompute paths for other agents to use during data collection
     # Dummy action to trigger path precomputation in the environment
     _ = agent_0.select_action(obs[0])
     precomputed_paths = agent_0.precomputed_paths
-    agent_1 = SimpleAgent(1, precomputed_paths=precomputed_paths)
-    agent_2 = GreedySwitchAgent(0, precomputed_paths=precomputed_paths)
-    agent_3 = GreedySwitchAgent(1, precomputed_paths=precomputed_paths)
-    agent_4 = StalkerAgent(0, precomputed_paths=precomputed_paths)
-    agent_5 = StalkerAgent(1, precomputed_paths=precomputed_paths)
+    agent_1 = SimpleAgent(1, precomputed_paths=precomputed_paths, map_layout=map_layout)
+    agent_2 = GreedySwitchAgent(
+        0, precomputed_paths=precomputed_paths, map_layout=map_layout
+    )
+    agent_3 = GreedySwitchAgent(
+        1, precomputed_paths=precomputed_paths, map_layout=map_layout
+    )
+    agent_4 = StalkerAgent(
+        0, precomputed_paths=precomputed_paths, map_layout=map_layout
+    )
+    agent_5 = StalkerAgent(
+        1, precomputed_paths=precomputed_paths, map_layout=map_layout
+    )
     agent_combinations = [
         (agent_0, agent_1),
         (agent_0, agent_3),
@@ -148,10 +157,17 @@ def run_episode(agent0, agent1, env, args, render=False):
     agent1.reset()
     total_reward_0 = 0
     total_reward_1 = 0
+    renderer = RealtimeRenderer() if render else None
 
     for step in range(100):
-        if render:
+        if render and renderer is not None:
+            global_state = env.get_global_state()
+            H, W, _ = global_state.shape
+            dummy_om = np.zeros((H, W), dtype=np.float32)
+            renderer.render(global_state, obs[0], obs[1], dummy_om)
             env.render()
+            print(f"Agent 0 belief_food at: {agent0.belief_food}")
+            print(f"Global food at: {env._get_food_positions()}")
 
         a_0, _, _ = agent0.select_action(obs[0])
         a_1, _, _ = agent1.select_action(obs[1])
@@ -164,25 +180,40 @@ def run_episode(agent0, agent1, env, args, render=False):
 
         obs = next_obs
         if done:
-            if render:
+            if render and renderer is not None:
+                global_state = env.get_global_state()
+                H, W, _ = global_state.shape
+                dummy_om = np.zeros((H, W), dtype=np.float32)
+                renderer.render(global_state, obs[0], obs[1], dummy_om)
                 env.render()
+                print(f"Agent 0 belief_food at: {agent0.belief_food}")
+                print(f"Global food at: {env._get_food_positions()}")
             break
 
 
 if __name__ == "__main__":
     # collect_offline_data(num_episodes=10)
+    map_layout = MAP_4
     args = OMGArgs()
-    env = SimpleForagingEnv(max_steps=args.max_steps, map_layout=MAP_4)
+    env = SimpleForagingEnv(max_steps=args.max_steps, map_layout=map_layout)
     obs = env.reset()
-    agent_0 = SimpleAgent(0)
+    agent_0 = SimpleAgent(0, map_layout=map_layout)
     _ = agent_0.select_action(obs[0])
     precomputed_paths = agent_0.precomputed_paths
-    agent_1 = SimpleAgent(1, precomputed_paths=precomputed_paths)
-    agent_2 = GreedySwitchAgent(0, precomputed_paths=precomputed_paths)
-    agent_3 = GreedySwitchAgent(1, precomputed_paths=precomputed_paths)
-    agent_4 = StalkerAgent(0, precomputed_paths=precomputed_paths)
-    agent_5 = StalkerAgent(1, precomputed_paths=precomputed_paths)
+    agent_1 = SimpleAgent(1, precomputed_paths=precomputed_paths, map_layout=map_layout)
+    agent_2 = GreedySwitchAgent(
+        0, precomputed_paths=precomputed_paths, map_layout=map_layout
+    )
+    agent_3 = GreedySwitchAgent(
+        1, precomputed_paths=precomputed_paths, map_layout=map_layout
+    )
+    agent_4 = StalkerAgent(
+        0, precomputed_paths=precomputed_paths, map_layout=map_layout
+    )
+    agent_5 = StalkerAgent(
+        1, precomputed_paths=precomputed_paths, map_layout=map_layout
+    )
 
-    for ep in range(2):
+    for ep in range(1):
         print(f"Episode {ep + 1}")
         run_episode(agent_2, agent_3, env, args, render=True)
