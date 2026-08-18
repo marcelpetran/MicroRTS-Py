@@ -36,9 +36,6 @@ class OpponentModel(nn.Module):
         sigma = self.args.sigma - (self.args.sigma - self.args.sigma_end) * (
             step / self.args.sigma_decay_steps
         )
-        sigma = self.args.sigma - (self.args.sigma - self.args.sigma_end) * (
-            step / self.args.sigma_decay_steps
-        )
         return max(sigma, self.args.sigma_end)
 
     def collate_history(self, items, extra: int = 0) -> Dict[str, torch.Tensor]:
@@ -245,14 +242,21 @@ class OpponentModel(nn.Module):
         history = batch["history"]
         # (B, H, W) Ground Truth from Hindsight
         target_map = batch["true_goal_map"]
+        true_opp_heatmap = batch["true_opp_heatmap"]
+
         self.inference_model.train()
         pred_logits = self.forward(x, history, cached_features=False)  # (B, H, W)
 
         # Generate soft targets with Gaussian smoothing
         soft_targets = self._generate_soft_targets(target_map)
+        soft_true_targets = self._generate_soft_targets(true_opp_heatmap)
         log_probs = F.log_softmax(pred_logits.view(pred_logits.shape[0], -1), dim=-1)
         target_dist = soft_targets.view(soft_targets.shape[0], -1)
-        loss = F.kl_div(log_probs, target_dist, reduction="batchmean")
+        target_true_dist = soft_true_targets.view(soft_true_targets.shape[0], -1)
+        loss = (
+            F.kl_div(log_probs, target_true_dist, reduction="batchmean")
+            + F.kl_div(log_probs, target_dist, reduction="batchmean") * 0.3
+        )
 
         loss_val = loss.item()
         self.optimizer.zero_grad()
