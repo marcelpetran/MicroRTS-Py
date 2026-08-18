@@ -165,9 +165,6 @@ def run_episode(agent0, agent1, env, args, render=False):
             H, W, _ = global_state.shape
             dummy_om = np.zeros((H, W), dtype=np.float32)
             renderer.render(global_state, obs[0], obs[1], dummy_om)
-            env.render()
-            print(f"Agent 0 belief_food at: {agent0.belief_food}")
-            print(f"Global food at: {env._get_food_positions()}")
 
         a_0, _, _ = agent0.select_action(obs[0])
         a_1, _, _ = agent1.select_action(obs[1])
@@ -185,9 +182,6 @@ def run_episode(agent0, agent1, env, args, render=False):
                 H, W, _ = global_state.shape
                 dummy_om = np.zeros((H, W), dtype=np.float32)
                 renderer.render(global_state, obs[0], obs[1], dummy_om)
-                env.render()
-                print(f"Agent 0 belief_food at: {agent0.belief_food}")
-                print(f"Global food at: {env._get_food_positions()}")
             break
 
 
