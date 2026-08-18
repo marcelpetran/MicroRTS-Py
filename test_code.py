@@ -13,6 +13,7 @@ import torch
 
 import wandb
 from collect_data import collect_offline_data
+from maps import MAP_1
 from omg_args import OMGArgs
 from opponent_model import OpponentModel
 from q_agent import QLearningAgent
@@ -39,7 +40,7 @@ def check(name, fn):
 # Setup: tiny everything
 # --------------------------------------------------------------------------
 def make_args():
-    env = SimpleForagingEnv(max_steps=50)
+    env = SimpleForagingEnv(max_steps=50, map_layout=MAP_1)
     obs = env.reset()
     H, W, F_dim = obs[0].shape
     return env, OMGArgs(
@@ -189,7 +190,7 @@ check("collect_offline_data + pretrain (1 epoch)", t_pretrain)
 #    compute_targets (both OM forwards with extra=0/1)
 # --------------------------------------------------------------------------
 def t_run_episode():
-    opp = SimpleAgent(agent_id=1)
+    opp = SimpleAgent(agent_id=1, map_layout=MAP_1)
     for _ in range(3):
         stats = agent.run_episode(opp, max_steps=15)
     assert len(agent.replay) > 0
@@ -234,7 +235,7 @@ check("ReplayBuffer circular FIFO + sampling", t_replay)
 # 7. Eval episode: run_test_episode vs GreedySwitchAgent, metrics sane
 # --------------------------------------------------------------------------
 def t_test_episode():
-    opp = GreedySwitchAgent(agent_id=1)
+    opp = GreedySwitchAgent(agent_id=1, map_layout=MAP_1)
     stats = agent.run_test_episode(opp, max_steps=15, render=False)
     assert stats["steps"] <= 15
     assert stats["avg_kl_error"] is None or np.isfinite(stats["avg_kl_error"])
@@ -250,7 +251,7 @@ check("run_test_episode vs GreedySwitchAgent", t_test_episode)
 # --------------------------------------------------------------------------
 def t_update_mechanics():
     # ensure enough replay for batches
-    opp = SimpleAgent(agent_id=1)
+    opp = SimpleAgent(agent_id=1, map_layout=MAP_1)
     while len(agent.replay) < 40:
         agent.run_episode(opp, max_steps=15)
     q_before = [p.clone() for p in agent.q.parameters()]
