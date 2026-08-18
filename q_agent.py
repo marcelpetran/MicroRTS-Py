@@ -1,5 +1,5 @@
 import random
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -237,7 +237,7 @@ class QLearningAgent:
     @torch.no_grad()
     def select_action(
         self, s_t: np.ndarray, history: Dict[str, torch.Tensor], eval=False
-    ) -> Tuple[int, torch.Tensor, Number]:
+    ) -> tuple[int, torch.Tensor, Number]:
         """
         (interaction phase) Infer g_hat and act eps-greedily on Q(s,g_hat,*)
         """
@@ -261,7 +261,7 @@ class QLearningAgent:
 
     def compute_targets(
         self, batch: List[Dict], history: Dict[str, torch.Tensor]
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Standard DDQN target computation using Hindsight Experience Replay Goal Maps.
         """

@@ -1,5 +1,5 @@
 import random
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -173,7 +173,7 @@ class QLearningAgentClassic:
 
     # ------------- training -------------
 
-    def compute_targets(self, batch: List[Dict]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def compute_targets(self, batch: List[Dict]) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Implements Eq. (4) and (8) mixing between g_hat and g_bar with a decaying switch.
         """

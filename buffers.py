@@ -1,4 +1,4 @@
-from typing import Deque, Dict, List, Tuple, Optional
+from typing import Deque, Dict, List, Optional
 from collections import deque
 import random
 import torch

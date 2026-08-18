@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List
 import random
 import numpy as np
 import torch
@@ -75,7 +75,7 @@ class FSPAgentOM:
     return int(torch.argmax(qvals + gumbel_noise))
 
   @torch.no_grad()
-  def select_rl_action(self, s_t: np.ndarray, history: Dict[str, torch.Tensor], eval=False) -> Tuple[int, torch.Tensor, float]:
+  def select_rl_action(self, s_t: np.ndarray, history: Dict[str, torch.Tensor], eval=False) -> tuple[int, torch.Tensor, float]:
     """Calculates the Best Response action using Q-learning and OM."""
     self.q.eval()
     x = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
@@ -93,7 +93,7 @@ class FSPAgentOM:
     return a, g_map.squeeze(0), entropy
 
   @torch.no_grad()
-  def select_sl_action(self, s_t: np.ndarray, eval=False) -> Tuple[int, float]:
+  def select_sl_action(self, s_t: np.ndarray, eval=False) -> tuple[int, float]:
     """Calculates the Average Strategy action using Supervised Learning."""
     self.sl.eval()
     s = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
@@ -110,7 +110,7 @@ class FSPAgentOM:
     self.sl.train()
     return action, entropy
 
-  def select_action(self, s_t: np.ndarray, history: Dict[str, torch.Tensor] = None, eval=False) -> Tuple[int, float]:
+  def select_action(self, s_t: np.ndarray, history: Dict[str, torch.Tensor] = None, eval=False) -> tuple[int, float]:
     """Generic interface for opponents. Defaults to SL if frozen."""
     if self.is_frozen_as_sl:
       return self.select_sl_action(s_t, eval=eval)
@@ -120,7 +120,7 @@ class FSPAgentOM:
 
   # ------------- RL Update Logic -------------
 
-  def compute_targets(self, batch: List[Dict]) -> Tuple[torch.Tensor, torch.Tensor]:
+  def compute_targets(self, batch: List[Dict]) -> tuple[torch.Tensor, torch.Tensor]:
     s = torch.from_numpy(
       np.array([b["state"] for b in batch], dtype=np.float32)).to(self.device)
     sp = torch.from_numpy(

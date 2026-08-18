@@ -7,7 +7,7 @@ Run:  python smoke_test.py
 """
 
 import traceback
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 import numpy as np
 import torch
