@@ -1,7 +1,4 @@
 from dataclasses import dataclass
-from typing import Tuple
-
-from sympy import true
 
 
 @dataclass
@@ -34,7 +31,7 @@ class OMGArgs:
     sigma_decay_steps: int = 600_000
 
     # Transformer architecture params
-    state_shape: Tuple[int, int, int] = (11, 11, 6)  # (H, W, F)
+    state_shape: tuple[int, int, int] = (11, 11, 6)  # (H, W, F)
     H: int = 7  # grid height
     W: int = 7  # grid width
     action_dim: int = 5
