@@ -21,7 +21,25 @@ class OpponentModel(nn.Module):
         self.optimizer = torch.optim.Adam(self.inference_model.parameters(), lr=args.lr)
         self.device = args.device
         self.args = args
-        self.sigma = 1.0  # Standard deviation for Gaussian smoothing of targets
+
+    def _sigma(self):
+        """
+        Computes the current sigma value based on the decay schedule.
+        """
+        if self.args.sigma_decay_steps <= 0:
+            return self.args.sigma_end
+        state = self.optimizer.state_dict().get("state", [])
+        step = min(
+            state[0]["step"] if len(state) > 0 and "step" in state[0] else 0,
+            self.args.sigma_decay_steps,
+        )
+        sigma = self.args.sigma - (self.args.sigma - self.args.sigma_end) * (
+            step / self.args.sigma_decay_steps
+        )
+        sigma = self.args.sigma - (self.args.sigma - self.args.sigma_end) * (
+            step / self.args.sigma_decay_steps
+        )
+        return max(sigma, self.args.sigma_end)
 
     def collate_history(self, items, extra: int = 0) -> Dict[str, torch.Tensor]:
         max_len = self.args.max_history_length
@@ -191,12 +209,12 @@ class OpponentModel(nn.Module):
         with higher values creating a wider "hill" around the true target location.
         target_map: (B, H, W)
         """
-        kernel_size = int(2 * math.ceil(2 * self.sigma) + 1)
+        kernel_size = int(2 * math.ceil(2 * self._sigma()) + 1)
 
         # Create 1D Gaussian kernel
         x = torch.arange(kernel_size, dtype=torch.float32, device=target_map.device)
         x = x - kernel_size // 2
-        kernel_1d = torch.exp(-(x**2) / (2 * self.sigma**2))
+        kernel_1d = torch.exp(-(x**2) / (2 * self._sigma() ** 2))
         kernel_1d = kernel_1d / kernel_1d.sum()
 
         # Create 2D Gaussian kernel via outer product

@@ -29,6 +29,10 @@ class OMGArgs:
     tau_end: float = 0.05
     tau_decay_steps: int = 600_000
 
+    sigma: float = 2.0
+    sigma_end: float = 0.5
+    sigma_decay_steps: int = 600_000
+
     # Transformer architecture params
     state_shape: Tuple[int, int, int] = (11, 11, 6)  # (H, W, F)
     H: int = 7  # grid height
