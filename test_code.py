@@ -7,6 +7,7 @@ Run:  python smoke_test.py
 """
 
 import traceback
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import torch
@@ -221,10 +222,11 @@ def t_replay():
         rb.push(i)
     assert len(rb) == 10
     assert rb.buf[rb.ptr] == 15 or True  # order not asserted, size is
-    sample = rb.sample(4)
+    sample: List[Int] = rb.sample(4)
     assert len(sample) == 4 and len(set(sample)) == 4, (
         "sample must be without replacement"
     )
+
     assert min(sample) >= 15, "oldest elements must have been evicted (FIFO)"
 
 

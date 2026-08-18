@@ -2,20 +2,22 @@ import heapq
 
 import numpy as np
 
-from maps import *
+from maps import MAP_1
 
 
 class SimpleForagingEnv:
-    def __init__(self, max_steps=50, map_layout=MAP_1, vision_radius=2):
-        self.map_layout = map_layout
-        self.height = len(map_layout)
-        self.width = len(map_layout[0])
-        self.num_agents = 2
+    def __init__(
+        self, max_steps: int = 50, map_layout: list[str] = MAP_1, vision_radius: int = 2
+    ):
+        self.map_layout: list[str] = map_layout
+        self.height: int = len(map_layout)
+        self.width: int = len(map_layout[0])
+        self.num_agents: int = 2
         # 0: empty, 1: food, 2: agent1, 3: agent2, 4: wall, 5: vis_mask
-        self.features = 6
-        self.max_steps = max_steps
-        self.vision_radius = vision_radius
-        self.action_space = self._get_action_space()
+        self.features: int = 6
+        self.max_steps: int = max_steps
+        self.vision_radius: int = vision_radius
+        self.action_space: list[int] = self._get_action_space()
 
         self._initial_agents = {0: None, 1: None}
         self._initial_food = set()

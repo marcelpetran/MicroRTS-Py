@@ -12,7 +12,9 @@ from torch.types import Number
 from buffers import ReplayBuffer
 from networks import QNet
 from omg_args import OMGArgs
+from opponent_model import OpponentModel
 from renderer import RealtimeRenderer
+from simple_foraging_env import SimpleForagingEnv
 
 
 class QLearningAgent:
@@ -20,18 +22,23 @@ class QLearningAgent:
     Q-learning agent with Hindsight Experience Replay and subgoal inference for opponent modeling.
     """
 
-    def __init__(self, env, opponent_model, args: OMGArgs = OMGArgs()):
-        self.env = env
-        self.model = opponent_model
-        self.args = args
-        self.device = torch.device(args.device)
+    def __init__(
+        self,
+        env: SimpleForagingEnv,
+        opponent_model: OpponentModel,
+        args: OMGArgs = OMGArgs(),
+    ):
+        self.env: SimpleForagingEnv = env
+        self.model: OpponentModel = opponent_model
+        self.args: OMGArgs = args
+        self.device: torch.device = torch.device(args.device)
 
-        if not hasattr(self.env, "action_space") or self.env.action_space is None:
+        if not hasattr(self.env, "action_space"):
             raise ValueError("Env must have action_space (list or int).")
         self.args.action_dim = (
             len(self.env.action_space)
             if hasattr(self.env.action_space, "__len__")
-            else int(self.env.action_space)
+            else self.env.action_space.n
         )
 
         # Networks

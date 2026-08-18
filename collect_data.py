@@ -48,10 +48,10 @@ def _apply_hindsight_relabeling(episode_transitions: List, H: int, W: int):
 
 
 def collect_offline_data(
-    num_episodes=1000,
-    save_path="./dataset/dataset.pt",
-    map_layout=MAP_1,
-    om_args=OMGArgs(),
+    num_episodes: int = 1000,
+    save_path: str = "./dataset/dataset.pt",
+    map_layout: list[str] = MAP_1,
+    om_args: OMGArgs = OMGArgs(),
 ):
     args = om_args
     env = SimpleForagingEnv(max_steps=args.max_steps, map_layout=map_layout)
