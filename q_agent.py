@@ -10,6 +10,7 @@ from torch.distributions import Categorical
 from torch.types import Number
 
 import wandb
+from beliefs import BeliefTracker
 from buffers import ReplayBuffer
 from networks import QNet
 from omg_args import OMGArgs
@@ -50,6 +51,14 @@ class QLearningAgent:
 
         # Replay
         self.replay = ReplayBuffer(self.args.capacity)
+
+        # Belief map
+        self.tracker = BeliefTracker(
+            self.args.H,
+            self.args.W,
+            map_layout=self.env.map_layout,
+            horizon=self.args.max_steps,
+        )
 
         # Schedules
         self.global_step = 0
@@ -107,7 +116,20 @@ class QLearningAgent:
             self.env._place_agent(0, pos)
             temp_state = self.env._get_observations()[0]  # Get the modified state
 
-            s_tensor = torch.from_numpy(temp_state).float().unsqueeze(0).to(self.device)
+            s_tensor = (
+                torch.from_numpy(
+                    np.concatenate(
+                        [
+                            temp_state,
+                            np.zeros((H, W, self.args.belief_channels), np.float32),
+                        ],
+                        -1,
+                    )
+                )
+                .float()
+                .unsqueeze(0)
+                .to(self.device)
+            )
 
             # subgoal is valid only for the current agent position
             # but true q-values with correct subgoals are expensive to compute
@@ -237,19 +259,24 @@ class QLearningAgent:
 
     @torch.no_grad()
     def select_action(
-        self, s_t: np.ndarray, history: Dict[str, torch.Tensor], eval=False
+        self,
+        s_t: np.ndarray,
+        s_aug: np.ndarray,
+        history: Dict[str, torch.Tensor],
+        eval=False,
     ) -> tuple[int, torch.Tensor, Number]:
         """
         (interaction phase) Infer g_hat and act eps-greedily on Q(s,g_hat,*)
         """
         x = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
+        x_aug = torch.from_numpy(s_aug).float().unsqueeze(0).to(self.device)
         with torch.no_grad():
             g_logits = self.model(x, history)  # (1, H, W)
             g_map = F.softmax(g_logits.view(g_logits.shape[0], -1), dim=-1).view_as(
                 g_logits
             )  # (B, H, W)
 
-        qvals = self.q(x, g_map)
+        qvals = self.q(x_aug, g_map)
 
         tau = 0.05 if eval else self._tau()
         entropy = Categorical(logits=qvals / tau).entropy().item()
@@ -269,9 +296,19 @@ class QLearningAgent:
         s = torch.from_numpy(
             np.array([b["state"] for b in batch], dtype=np.float32)
         ).to(self.device)
+        squ = (
+            torch.from_numpy(np.stack([b["state_aug"] for b in batch]))
+            .float()
+            .to(self.device)
+        )
         sp = torch.from_numpy(
             np.array([b["next_state"] for b in batch], dtype=np.float32)
         ).to(self.device)
+        spu = (
+            torch.from_numpy(np.stack([b["next_state_aug"] for b in batch]))
+            .float()
+            .to(self.device)
+        )
         a = torch.from_numpy(np.array([b["action"] for b in batch], dtype=np.int64)).to(
             self.device
         )
@@ -321,15 +358,15 @@ class QLearningAgent:
         wandb.log({"om/kl_live_ema": kl_live_ema}, step=self.global_step)
 
         # 1. Q(s, g, a)
-        q_sa = self.q(s, g_map).gather(1, a.unsqueeze(1)).squeeze(1)
+        q_sa = self.q(squ, g_map).gather(1, a.unsqueeze(1)).squeeze(1)
 
         # 2. Target = r + gamma * max_a' Q_tgt(s', g, a')
         with torch.no_grad():
-            q_val = self.q(sp, g_map_next)
+            q_val = self.q(spu, g_map_next)
             noise = torch.rand_like(q_val) * 1e-6
             best_actions = (q_val + noise).argmax(dim=1, keepdim=True)
 
-            q_next = self.q_tgt(sp, g_map_next).gather(1, best_actions).squeeze(1)
+            q_next = self.q_tgt(spu, g_map_next).gather(1, best_actions).squeeze(1)
 
             target = r + (1.0 - done) * self.args.gamma * q_next
             target = torch.clamp(target, min=-15.0, max=15.0)
@@ -427,6 +464,8 @@ class QLearningAgent:
             # 50% of the time swap spawns to add more diversity
             obs = self.env.swap_agents()
         opponent_agent.reset()
+        self.tracker.reset(use_map_prior=self.args.belief_map_prior)
+        self.tracker.update(obs[0])
 
         done = False
         ep_ret = 0.0
@@ -461,8 +500,9 @@ class QLearningAgent:
                 "mask": rolling_mask,
                 "prev_obs": prev_state_tensor,
             }
+            s_aug = self.tracker.augment(obs[0])
 
-            a, g_map, step_entropy = self.select_action(obs[0], history_gpu)
+            a, g_map, step_entropy = self.select_action(obs[0], s_aug, history_gpu)
             a_opponent, _, opp_true_map = opponent_agent.select_action(obs[1])
 
             actions = {0: a, 1: a_opponent}
@@ -472,6 +512,8 @@ class QLearningAgent:
             global_state = self.env.get_global_state()
             next_obs, reward, done, info = self.env.step(actions)
             next_global_state = self.env.get_global_state()
+            self.tracker.update(next_obs[0])
+            next_aug = self.tracker.augment(next_obs[0])
 
             if hasattr(opponent_agent, "replay"):
                 opp_step_info = {
@@ -489,11 +531,13 @@ class QLearningAgent:
             # Store the step without the true label
             transition = {
                 "state": obs[0].copy(),
+                "state_aug": s_aug.copy(),
                 "global_state": global_state.copy(),
                 "action": a,
                 "reward": float(reward[0]),
                 "opp_reward": float(reward[1]),
                 "next_state": next_obs[0].copy(),
+                "next_state_aug": next_aug.copy(),
                 "next_global_state": next_global_state.copy(),
                 "done": bool(done),
                 "true_opp_heatmap": opp_true_map.copy(),
@@ -562,9 +606,12 @@ class QLearningAgent:
     def run_test_episode(
         self, opponent_agent, max_steps: int = 500, render: bool = False
     ) -> Dict[str, float]:
-        self.model.eval()
+        self.model.inference_model.eval()
         obs = self.env.reset()
         opponent_agent.reset()
+        self.tracker.reset(use_map_prior=self.args.belief_map_prior)
+        self.tracker.update(obs[0])
+
         done = False
         renderer = RealtimeRenderer() if render else None
         ep_ret = 0.0
@@ -592,8 +639,11 @@ class QLearningAgent:
                 "mask": rolling_mask,
                 "prev_obs": prev_state_tensor,
             }
+            s_aug = self.tracker.augment(obs[0])
 
-            a, g_map, step_entropy = self.select_action(obs[0], history, eval=True)
+            a, g_map, step_entropy = self.select_action(
+                obs[0], s_aug, history, eval=True
+            )
             a_opponent, _, opp_heatmap = opponent_agent.select_action(obs[1], eval=True)
 
             actions = {0: a, 1: a_opponent}
@@ -614,6 +664,7 @@ class QLearningAgent:
             ep_spatial_errors.append(spatial_error)
 
             next_obs, reward, done, info = self.env.step(actions)
+            self.tracker.update(next_obs[0])
 
             state_tensor = torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device)
             with torch.no_grad():

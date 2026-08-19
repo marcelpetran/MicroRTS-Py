@@ -20,6 +20,8 @@ class OMGArgs:
     seed: int = 0
     folder_id: int = 0
     true_intent: bool = False
+    belief_channels: int = 3  # food_belief, opp_last_seen, opp_age
+    belief_map_prior: bool = True
 
     oracle: bool = False
     tau_soft: float = 0.001

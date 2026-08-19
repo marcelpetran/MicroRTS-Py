@@ -153,15 +153,18 @@ def t_soft_targets():
     H, W, _ = args.state_shape
     tm = np.zeros((3, H, W), dtype=np.float32)
     tm[0, 2, 3] = 1.0
+    tm[2, 3, 3] = 1.0
+    tm[2, 3, 4] = 1.0
     # tm[1] stays all-zero (HER can produce this when no goal was found)
     st = om._generate_soft_targets(torch.from_numpy(tm).to(args.device))
     assert st.shape == (3, H, W)
     assert torch.isfinite(st).all()
-    if hasattr(args, "true_intent") and args.true_intent is False:
-        assert abs(st[0].max().item() - 1.0) < 2e-3, "peak after clamp should be ~1"
+    assert abs(st[0].sum().item() - 1.0) < 1e-3, "target should normalize to sum 1"
+    assert abs(st[2].sum().item() - 1.0) < 1e-3, "multi-peak target should sum to 1"
+    assert st[1].sum().item() == 0.0, "zero target must stay zero (clamp prevents NaN)"
 
 
-check("_generate_soft_targets (peak, zero-map)", t_soft_targets)
+check("_generate_soft_targets (sum-norm, multi-peak, zero-map)", t_soft_targets)
 
 
 # --------------------------------------------------------------------------
@@ -198,6 +201,11 @@ def t_run_episode():
     assert 0.0 <= stats["return"] <= 15
     # transitions must not contain any opponent-action leakage
     t = agent.replay.buf[0]
+    F_raw = args.state_shape[-1]
+    assert t["state"].shape[-1] == F_raw, "OM must receive RAW states"
+    assert t["state_aug"].shape[-1] == F_raw + args.belief_channels
+    assert t["next_state_aug"].shape[-1] == F_raw + args.belief_channels
+    assert t["history"]["states"].shape[-1] == F_raw
     for key in t:
         assert "action" not in key.replace("opp_", "X") or key == "action", (
             f"unexpected action key in transition: {key}"
@@ -272,6 +280,79 @@ def t_update_mechanics():
 
 
 check("update() losses / target-net lerp", t_update_mechanics)
+
+
+# --------------------------------------------------------------------------
+# 9. Classic Q-learning agent: rollout + update, belief-augmented states, loss finite
+# --------------------------------------------------------------------------
+
+
+def t_classic_rollout():
+    from q_agent_classic import QLearningAgentClassic
+
+    agent_c = QLearningAgentClassic(env, args=args)
+    opp = SimpleAgent(agent_id=1, map_layout=MAP_1)
+    for _ in range(3):
+        stats = agent_c.run_episode(opp, max_steps=15)
+        assert 0.0 <= stats["return"] <= 15
+    t = next(item for item in agent_c.replay.buf if item is not None)
+    F_raw = args.state_shape[-1]
+    assert t["state"].shape[-1] == F_raw + args.belief_channels, (
+        "classic stores AUGMENTED state"
+    )
+    l = agent_c.update()
+    assert l is None or np.isfinite(l)
+
+
+check("QLearningAgentClassic rollout + update (belief-augmented)", t_classic_rollout)
+
+# --------------------------------------------------------------------------
+# 10. BeliefTracker: reset, update, channels, augment, sanity checks
+# --------------------------------------------------------------------------
+
+
+def t_belief_tracker():
+    from beliefs import BeliefTracker
+
+    env_t = SimpleForagingEnv(max_steps=50, map_layout=MAP_1)
+    obs = env_t.reset()
+    bt = BeliefTracker(
+        env_t.height, env_t.width, map_layout=env_t.map_layout, horizon=50
+    )
+    bt.reset(use_map_prior=True)
+    bt.update(obs[0])
+    ch = bt.channels()
+    assert ch.shape == (env_t.height, env_t.width, 3)
+    assert ch[..., 0].sum() == 2, "prior food from map_layout"
+    assert ch[..., 1].sum() == 1, "opponent marker present (prior B)"
+    assert 0.0 <= ch[..., 2].max() <= 1.0, "age channel normalized"
+    aug = bt.augment(obs[0])
+    assert aug.shape[-1] == obs[0].shape[-1] + 3
+    assert np.isfinite(aug).all()
+
+
+check("BeliefTracker reset/update/channels", t_belief_tracker)
+
+
+# --------------------------------------------------------------------------
+# 11. OM EMA target: device, eval-mode, drift
+# --------------------------------------------------------------------------
+def t_om_ema_target():
+    assert hasattr(om, "tgt_model")
+    assert not om.tgt_model.training
+    for p_l, p_t in zip(om.inference_model.parameters(), om.tgt_model.parameters()):
+        assert p_l.device == p_t.device, "EMA copy on wrong device"
+        assert torch.isfinite(p_t).all()
+    drift = max(
+        (p_l - p_t).abs().max().item()
+        for p_l, p_t in zip(om.inference_model.parameters(), om.tgt_model.parameters())
+    )
+    assert 0.0 < drift < 1.0, (
+        f"EMA drift {drift}: 0 => lerp dead, large => lerp too fast"
+    )
+
+
+check("OM EMA tgt_model (device, eval-mode, drift)", t_om_ema_target)
 
 # --------------------------------------------------------------------------
 # Summary

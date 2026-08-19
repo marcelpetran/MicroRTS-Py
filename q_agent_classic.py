@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
-import wandb
+from beliefs import BeliefTracker
 from buffers import ReplayBuffer
 from networks import QNetClassic
 from omg_args import OMGArgs
@@ -24,12 +24,6 @@ class QLearningAgentClassic:
         self.args = args
         self.device = torch.device(args.device)
 
-        # Try to infer dims from env
-        if args.state_shape is None:
-            # env observation: (H, W, F)
-            obs = self.env.reset()
-            H, W, F_dim = obs.shape
-            self.args.state_shape = (H, W, F_dim)
         if not hasattr(self.env, "action_space") or self.env.action_space is None:
             raise ValueError("Env must have action_space (list or int).")
         self.args.action_dim = (
@@ -46,6 +40,14 @@ class QLearningAgentClassic:
 
         # Replay
         self.replay = ReplayBuffer(self.args.capacity)
+
+        # Belief map
+        self.tracker = BeliefTracker(
+            self.args.H,
+            self.args.W,
+            map_layout=self.env.map_layout,
+            horizon=self.args.max_steps,
+        )
 
         # Schedules
         self.global_step = 0
@@ -82,7 +84,20 @@ class QLearningAgentClassic:
             self.env._place_agent(0, pos)
             temp_state = self.env._get_observations()[0]  # Get the modified state
 
-            s_tensor = torch.from_numpy(temp_state).float().unsqueeze(0).to(self.device)
+            s_tensor = (
+                torch.from_numpy(
+                    np.concatenate(
+                        [
+                            temp_state,
+                            np.zeros((H, W, self.args.belief_channels), np.float32),
+                        ],
+                        -1,
+                    )
+                )
+                .float()
+                .unsqueeze(0)
+                .to(self.device)
+            )
 
             q_values = self.q(s_tensor)  # (1, num_actions)
 
@@ -177,9 +192,6 @@ class QLearningAgentClassic:
         """
         Implements Eq. (4) and (8) mixing between g_hat and g_bar with a decaying switch.
         """
-        B = len(batch)
-        H, W, F_dim = self.args.state_shape
-
         s = (
             torch.from_numpy(np.stack([b["state"] for b in batch]))
             .float()
@@ -264,6 +276,8 @@ class QLearningAgentClassic:
             # 50% of the time swap spawns to add more diversity
             obs = self.env.swap_agents()
         opponent_agent.reset()
+        self.tracker.reset(use_map_prior=self.args.belief_map_prior)
+        self.tracker.update(obs[0])
 
         done = False
         ep_ret = 0.0
@@ -274,13 +288,16 @@ class QLearningAgentClassic:
         opp_losses = []
 
         for step in range(max_steps):
-            a, step_entropy = self.select_action(obs[0])
+            s_aug = self.tracker.augment(obs[0])
+            a, step_entropy = self.select_action(s_aug)
             a_opponent, _, _ = opponent_agent.select_action(obs[1])
 
             actions = {0: a, 1: a_opponent}
             ep_entropy += step_entropy
 
             next_obs, reward, done, info = self.env.step(actions)
+            self.tracker.update(next_obs[0])
+            next_aug = self.tracker.augment(next_obs[0])
 
             if hasattr(opponent_agent, "replay"):
                 opp_step_info = {"state": obs[0].copy(), "action": a}
@@ -293,10 +310,10 @@ class QLearningAgentClassic:
                     opp_loss_val = opp_loss
 
             step_info = {
-                "state": obs[0].copy(),
+                "state": s_aug.copy(),
                 "action": a,
                 "reward": float(reward[0]),
-                "next_state": next_obs[0].copy(),
+                "next_state": next_aug.copy(),
                 "done": bool(done),
             }
             self.replay.push(step_info)
@@ -330,13 +347,17 @@ class QLearningAgentClassic:
     ) -> Dict[str, float]:
         obs = self.env.reset()
         opponent_agent.reset()
+        self.tracker.reset(use_map_prior=self.args.belief_map_prior)
+        self.tracker.update(obs[0])
+
         done = False
         ep_ret = 0.0
         opp_ret = 0.0
         ep_entropy = 0.0
 
         for step in range(max_steps):
-            a, step_entropy = self.select_action(obs[0], eval=True)
+            s_aug = self.tracker.augment(obs[0])
+            a, step_entropy = self.select_action(s_aug, eval=True)
             a_opponent, _, _ = opponent_agent.select_action(obs[1], eval=True)
 
             actions = {0: a, 1: a_opponent}
@@ -348,6 +369,8 @@ class QLearningAgentClassic:
                 )
 
             next_obs, reward, done, info = self.env.step(actions)
+            self.tracker.update(next_obs[0])
+
             ep_ret += reward[0]
             opp_ret += reward[1]
             obs = next_obs
