@@ -202,6 +202,7 @@ class OpponentModel(nn.Module):
         Returns:
             Heatmap (B, H, W) of the predicted subgoal location.
         """
+        self.inference_model.eval()  # Ensure the model is in evaluation mode
         return self.inference_model(x, history, cached_features=cached_features)
 
     def _generate_soft_targets(self, target_map: torch.Tensor):
