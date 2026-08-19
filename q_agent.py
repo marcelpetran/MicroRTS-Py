@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 from torch.types import Number
 
+import wandb
 from buffers import ReplayBuffer
 from networks import QNet
 from omg_args import OMGArgs
@@ -282,10 +283,8 @@ class QLearningAgent:
         ).to(self.device)
 
         with torch.no_grad():
-            self.model.inference_model.eval()
-
             hist = history
-            g_logits = self.model.inference_model(s, hist, cached_features=False)
+            g_logits = self.model.tgt_model(s, hist, cached_features=False)
             g_map = F.softmax(g_logits.view(len(batch), -1), dim=-1).view_as(g_logits)
 
             hist_states = history["states"].clone()  # [B, max_len, H, W, F_dim]
@@ -299,14 +298,27 @@ class QLearningAgent:
             hist_mask[:, -1] = True
 
             hist_next = {"states": hist_states, "mask": hist_mask}
-            g_logits_next = self.model.inference_model(
-                sp, hist_next, cached_features=False
-            )
+            g_logits_next = self.model.tgt_model(sp, hist_next, cached_features=False)
             g_map_next = F.softmax(g_logits_next.view(len(batch), -1), dim=-1).view_as(
                 g_logits_next
             )
 
+        # Helper log
+        with torch.no_grad():
+            self.model.inference_model.eval()
+            g_logits_live = self.model.inference_model(s, hist, cached_features=False)
             self.model.inference_model.train()
+            g_live = F.softmax(g_logits_live.view(len(batch), -1), dim=-1)
+            g_ema = F.softmax(
+                g_logits.view(len(batch), -1), dim=-1
+            )  # tgt_model logits already computed
+            kl_live_ema = (
+                (g_live * (torch.log(g_live + 1e-8) - torch.log(g_ema + 1e-8)))
+                .sum(dim=-1)
+                .mean()
+                .item()
+            )
+        wandb.log({"om/kl_live_ema": kl_live_ema}, step=self.global_step)
 
         # 1. Q(s, g, a)
         q_sa = self.q(s, g_map).gather(1, a.unsqueeze(1)).squeeze(1)
@@ -550,6 +562,7 @@ class QLearningAgent:
     def run_test_episode(
         self, opponent_agent, max_steps: int = 500, render: bool = False
     ) -> Dict[str, float]:
+        self.model.eval()
         obs = self.env.reset()
         opponent_agent.reset()
         done = False

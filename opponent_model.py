@@ -17,8 +17,15 @@ class OpponentModel(nn.Module):
     def __init__(self, model: SpatialOpponentModel, args: OMGArgs = OMGArgs()):
         super(OpponentModel, self).__init__()
         self.inference_model = model
+        self.tgt_model = SpatialOpponentModel(args).to(args.device)
+        self.tgt_model.load_state_dict(self.inference_model.state_dict())
+        for param in self.tgt_model.parameters():
+            param.requires_grad = False
+        self.tgt_model.eval()
         # self.inference_model = torch.compile(self.inference_model)
-        self.optimizer = torch.optim.Adam(self.inference_model.parameters(), lr=args.lr)
+        self.optimizer = torch.optim.Adam(
+            self.inference_model.parameters(), lr=args.lr_om
+        )
         self.device = args.device
         self.args = args
 
@@ -225,15 +232,10 @@ class OpponentModel(nn.Module):
         padding = kernel_size // 2
         soft_targets = F.conv2d(target_reshaped, kernel_2d, padding=padding)
         soft_targets = torch.clamp(soft_targets, min=0.0)
-
-        # Re-normalize each map in the batch so the peak is exactly 1.0
-        # Flatten spatial dims to find max per batch item
-        batch_size = soft_targets.shape[0]
-        max_vals = soft_targets.view(batch_size, -1).max(dim=1)[0]
-
-        # Avoid division by zero for empty targets
-        max_vals = torch.clamp(max_vals, min=1e-8)
-        soft_targets = soft_targets / max_vals.view(batch_size, 1, 1, 1)
+        # Normalize the soft targets to ensure they sum to 1 across the spatial dimensions
+        soft_targets = soft_targets / soft_targets.sum(
+            dim=(2, 3), keepdim=True
+        ).clamp_min(1e-8)
 
         return soft_targets.squeeze(1)  # Return to (B, H, W)
 
@@ -263,6 +265,12 @@ class OpponentModel(nn.Module):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.inference_model.parameters(), 1.0)
         self.optimizer.step()
+
+        with torch.no_grad():
+            for param, target_param in zip(
+                self.inference_model.parameters(), self.tgt_model.parameters()
+            ):
+                target_param.lerp_(param, self.args.tau_soft)
 
         opp_heatmap = batch["true_opp_heatmap"].to(self.device)
         g_map = F.softmax(pred_logits.view(pred_logits.shape[0], -1), dim=-1).view_as(
@@ -301,6 +309,13 @@ class OpponentModel(nn.Module):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.inference_model.parameters(), 1.0)
         self.optimizer.step()
+
+        # Target update (soft update)
+        with torch.no_grad():
+            for param, target_param in zip(
+                self.inference_model.parameters(), self.tgt_model.parameters()
+            ):
+                target_param.lerp_(param, self.args.tau_soft)
 
         return loss_val
 

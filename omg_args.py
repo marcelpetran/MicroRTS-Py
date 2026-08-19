@@ -6,10 +6,11 @@ class OMGArgs:
     device: str = "cpu"  # cpu, cuda, mps
     gamma: float = 0.985
     lr: float = 3e-4
+    lr_om: float = 1e-4
     batch_size: int = 128
     capacity: int = 250_000
     sl_capacity: int = 500_000
-    min_replay: int = 256
+    min_replay: int = 10_000
     train_every: int = 4
     visualise_every_n_step: int = 3
     qnet_hidden: int = 256
