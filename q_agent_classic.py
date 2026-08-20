@@ -168,7 +168,9 @@ class QLearningAgentClassic:
         gumbel_noise = -beta * torch.empty_like(qvals).exponential_().log()
 
         if eval == True:
-            dist = F.softmax(qvals / beta, dim=-1)
+            dist = F.softmax(
+                qvals / beta - qvals.max(dim=-1, keepdim=True).values, dim=-1
+            )
             return int(torch.multinomial(dist, num_samples=1).item())
 
         return int(torch.argmax(qvals + gumbel_noise))
@@ -182,7 +184,7 @@ class QLearningAgentClassic:
         qvals = self.q(s)
 
         tau = 0.05 if eval else self._tau()
-        entropy = Categorical(logits=qvals / tau).entropy().item()
+        entropy = Categorical(logits=qvals / 0.05).entropy().item()
 
         return self.choose_action(qvals, tau, eval), entropy
 
