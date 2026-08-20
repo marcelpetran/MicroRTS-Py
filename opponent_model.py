@@ -88,48 +88,67 @@ class OpponentModel(nn.Module):
 
         return kl_div.item()
 
+    def _pairwise_manhattan(self, H: int, W: int, device: torch.device) -> torch.Tensor:
+        """
+        Cached pairwise Manhattan distance matrix of shape (H*W, H*W) for the grid.
+        Built lazily and keyed by (H, W, device) so it is reused across calls.
+        """
+        key = (H, W, device)
+        cache = getattr(self, "_pw_cache", None)
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        y, x = torch.meshgrid(
+            torch.arange(H, device=device),
+            torch.arange(W, device=device),
+            indexing="ij",
+        )
+        coords = torch.stack([y, x], dim=-1).reshape(-1, 2).float()  # (HW, 2)
+        dist = (coords.unsqueeze(1) - coords.unsqueeze(0)).abs().sum(-1)  # (HW, HW)
+        self._pw_cache = (key, dist)
+        return dist
+
     def expected_spatial_error(
         self, g_map: torch.Tensor, true_goal_map: torch.Tensor
     ) -> float:
         """
-        Calculates the probability-weighted Manhattan distance to the nearest valid target.
+        Probability-weighted Manhattan distance from each cell to the nearest valid
+        target, averaged over the batch. Vectorized over the batch dimension.
 
         Args:
             g_map: Predicted probabilities after softmax (B, H, W)
             true_goal_map: Ground truth probabilities (B, H, W)
         """
         B, H, W = g_map.shape
-        total_error = 0.0
-        valid_count = 0
+        dist = self._pairwise_manhattan(H, W, g_map.device)  # (HW, HW)
 
-        y, x = torch.meshgrid(
-            torch.arange(H, device=g_map.device),
-            torch.arange(W, device=g_map.device),
-            indexing="ij",
-        )
-        coords_flat = torch.stack([y, x], dim=-1).view(-1, 2).float()
+        g_flat = g_map.reshape(B, -1)  # (B, HW)
+        tgt_flat = true_goal_map.reshape(B, -1)  # (B, HW)
+        valid = tgt_flat > 0  # (B, HW)
 
-        for b in range(B):
-            true_targets = torch.nonzero(true_goal_map[b] > 0).float()
-            if len(true_targets) == 0:
-                continue
+        # Per (batch, cell): Manhattan distance to the nearest valid target.
+        # Invalid targets get a sentinel larger than any real distance (max is H+W-2).
+        nearest = (
+            dist.unsqueeze(0)
+            .masked_fill(~valid.unsqueeze(1), float(H + W))
+            .amin(dim=-1)
+        )  # (B, HW)
 
-            dists = torch.abs(coords_flat.unsqueeze(1) - true_targets.unsqueeze(0)).sum(
-                dim=-1
-            )
-            min_dists = torch.min(dists, dim=1).values.view(H, W)
+        has_target = valid.any(dim=-1)  # (B,)
+        per_batch = (g_flat * nearest).sum(dim=-1)
+        per_batch = torch.where(has_target, per_batch, torch.zeros_like(per_batch))
 
-            total_error += (g_map[b] * min_dists).sum().item()
-            valid_count += 1
-
-        return total_error / valid_count if valid_count > 0 else 0.0
+        valid_count = has_target.sum()
+        if valid_count.item() == 0:
+            return 0.0
+        return (per_batch.sum() / valid_count).item()
 
     def pretrain(self, dataset, epochs=10, batch_size=128):
         """
-        Enhanced pretraining loop with logging and progress bars.
+        Pretraining loop with progress bars, throttled step-level logging and
+        per-epoch summaries.
         """
         print(f"Starting pretraining for {epochs} epochs on {self.device}...")
-        step = 0
+        global_step = 0
         for epoch in range(epochs):
             random.shuffle(dataset)
             epoch_losses = []
@@ -162,13 +181,11 @@ class OpponentModel(nn.Module):
                     ).to(self.device, non_blocking=True),
                 }
 
-                loss, kl_error, spatial_error = self.pretrain_step(
-                    om_batch, step=step, epoch=epoch
-                )
+                loss, kl_error, spatial_error = self.pretrain_step(om_batch)
                 epoch_losses.append(loss)
                 epoch_kl_divs.append(kl_error)
                 epoch_spatial_errors.append(spatial_error)
-                step += 1
+                global_step += 1
 
                 # Update progress bar suffix with current loss
                 pbar.set_postfix({"loss": f"{loss:.4f}"})
@@ -240,7 +257,7 @@ class OpponentModel(nn.Module):
 
         return soft_targets.squeeze(1)  # Return to (B, H, W)
 
-    def pretrain_step(self, batch, step=0, epoch=0):
+    def pretrain_step(self, batch):
         x = batch["states"]
         history = batch["history"]
         # (B, H, W) Ground Truth from Hindsight
@@ -279,15 +296,6 @@ class OpponentModel(nn.Module):
         )  # (B, H, W)
         kl_div = self.heatmap_kl_divergence(g_map, opp_heatmap)
         spatial_error = self.expected_spatial_error(g_map, opp_heatmap)
-        wandb.log(
-            {
-                "train/batch_loss": loss_val,
-                "train/kl_divergence": kl_div,
-                "train/expected_spatial_error": spatial_error,
-                "step": step,
-                "epoch": epoch,
-            }
-        )
 
         return loss_val, kl_div, spatial_error
 

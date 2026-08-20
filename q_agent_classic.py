@@ -36,7 +36,7 @@ class QLearningAgentClassic:
         self.q = QNetClassic(args).to(self.device)
         self.q_tgt = QNetClassic(args).to(self.device)
         self.q_tgt.load_state_dict(self.q.state_dict())
-        self.opt = torch.optim.Adam(self.q.parameters(), lr=self.args.lr)
+        self.opt = torch.optim.Adam(self.q.parameters(), lr=self.args.lr, eps=1e-6)
 
         # Replay
         self.replay = ReplayBuffer(self.args.capacity)

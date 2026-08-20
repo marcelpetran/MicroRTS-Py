@@ -37,6 +37,16 @@ class SimpleForagingEnv:
 
         self.num_food = len(self._initial_food)
 
+        # Precompute wall coordinates for vectorized observation construction.
+        # Walls are immutable after init.
+        if self.walls:
+            w_rows, w_cols = zip(*self.walls)
+            self._wall_rows = np.asarray(w_rows, dtype=np.int64)
+            self._wall_cols = np.asarray(w_cols, dtype=np.int64)
+        else:
+            self._wall_rows = np.empty(0, dtype=np.int64)
+            self._wall_cols = np.empty(0, dtype=np.int64)
+
         self.base_obs = np.zeros(
             (self.height, self.width, self.features), dtype=np.int8
         )
@@ -119,25 +129,25 @@ class SimpleForagingEnv:
     def get_global_state(self):
         obs = np.zeros((self.height, self.width, self.features), dtype=np.int8)
         obs[:, :, 5] = 1  # All cells visible in global state
-        for r, c in self.walls:
-            obs[r, c, 4] = 1
-        for r, c in self.food_positions:
-            obs[r, c, 1] = 1
+
+        # Walls (vectorized)
+        if self._wall_rows.size:
+            obs[self._wall_rows, self._wall_cols, 4] = 1
+
+        # Food (global state sees all food)
+        if self.food_positions:
+            food_rows, food_cols = zip(*self.food_positions)
+            obs[food_rows, food_cols, 1] = 1
+
+        # Agents
         if self.agents[0] is not None:
-            r0, c0 = self.agents[0]
-            obs[r0, c0, 2] = 1
+            obs[self.agents[0][0], self.agents[0][1], 2] = 1
         if self.agents[1] is not None:
-            r1, c1 = self.agents[1]
-            obs[r1, c1, 3] = 1
-        for r in range(self.height):
-            for c in range(self.width):
-                if (
-                    obs[r, c, 1] == 0
-                    and obs[r, c, 2] == 0
-                    and obs[r, c, 3] == 0
-                    and obs[r, c, 4] == 0
-                ):
-                    obs[r, c, 0] = 1
+            obs[self.agents[1][0], self.agents[1][1], 3] = 1
+
+        # Empty cells: everywhere no object (food/agent/wall) is present.
+        occupied = (obs[..., 1] | obs[..., 2] | obs[..., 3] | obs[..., 4]).astype(bool)
+        obs[..., 0] = ~occupied
         return obs
 
     def swap_agents(self):
@@ -166,20 +176,30 @@ class SimpleForagingEnv:
         return [0, 1, 2, 3]
 
     def _get_observations(self):
+        wall_rows, wall_cols = self._wall_rows, self._wall_cols
+
+        # Food positions are shared across agents; extract once.
+        if self.food_positions:
+            food_rows, food_cols = zip(*self.food_positions)
+            food_rows = np.asarray(food_rows, dtype=np.int64)
+            food_cols = np.asarray(food_cols, dtype=np.int64)
+        else:
+            food_rows = food_cols = np.empty(0, dtype=np.int64)
+
         observations = {}
         for agent_id in self.agents:
             obs = np.zeros((self.height, self.width, self.features), dtype=np.int8)
             vis_map = self.get_visibility_map(agent_id)
             obs[:, :, 5] = vis_map
 
-            # Walls (known)
-            for r, c in self.walls:
-                obs[r, c, 4] = 1
+            # Walls (known to all agents regardless of visibility)
+            if wall_rows.size:
+                obs[wall_rows, wall_cols, 4] = 1
 
             # Visible food
-            for r, c in self.food_positions:
-                if vis_map[r, c] == 1:
-                    obs[r, c, 1] = 1
+            if food_rows.size:
+                visible = vis_map[food_rows, food_cols] == 1
+                obs[food_rows[visible], food_cols[visible], 1] = 1
 
             # Visible Agent 0
             if self.agents[0] is not None:
@@ -193,17 +213,11 @@ class SimpleForagingEnv:
                 if vis_map[r1, c1] == 1:
                     obs[r1, c1, 3] = 1
 
-            # Empty visible tiles
-            for r in range(self.height):
-                for c in range(self.width):
-                    if (
-                        vis_map[r, c] == 1
-                        and obs[r, c, 1] == 0
-                        and obs[r, c, 2] == 0
-                        and obs[r, c, 3] == 0
-                        and obs[r, c, 4] == 0
-                    ):
-                        obs[r, c, 0] = 1
+            # Empty visible tiles: visible and not occupied by food/agent/wall.
+            occupied = (obs[..., 1] | obs[..., 2] | obs[..., 3] | obs[..., 4]).astype(
+                bool
+            )
+            obs[..., 0] = vis_map.astype(bool) & ~occupied
 
             observations[agent_id] = obs
         return observations
@@ -470,7 +484,6 @@ class SimpleAgent:
 
     def select_action(self, observation, eval=False):
         my_channel = 2
-        self.update_belief(observation)
         heatmap = self.get_subgoal_heatmap(observation)
 
         agent_pos_arr = np.argwhere(observation[:, :, my_channel] == 1)
@@ -636,7 +649,6 @@ class GreedySwitchAgent:
 
     def select_action(self, observation, eval=False):
         my_channel = 2
-        self.update_belief(observation)
         heatmap = self.get_subgoal_heatmap(observation)
         agent_pos_arr = np.argwhere(observation[:, :, my_channel] == 1)
 
@@ -850,7 +862,6 @@ class StalkerAgent:
 
     def select_action(self, observation, eval=False):
         my_channel = 2
-        self.update_belief(observation)
         heatmap = self.get_subgoal_heatmap(observation)
 
         my_pos_arr = np.argwhere(observation[:, :, my_channel] == 1)

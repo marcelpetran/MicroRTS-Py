@@ -340,23 +340,6 @@ class QLearningAgent:
                 g_logits_next
             )
 
-        # Helper log
-        with torch.no_grad():
-            self.model.inference_model.eval()
-            g_logits_live = self.model.inference_model(s, hist, cached_features=False)
-            self.model.inference_model.train()
-            g_live = F.softmax(g_logits_live.view(len(batch), -1), dim=-1)
-            g_ema = F.softmax(
-                g_logits.view(len(batch), -1), dim=-1
-            )  # tgt_model logits already computed
-            kl_live_ema = (
-                (g_live * (torch.log(g_live + 1e-8) - torch.log(g_ema + 1e-8)))
-                .sum(dim=-1)
-                .mean()
-                .item()
-            )
-        wandb.log({"om/kl_live_ema": kl_live_ema}, step=self.global_step)
-
         # 1. Q(s, g, a)
         q_sa = self.q(squ, g_map).gather(1, a.unsqueeze(1)).squeeze(1)
 
