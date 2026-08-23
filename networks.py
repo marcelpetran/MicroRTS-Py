@@ -1,7 +1,5 @@
-import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+from torch import nn
 
 from omg_args import OMGArgs
 
@@ -19,14 +17,14 @@ class QNet(nn.Module):
     def __init__(self, args: OMGArgs):
         super().__init__()
         H, W, F_dim = args.state_shape
-        self.state_dim = H * W * F_dim
-        self.action_dim = args.action_dim
+        self.state_dim: int = H * W * F_dim
+        self.action_dim: int = args.action_dim
         cnn_hidden = args.cnn_hidden
 
-        self.flat_dim = cnn_hidden * H * W
+        self.flat_dim: int = cnn_hidden * H * W
         input_channels = F_dim + args.belief_channels + 1
 
-        self.cnn = nn.Sequential(
+        self.cnn: nn.Sequential = nn.Sequential(
             nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Conv2d(32, cnn_hidden, kernel_size=3, padding=1),
@@ -37,13 +35,13 @@ class QNet(nn.Module):
         )
 
         # Heads (Dueling)
-        self.advantage_head = nn.Sequential(
+        self.advantage_head: nn.Sequential = nn.Sequential(
             nn.Linear(self.flat_dim, args.qnet_hidden),
             nn.ReLU(),
             nn.Linear(args.qnet_hidden, self.action_dim),
         )
 
-        self.value_head = nn.Sequential(
+        self.value_head: nn.Sequential = nn.Sequential(
             nn.Linear(self.flat_dim, args.qnet_hidden),
             nn.ReLU(),
             nn.Linear(args.qnet_hidden, 1),
