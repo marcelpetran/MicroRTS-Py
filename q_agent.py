@@ -252,7 +252,7 @@ class QLearningAgent:
         gumbel_noise = -beta * torch.empty_like(qvals).exponential_().log()
 
         if eval == True:
-            dist = F.softmax(qvals / beta, dim=-1)
+            dist = F.softmax(qvals / beta - qvals.max(dim=-1, keepdim=True).values, dim=-1)
             return int(torch.multinomial(dist, num_samples=1).item())
 
         return int(torch.argmax(qvals + gumbel_noise))
@@ -279,7 +279,7 @@ class QLearningAgent:
         qvals = self.q(x_aug, g_map)
 
         tau = 0.05 if eval else self._tau()
-        entropy = Categorical(logits=qvals / tau).entropy().item()
+        entropy = Categorical(logits=qvals / 0.05).entropy().item()
 
         a = self.choose_action(qvals, tau, eval)
 
@@ -339,23 +339,6 @@ class QLearningAgent:
             g_map_next = F.softmax(g_logits_next.view(len(batch), -1), dim=-1).view_as(
                 g_logits_next
             )
-
-        # Helper log
-        with torch.no_grad():
-            self.model.inference_model.eval()
-            g_logits_live = self.model.inference_model(s, hist, cached_features=False)
-            self.model.inference_model.train()
-            g_live = F.softmax(g_logits_live.view(len(batch), -1), dim=-1)
-            g_ema = F.softmax(
-                g_logits.view(len(batch), -1), dim=-1
-            )  # tgt_model logits already computed
-            kl_live_ema = (
-                (g_live * (torch.log(g_live + 1e-8) - torch.log(g_ema + 1e-8)))
-                .sum(dim=-1)
-                .mean()
-                .item()
-            )
-        wandb.log({"om/kl_live_ema": kl_live_ema}, step=self.global_step)
 
         # 1. Q(s, g, a)
         q_sa = self.q(squ, g_map).gather(1, a.unsqueeze(1)).squeeze(1)
