@@ -6,11 +6,13 @@ class BeliefTracker:
     Belief channels derived ONLY from the agent's own observation history.
     Update rules mirror the heuristic opponents' beliefs:
       - food: add where food observed, discard where cell observed empty [6]
-      - opponent: last-seen position + steps-since-seen [6]
+      - opponent: last-seen position, cleared to None when that cell is later
+        observed visible-and-empty (the opponent has left); opp_age keeps
+        growing so the NN still gets a staleness signal after the drop [6]
 
     Channels (H, W, 3):
       0: belief_food     cells believed to contain food
-      1: opp_last_seen   1.0 at opponent's last observed cell
+      1: opp_last_seen   1.0 at opponent's last observed cell (all-zeros if unknown)
       2: opp_age         steps since opponent last seen, normalized to [0, 1]
     """
 
@@ -46,6 +48,10 @@ class BeliefTracker:
         if len(opp) > 0:
             self.opp_last_seen = tuple(opp[0])
             self.opp_age = 0
+        elif self.opp_last_seen is not None:
+            r_opp, c_opp = self.opp_last_seen
+            if vis[r_opp, c_opp] == 1:
+                self.opp_last_seen = None
 
     def channels(self):
         out = np.zeros((self.H, self.W, 3), dtype=np.float32)
