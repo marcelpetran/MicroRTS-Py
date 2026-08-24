@@ -147,3 +147,5 @@ plots/*
 # ignored folder:
 ignore/*
 args
+graphify-out/
+report/
