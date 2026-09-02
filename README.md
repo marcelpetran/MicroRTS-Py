@@ -1,65 +1,130 @@
-# Opponent Modeling based on Subgoal Inference
+# Opponent Modeling based on Subgoal Inference — Team Exploration on CMAPF Maps
 
-This project explores opponent modeling in multi-agent reinforcement learning, specifically within the context of what we define as **Explicit Sequential Subgoal (ESS) Games**. In these games, an agent's behavior can be effectively modeled as a sequence of intermediate objectives or "subgoals." By inferring these subgoals, an agent can better predict an opponent's long-term strategy and adapt its own policy for more effective counter-play.
+This project explores opponent/teammate modeling (OM) in multi-agent reinforcement
+learning. Agents' behavior is modeled as a sequence of intermediate objectives
+("subgoals"); by inferring these subgoals, an agent can predict the long-term
+strategy of **opponents and teammates alike** and adapt its own policy.
 
-This repository provides the implementation of a Q-learning agent augmented with a Transformer-based opponent model, trained and evaluated in a competitive foraging environment.
+The thesis work targets **team-based competitive/cooperative exploration**:
+two or more teams compete for a shared pool of hidden goals on large MovingAI
+(CMAPF benchmark) maps with fog of war. The learning team (one shared Q-net per
+team) plays against Stefan Edelkamp-style heuristic greedy teams. Teammates pool
+their vision ("slightly centralized" perception) and share rewards.
 
-For a detailed theoretical background on ESS games and the foundational concepts of this work, please refer to the paper located at `papers/Opponent_Modeling_in_Zero_Sum_Games.pdf`. Please note that while the core concepts remain, the specific architecture described in the paper has been updated in this implementation.
+For the theoretical background see `papers/Opponent_Modeling_in_Zero_Sum_Games.pdf`
+(the architecture described there has since been updated).
+
+## Project Structure
+
+```
+MicroRTS-Py/
+├── omexplore/                  # main package
+│   ├── envs/
+│   │   ├── roadmap_foraging_env.py   # TeamRoadmapEnv: team competitive exploration (thesis env)
+│   │   └── simple_foraging_env.py    # legacy 1v1 foraging env
+│   ├── agents/
+│   │   ├── q_agent.py          # QLearningAgent: team agent w/ hostile+friendly OM (thesis agent)
+│   │   ├── q_agent_classic.py  # baseline Q-learning agent (no OM)
+│   │   ├── slq_agent.py        # FSP variants (legacy experiments)
+│   │   ├── slq_agent_classic.py
+│   │   └── team_agents.py      # scripted greedy TeamAgent (heuristic opponent)
+│   ├── models/
+│   │   ├── networks.py         # QNet / QNetClassic / SLnet
+│   │   ├── transformers.py     # SpatialOpponentModel (transformer OM)
+│   │   ├── opponent_model.py   # OpponentModel wrapper (training, EMA target, metrics)
+│   │   ├── beliefs.py          # BeliefTracker (fog-of-war belief channels)
+│   │   └── buffers.py          # replay / reservoir buffers
+│   ├── utils/
+│   │   ├── maps.py             # small legacy map layouts
+│   │   ├── omg_args.py         # OMGArgs hyperparameter dataclass
+│   │   └── renderer.py         # realtime matplotlib renderer (legacy env)
+│   └── collect_data.py         # offline OM pretraining data collection (legacy env)
+├── scripts/                    # executable entry points (run from project root)
+│   ├── train_team_exploration.py     # thesis pipeline: team training
+│   ├── train_1v1.py                  # legacy 1v1 training (broken vs new q_agent)
+│   ├── train_fsp_multiagent.py        # legacy FSP experiments
+│   ├── benchmark_env.py              # env profiling
+│   ├── plot_eval_returns.py           # wandb result plots
+│   └── plot_om_spatial_error.py
+├── tests/
+│   ├── test_team_pipeline.py         # end-to-end team pipeline smoke test
+│   ├── test_hindsight_labeling.py    # claim-count labeling unit tests
+│   └── test_smoke.py                # component smoke tests (legacy env)
+├── cmapf_unified/             # CMAPF solver server, benchmark maps, visualizations
+├── models/, diagrams/, dataset/, plots/   # outputs (gitignored)
+├── notebooks/                 # analysis notebooks
+└── papers/                    # related work + thesis paper
+```
 
 ## Architecture
 
-The system is composed of two main components: a `QLearningAgent` that learns to act in the environment, and an `OpponentModel` that provides insights into the opponent's intentions.
+### Team environment (`TeamRoadmapEnv`)
 
-### Opponent Model
+- Octile movement (8 actions, no corner cutting), matching the CMAPF solver.
+- 7-channel egocentric observation per agent: empty / goal-in-team-vis /
+  self / teammate / opponent-in-vis / wall / team-visibility.
+- Teammates pool vision; teams share rewards; simultaneous goal collection
+  splits the reward across teams.
+- Hidden goal pool → exploration is required; opponents are only visible
+  inside the team's pooled vision.
 
-The `OpponentModel` is the core of our subgoal inference mechanism. It is designed to predict the opponent's next subgoal based on their recent trajectory.
+### Opponent models
 
--   **Model:** It uses a Transformer-based architecture, specifically a `SpatialOpponentModel` (`transformers.py`), to process a sequence of historical states and opponent actions.
--   **Input:** The model takes the current state and a history of the opponent's recent (state, action) pairs.
--   **Output:** It produces a spatial heatmap (`g_map`) over the game grid, representing a probability distribution over the opponent's potential subgoal locations.
--   **Training:** The model is trained using a cross-entropy loss, supervised via "hindsight." At the end of an episode, the opponent's actual success (i.e., which food they collected) is used as the ground-truth label for what their subgoal was.
+Two `OpponentModel`s per learning team, one per side:
 
-### Q-Learning Agent
+- **Hostile OM** predicts the hostile teams' pooled claim-count map
+  (where each opponent is heading).
+- **Friendly OM** predicts the teammates' claim map (everyone except the
+  acting agent — the agent knows its own goal).
 
-The `QLearningAgent` is a Double Deep Q-Network (DDQN) agent responsible for making decisions in the environment. It is augmented to leverage the predictions of the `OpponentModel`.
+Labels are generated by **hindsight relabeling**: after each episode, each
+agent's intended subgoal at step _t_ is the next goal it actually collected
+(claim counts, so a cell can hold >1). Agents that never collect fall back to
+their final position.
 
--   **Q-Network:** The agent's `QNet` is a Convolutional Neural Network (CNN) that approximates the action-value function `Q(s, g, a)`.
--   **Conditioned Input:** Crucially, the Q-network takes not only the current state `s` but also the subgoal heatmap `g` (produced by the `OpponentModel`) as input. This allows the agent's policy to be conditioned on the inferred intent of the opponent.
--   **Training:** The agent is trained using a replay buffer and DDQN to learn a policy that maximizes its own rewards, taking the opponent's predicted strategy into account.
+### Q-learning agent
 
-## Environment
-
-The experiments are conducted in the `SimpleForagingEnv`, a grid-world environment where two agents compete to collect food items.
-
--   **Objective:** Be the first to collect the food items.
--   **Setup:** A 2-player, zero-sum game on a grid. Each player starts at a fixed position, and two food items are placed at other fixed positions.
--   **Actions:** Agents can move Up, Down, Left, or Right.
+`QLearningAgent` is a Double DQN controlling **every member of the learning
+team with one shared Q-net**. The Q-net is conditioned on the state, belief
+channels, and the OM's predicted subgoal heatmap. DDQN targets + Boltzmann
+exploration with temperature decay.
 
 ## How to Run
 
-The main training script is `simple_foraging_train.py`. You can configure the training run using command-line arguments.
-
-**Example:**
+All commands from the project root.
 
 ```bash
-python simple_foraging_train.py --episodes 20000 --batch_size 32 --d_model 256
+# Team training (thesis pipeline)
+python scripts/train_team_exploration.py --map den312d --episodes 3000
+
+# With argument files
+python scripts/train_team_exploration.py @args
+
+# Tests
+python tests/test_team_pipeline.py
+python tests/test_hindsight_labeling.py
+python tests/test_smoke.py
+# or all at once:
+pytest tests/
 ```
 
-### Key Arguments:
+### Key training arguments
 
--   `--oracle`: Use a ground-truth "oracle" opponent model instead of the learned Transformer model.
--   `--classic`: Run a standard Q-learning agent without any opponent modeling. This is useful as a baseline.
--   `--episodes`: Number of episodes to train for.
--   `--env_size`: The size of the grid (e.g., 11 for an 11x11 grid).
--   `--batch_size`: The batch size for training the networks.
--   `--d_model`, `--nhead`, etc.: Hyperparameters for the Transformer architecture.
+- `--map`: MovingAI map name (`cmapf_unified/maps/*.map`)
+- `--team_sizes`: e.g. `2,2` — team 0 learns, the rest are scripted
+- `--num_goals`, `--vision_radius`, `--max_steps`: environment config
+- `--episodes`, `--episodes_per_epoch`, `--eval_episodes`: schedule
+- `--batch_size`, `--replay_capacity`, `--train_every`, `--gamma`: RL
+- `--max_history_length`: transformer history window (memory-sensitive!)
 
-## Key Files
+Outputs (checkpoints, charts) go to `models/<folder_id>/` and
+`diagrams/<folder_id>/`; metrics to Weights & Biases (project
+`om-team-exploration`).
 
--   `simple_foraging_train.py`: The main script to start the training process.
--   `q_agent.py`: Contains the implementation of the `QLearningAgent`, including the `QNet` and replay buffer.
--   `opponent_model.py`: Implements the `OpponentModel`, which wraps the Transformer network and handles the training step.
--   `transformers.py`: Defines the `SpatialOpponentModel`, the Transformer-based network for subgoal inference.
--   `simple_foraging_env.py`: Defines the `SimpleForagingEnv` game environment.
--   `omg_args.py`: A dataclass for managing hyperparameters and configuration.
--   `papers/Opponent_Modeling_in_Zero_Sum_Games.pdf`: The research paper detailing the theoretical foundations of the project.
+## Notes
+
+- The legacy 1v1 pipeline (`train_1v1.py`, `train_fsp_multiagent.py`) predates
+  the team refactor; `q_agent.py` now targets `TeamRoadmapEnv` and is not
+  compatible with the legacy scripts.
+- `cmapf_unified/` contains the CMAPF solver server (`server.py`, port 8767),
+  benchmark maps/scenarios, and visualizations.
