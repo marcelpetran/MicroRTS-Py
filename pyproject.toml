@@ -1,7 +1,7 @@
 [project]
-name = "microrts-py"
-version = "0.1.0"
-description = "Add your description here"
+name = "omexplore"
+version = "0.2.0"
+description = "Opponent/teammate modeling via subgoal inference for team-based competitive exploration (CMAPF benchmark maps)"
 readme = "README.md"
 authors = [
     { name = "marcelpetran", email = "marcelpetran55@gmail.com" }
@@ -21,3 +21,4 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["omexplore*"]
