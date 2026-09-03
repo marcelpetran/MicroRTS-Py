@@ -298,6 +298,11 @@ def run_team_collection_episode(env: TeamRoadmapEnv, team_agents, records_out=No
         agent_goals = compute_agent_goals(step_records, final_positions)
     else:
         agent_goals = []
+    # Stack each team's anchor stream ONCE and share the array by reference
+    # across that team's transitions (stacking inside the transition loop
+    # would copy the full stream per transition and OOM on large runs;
+    # torch.save/pickle preserves the sharing, so the file stays small too).
+    team_histories = {t: np.stack(s) for t, s in anchor_states.items() if len(s) > 0}
     for tr in transitions:
         if agent_goals:
             goals = agent_goals[tr["step_idx"]]
@@ -308,7 +313,7 @@ def run_team_collection_episode(env: TeamRoadmapEnv, team_agents, records_out=No
         else:
             tr["true_goal_cells"] = []
             tr["true_team_cells"] = []
-        tr["history"] = {"states": np.stack(anchor_states[tr["team"]])}
+        tr["history"] = {"states": team_histories[tr["team"]]}
     return transitions
 
 
