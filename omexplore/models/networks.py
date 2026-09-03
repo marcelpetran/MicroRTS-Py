@@ -6,10 +6,13 @@ from omexplore.utils.omg_args import OMGArgs
 
 class QNet(nn.Module):
     """
-    RL Network Q(s, g, a) that learns best response with imbued heatmap of opponent subgoal inference.
+    RL Network Q(s, g, a) that learns best response with imbued heatmaps of
+    opponent and teammate subgoal inference.
     state_shape: (H, W, F)
     action_dim: number of discrete actions
-    g_map: (H, W) heatmap of inferred opponent subgoal
+    g_map: (B, H, W) heatmap of inferred hostile subgoals
+    g_team_map: (B, H, W) heatmap of inferred teammate subgoals (optional,
+        only used when args.friendly_om is set; zeros are fed otherwise)
     output: Q-values for each action
     Dueling architecture with shared CNN backbone and separate value/advantage heads.
     """
@@ -19,10 +22,12 @@ class QNet(nn.Module):
         H, W, F_dim = args.state_shape
         self.state_dim: int = H * W * F_dim
         self.action_dim: int = args.action_dim
+        self.friendly_om: bool = getattr(args, "friendly_om", True)
         cnn_hidden = args.cnn_hidden
 
         self.flat_dim: int = cnn_hidden * H * W
-        input_channels = F_dim + args.belief_channels + 1
+        # +1 hostile subgoal heatmap, +1 friendly subgoal heatmap (ablatable)
+        input_channels = F_dim + args.belief_channels + (2 if self.friendly_om else 1)
 
         self.cnn: nn.Sequential = nn.Sequential(
             nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
@@ -56,21 +61,25 @@ class QNet(nn.Module):
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0.01)
 
-    def forward(self, batch: torch.Tensor, g_map: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, batch: torch.Tensor, g_map: torch.Tensor, g_team_map: torch.Tensor = None
+    ) -> torch.Tensor:
         """
         Args:
-            batch: Game state (B, H, W, F)
-            g_map: Heatmap of inferred opponent subgoal (B, H, W)
-            return_aux: Whether to return auxiliary prediction (used during training)
+            batch: Game state (B, H, W, F)  [F already includes belief channels]
+            g_map: Heatmap of inferred hostile subgoals (B, H, W)
+            g_team_map: Heatmap of inferred teammate subgoals (B, H, W); only
+                used when constructed with friendly_om=True (zeros otherwise)
         """
-        # Batch shape: (B, H, W, F)
-        # Permute to (B, F, H, W) for PyTorch Conv2d
+        # Batch shape: (B, H, W, F) -> (B, F, H, W) for PyTorch Conv2d
         s = batch.permute(0, 3, 1, 2)
-        # (B, 1, H, W) - broadcast latent g across spatial dimensions
-        g = g_map.unsqueeze(1)
-
-        x = torch.cat([s, g], dim=1)
-        # x = torch.cat([s[:, :3], g_map.unsqueeze(1), s[:, 4:]], dim=1)
+        # (B, 1, H, W) - broadcast heatmaps across spatial dimensions
+        chans = [s, g_map.unsqueeze(1)]
+        if self.friendly_om:
+            if g_team_map is None:
+                g_team_map = torch.zeros_like(g_map)
+            chans.append(g_team_map.unsqueeze(1))
+        x = torch.cat(chans, dim=1)
         features = self.cnn(x)
 
         # Dueling Heads

@@ -55,24 +55,32 @@ class SpatialOpponentModel(nn.Module):
         self.args = args
         H, W, F_dim = args.state_shape
 
-        # CNN feature extractor to embed each (H, W, F) state into a d_model vector
-        # Projects (H, W, F) -> d_model
+        # CNN feature extractor to embed each (H, W, F) state into a d_model
+        # vector. 8x downsampling via AvgPool (NOT strided convs): stride-2
+        # convolutions fall off the MKLDNN fast path and run ~4x slower per
+        # FLOP, and pooling is anti-aliased (stride-2 convs alias). AvgPool
+        # (not Max) preserves the sign of the difference channels
+        # (x - x_prev), where -1 marks a disappearance under fog of war.
         self.feature_extractor = nn.Sequential(
+            nn.AvgPool2d(2),
             nn.Conv2d(2 * F_dim, 32, kernel_size=3, padding=1),
             nn.ReLU(),
+            nn.AvgPool2d(2),
             nn.Conv2d(32, 32, kernel_size=3, padding=1),
             nn.ReLU(),
+            nn.AvgPool2d(2),
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(64 * H * W, args.d_model),
+            nn.Linear(64 * (H // 8) * (W // 8), args.d_model),
         )
 
         self.pos_encoder = PositionalEncoding(
             args.d_model, seq_len=args.max_history_length + 1, dropout=args.dropout
         )
 
-        # Transformer Encoder
+        # Transformer Encoder. enable_nested_tensor=False: the nested-tensor
+        # fast path is prototype-stage and unsupported on some backends (MPS).
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=args.d_model,
             nhead=args.nhead,
@@ -81,7 +89,9 @@ class SpatialOpponentModel(nn.Module):
             batch_first=True,
         )
         self.transformer = nn.TransformerEncoder(
-            encoder_layer, num_layers=args.num_encoder_layers
+            encoder_layer,
+            num_layers=args.num_encoder_layers,
+            enable_nested_tensor=False,
         )
 
         # Spatial Head to predict heatmap of opponent location: d_model -> H*W
@@ -121,6 +131,13 @@ class SpatialOpponentModel(nn.Module):
             hist_states = history["states"]  # (B, T, H, W, F)
             prev_states = torch.zeros_like(hist_states)
             prev_states[:, 1:] = hist_states[:, :-1]
+            # True predecessor of the oldest window frame. For a full window
+            # (start > 0) this is the real previous observation; for a partial
+            # window it is zeros, matching the rollout's episode-start pairing.
+            prev_first = history.get("prev_first")
+            if prev_first is None:
+                prev_first = torch.zeros_like(hist_states[:, 0])
+            prev_states[:, 0] = prev_first
             valid = hist_mask.reshape(-1)
             hist_flat = hist_states.reshape(B * T, H, W, F_dim)[valid]
             prev_flat = prev_states.reshape(B * T, H, W, F_dim)[valid]

@@ -22,6 +22,10 @@ class OMGArgs:
     true_intent: bool = False
     belief_channels: int = 3  # food_belief, opp_last_seen, opp_age
     belief_map_prior: bool = True
+    friendly_om: bool = True
+    # Q-net conditioning ablation switch: True = Q(s, g_hostile, g_friendly, a),
+    # False = Q(s, g_hostile, a). The friendly OM is TRAINED either way (its
+    # loss is logged); the flag only controls whether the Q-net sees it.
 
     oracle: bool = False
     tau_soft: float = 0.001

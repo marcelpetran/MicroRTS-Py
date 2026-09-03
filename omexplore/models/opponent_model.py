@@ -16,7 +16,7 @@ from omexplore.utils.omg_args import OMGArgs
 class OpponentModel(nn.Module):
     def __init__(self, model: SpatialOpponentModel, args: OMGArgs = OMGArgs()):
         super(OpponentModel, self).__init__()
-        self.inference_model = model
+        self.inference_model = model.to(args.device)
         self.tgt_model = SpatialOpponentModel(args).to(args.device)
         self.tgt_model.load_state_dict(self.inference_model.state_dict())
         for param in self.tgt_model.parameters():
@@ -53,6 +53,12 @@ class OpponentModel(nn.Module):
             (B, max_len, H, W, F_dim), dtype=torch.float32, device=self.device
         )
         mask = torch.zeros((B, max_len), dtype=torch.bool, device=self.device)
+        # True predecessor observation of each window's oldest frame (zeros at
+        # episode start), so training recomputes exactly the features the
+        # rollout used (see SpatialOpponentModel.forward).
+        prev_first = torch.zeros(
+            (B, H, W, F_dim), dtype=torch.float32, device=self.device
+        )
         for i, t in enumerate(items):
             seq = t["history"]["states"]
             if not isinstance(seq, np.ndarray):
@@ -64,7 +70,9 @@ class OpponentModel(nn.Module):
             start = end - L
             states[i, -L:] = torch.from_numpy(seq[start:end]).float()
             mask[i, -L:] = True
-        return {"states": states, "mask": mask}
+            if start > 0:
+                prev_first[i] = torch.from_numpy(seq[start - 1]).float()
+        return {"states": states, "mask": mask, "prev_first": prev_first}
 
     def heatmap_kl_divergence(
         self, g_map: torch.Tensor, true_goal_map: torch.Tensor

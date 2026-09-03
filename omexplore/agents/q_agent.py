@@ -296,7 +296,8 @@ class QLearningAgent:
         eval=False,
     ) -> tuple[int, torch.Tensor, Number]:
         """
-        (interaction phase) Infer g_hat and act eps-greedily on Q(s,g_hat,*)
+        (interaction phase) Infer the hostile and friendly claim maps and act
+        eps-greedily on Q(s, g_hostile, g_friendly, *)
         """
         x = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
         x_aug = torch.from_numpy(s_aug).float().unsqueeze(0).to(self.device)
@@ -304,9 +305,15 @@ class QLearningAgent:
             g_logits = self.model(x, history)  # (1, H, W)
             g_map = F.softmax(g_logits.view(g_logits.shape[0], -1), dim=-1).view_as(
                 g_logits
-            )  # (B, H, W)
+            )  # (1, H, W)
+            g_team_map = None
+            if self.args.friendly_om:
+                gt_logits = self.team_model(x, history)  # (1, H, W)
+                g_team_map = F.softmax(
+                    gt_logits.view(gt_logits.shape[0], -1), dim=-1
+                ).view_as(gt_logits)  # (1, H, W)
 
-        qvals = self.q(x_aug, g_map)
+        qvals = self.q(x_aug, g_map, g_team_map)
 
         tau = 0.05 if eval else self._tau()
         entropy = Categorical(logits=qvals / 0.05).entropy().item()
@@ -354,8 +361,22 @@ class QLearningAgent:
             g_logits = self.model.tgt_model(s, hist, cached_features=False)
             g_map = F.softmax(g_logits.view(len(batch), -1), dim=-1).view_as(g_logits)
 
+            # Friendly claim maps from the same team-level history (the acting
+            # agent's own goal is not part of the label/prediction).
+            g_team_map = None
+            g_team_map_next = None
+            if self.args.friendly_om:
+                gt_logits = self.team_model.tgt_model(s, hist, cached_features=False)
+                g_team_map = F.softmax(gt_logits.view(len(batch), -1), dim=-1).view_as(
+                    gt_logits
+                )
+
             hist_states = history["states"].clone()  # [B, max_len, H, W, F_dim]
             hist_mask = history["mask"].clone()  # [B, max_len]
+
+            # The dropped oldest frame is the true predecessor of the shifted
+            # window's new oldest frame (zeros while it was padding).
+            prev_first_next = hist_states[:, 0].clone()
 
             # Shift left: drop timestep 0, move everything back
             hist_states[:, :-1] = hist_states[:, 1:]
@@ -364,22 +385,37 @@ class QLearningAgent:
             hist_states[:, -1] = s
             hist_mask[:, -1] = True
 
-            hist_next = {"states": hist_states, "mask": hist_mask}
+            hist_next = {
+                "states": hist_states,
+                "mask": hist_mask,
+                "prev_first": prev_first_next,
+            }
             g_logits_next = self.model.tgt_model(sp, hist_next, cached_features=False)
             g_map_next = F.softmax(g_logits_next.view(len(batch), -1), dim=-1).view_as(
                 g_logits_next
             )
+            if self.args.friendly_om:
+                gt_logits_next = self.team_model.tgt_model(
+                    sp, hist_next, cached_features=False
+                )
+                g_team_map_next = F.softmax(
+                    gt_logits_next.view(len(batch), -1), dim=-1
+                ).view_as(gt_logits_next)
 
         # 1. Q(s, g, a)
-        q_sa = self.q(squ, g_map).gather(1, a.unsqueeze(1)).squeeze(1)
+        q_sa = self.q(squ, g_map, g_team_map).gather(1, a.unsqueeze(1)).squeeze(1)
 
         # 2. Target = r + gamma * max_a' Q_tgt(s', g, a')
         with torch.no_grad():
-            q_val = self.q(spu, g_map_next)
+            q_val = self.q(spu, g_map_next, g_team_map_next)
             noise = torch.rand_like(q_val) * 1e-6
             best_actions = (q_val + noise).argmax(dim=1, keepdim=True)
 
-            q_next = self.q_tgt(spu, g_map_next).gather(1, best_actions).squeeze(1)
+            q_next = (
+                self.q_tgt(spu, g_map_next, g_team_map_next)
+                .gather(1, best_actions)
+                .squeeze(1)
+            )
 
             target = r + (1.0 - done) * self.args.gamma * q_next
             target = torch.clamp(target, min=-15.0, max=15.0)
@@ -654,6 +690,7 @@ class QLearningAgent:
         compatibility; a team-env renderer is still TBD.
         """
         self.model.inference_model.eval()
+        self.team_model.inference_model.eval()
         obs = self.env.reset()
         opponent_agent.reset()
         self.tracker.reset(use_map_prior=self.args.belief_map_prior)
