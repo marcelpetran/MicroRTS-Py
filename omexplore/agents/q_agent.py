@@ -15,6 +15,7 @@ from omexplore.models.beliefs import BeliefTracker
 from omexplore.models.buffers import ReplayBuffer
 from omexplore.models.networks import QNet
 from omexplore.models.opponent_model import OpponentModel
+from omexplore.utils.labeling import claim_count_map, compute_agent_goals
 from omexplore.utils.omg_args import OMGArgs
 
 
@@ -504,29 +505,16 @@ class QLearningAgent:
                 t["true_team_goal_map"] = np.zeros((H, W), dtype=np.float32)
             return
 
-        # next_goal[a] = goal agent a is heading to, seen from step t
-        next_goal = dict(final_positions)  # fallback: never collected
-        agent_goals = [None] * len(step_records)
-        for t in range(len(step_records) - 1, -1, -1):
-            for goal, collectors in step_records[t]["collectors"].items():
-                for a in collectors:
-                    next_goal[a] = goal
-            agent_goals[t] = dict(next_goal)
+        # Shared with offline collection (omexplore.utils.labeling) so the
+        # pretraining labels exactly match the RL-time labels.
+        agent_goals = compute_agent_goals(step_records, final_positions)
 
         for tr in episode_transitions:
             goals = agent_goals[tr["step_idx"]]
-            hostile_map = np.zeros((H, W), dtype=np.float32)
-            for h in self.hostile_ids:
-                p = goals[h]
-                hostile_map[p[0], p[1]] += 1.0
-            team_map = np.zeros((H, W), dtype=np.float32)
-            for m in self.learn_ids:
-                if m == tr["agent_id"]:
-                    continue
-                p = goals[m]
-                team_map[p[0], p[1]] += 1.0
-            tr["true_goal_map"] = hostile_map
-            tr["true_team_goal_map"] = team_map
+            tr["true_goal_map"] = claim_count_map(self.hostile_ids, goals, H, W)
+            tr["true_team_goal_map"] = claim_count_map(
+                [m for m in self.learn_ids if m != tr["agent_id"]], goals, H, W
+            )
 
     # ------------- rollout -------------
 

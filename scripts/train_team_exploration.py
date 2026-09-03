@@ -7,6 +7,10 @@ Run (from project root):
   /opt/homebrew/anaconda3/envs/om/bin/python scripts/train_team_exploration.py \
       --map den312d --episodes 3000
 
+Ablation (Q-net without friendly-OM conditioning; OM still trained for
+comparable metrics):
+  ... --no_friendly_om
+
 Defaults are sized for the 81x65 den312d map (see roadmap notes):
   max_history_length=8   (one collation = B x L x H x W x F floats)
   capacity=20000         (~200KB/transition in RAM)
@@ -82,7 +86,28 @@ parser.add_argument(
     "--device",
     type=str,
     default="auto",
-    help="auto|cpu|cuda|mps (auto = cuda if available, else cpu)",
+    help="auto|cpu|cuda|mps (auto = cuda if available, else mps, else cpu)",
+)
+parser.add_argument(
+    "--friendly_om",
+    dest="friendly_om",
+    action="store_true",
+    default=True,
+    help="Condition the Q-net on the friendly-OM heatmap (ablation flag; the "
+    "friendly OM is trained and logged either way)",
+)
+parser.add_argument(
+    "--no_friendly_om",
+    dest="friendly_om",
+    action="store_false",
+    help="Ablation: Q-net without friendly-OM conditioning",
+)
+parser.add_argument(
+    "--pretrained_om",
+    type=str,
+    default=None,
+    help="Dir with hostile_om.pth / friendly_om.pth from "
+    "scripts/pretrain_team_oms.py (arch flags must match)",
 )
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--folder_id", type=int, default=0)
@@ -103,7 +128,12 @@ np.random.seed(args_parsed.seed)
 torch.manual_seed(args_parsed.seed)
 
 if args_parsed.device == "auto":
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
 else:
     device = args_parsed.device
 print(f"Using device: {device}")
@@ -148,10 +178,24 @@ args = OMGArgs(
     num_encoder_layers=args_parsed.num_encoder_layers,
     dim_feedforward=args_parsed.dim_feedforward,
     dropout=args_parsed.dropout,
+    friendly_om=args_parsed.friendly_om,
 )
 
 hostile_om = OpponentModel(SpatialOpponentModel(args), args)
 friendly_om = OpponentModel(SpatialOpponentModel(args), args)
+
+if args_parsed.pretrained_om:
+    for om, fname in (
+        (hostile_om, "hostile_om.pth"),
+        (friendly_om, "friendly_om.pth"),
+    ):
+        sd = torch.load(
+            os.path.join(args_parsed.pretrained_om, fname), map_location=device
+        )
+        om.inference_model.load_state_dict(sd)
+        om.tgt_model.load_state_dict(sd)
+    print(f"Loaded pretrained OMs from {args_parsed.pretrained_om}")
+
 agent = QLearningAgent(env, hostile_om, friendly_om, args=args)
 opponent = TeamAgent(env, team_id=1)
 
