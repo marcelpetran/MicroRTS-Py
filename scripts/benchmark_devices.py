@@ -120,6 +120,13 @@ def main():
     parser.add_argument(
         "--devices", type=str, default="cpu,mps,cuda", help="Comma-separated candidates"
     )
+    parser.add_argument("--d_model", type=int, default=64)
+    parser.add_argument("--nhead", type=int, default=4)
+    parser.add_argument("--num_encoder_layers", type=int, default=1)
+    parser.add_argument("--dim_feedforward", type=int, default=256)
+    parser.add_argument("--cnn_hidden", type=int, default=64)
+    parser.add_argument("--num_goals", type=int, default=16)
+    parser.add_argument("--vision_radius", type=int, default=5)
     args_cli = parser.parse_args()
 
     wandb.init(mode="disabled")
@@ -147,7 +154,8 @@ def main():
             env = TeamRoadmapEnv(
                 map_name=args_cli.map,
                 max_steps=args_cli.max_steps,
-                num_goals=16,
+                num_goals=args_cli.num_goals,
+                vision_radius=args_cli.vision_radius,
                 team_sizes=(2, 2),
             )
             args_dict = dict(
@@ -157,6 +165,11 @@ def main():
                 action_dim=8,
                 max_steps=args_cli.max_steps,
                 max_history_length=args_cli.history_length,
+                d_model=args_cli.d_model,
+                nhead=args_cli.nhead,
+                num_encoder_layers=args_cli.num_encoder_layers,
+                dim_feedforward=args_cli.dim_feedforward,
+                cnn_hidden=args_cli.cnn_hidden,
                 capacity=5000,
                 min_replay=args_cli.min_replay,
                 batch_size=batch_size,

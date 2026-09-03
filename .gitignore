@@ -147,6 +147,7 @@ plots/*
 # ignored folder:
 ignore/*
 args
+pipeline.args
 graphify-out/
 report/
 cmapf_unified/web/

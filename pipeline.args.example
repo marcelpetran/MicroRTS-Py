@@ -1,0 +1,50 @@
+# pipeline.args.example — copy to ./pipeline.args (untracked) and edit.
+# Format: key=value, '#' starts a comment. Only set what you want to
+# override; anything unset uses the underlying script's default.
+# Unknown keys are a hard error (typo protection).
+# Driven by scripts/run_pipeline.py; see its --help for the full key list.
+
+# ---- env (collect + train) ----
+map=den312d
+team_sizes=2,2
+num_goals=16
+vision_radius=5
+max_steps=400
+seed=auto               # auto = derive from $SLURM_JOB_ID; or a number to pin
+
+# ---- OM architecture (forwarded to BOTH pretrain and train) ----
+d_model=64
+nhead=4
+num_encoder_layers=1
+dim_feedforward=256
+dropout=0.1
+cnn_hidden=64
+max_history_length=8
+
+# ---- stage 1: scripted 2v2 collection ----
+collect_episodes=100
+
+# ---- stage 2: OM pretraining ----
+pretrain_epochs=5
+pretrain_batch_size=64
+lr_om=0.0001
+# pretrain_wandb_project=om-team-pretrain
+
+# ---- stage 3: RL training ----
+episodes=10000
+episodes_per_epoch=100
+eval_episodes=20
+batch_size=64
+replay_capacity=20000
+min_replay=2000
+train_every=8
+gamma=0.995
+qnet_dim=256
+tau_start=2.1
+tau_end=0.1
+tau_decay_steps=2000000
+wandb_project=om-team-exploration
+
+# friendly_om=true        # set false for the --no_friendly_om ablation arm
+# no_wandb=true           # offline / smoke runs
+# device=auto             # auto|cpu|cuda|mps
