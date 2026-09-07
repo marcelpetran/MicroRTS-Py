@@ -141,11 +141,11 @@ def rollout_rl(env, args, a):
         )
         with torch.no_grad():
             gh = agent.model(x, history)
-            gh = F.softmax(gh.view(1, -1), dim=-1).view_as(gh).squeeze(0)
+            gh = torch.sigmoid(gh).squeeze(0)
             gf = None
             if args.friendly_om:
                 gf = agent.team_model(x, history)
-                gf = F.softmax(gf.view(1, -1), dim=-1).view_as(gf).squeeze(0)
+                gf = torch.sigmoid(gf).squeeze(0)
         return gh, gf
 
     frames = []

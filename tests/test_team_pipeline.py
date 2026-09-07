@@ -93,8 +93,8 @@ def main():
     print(f"test ep: {tstats}")
     assert 0.0 <= tstats["return"] <= 8.0
     assert 0.0 <= tstats["opp_return"] <= 8.0
-    if tstats["avg_kl_error"] is not None:
-        assert tstats["avg_kl_error"] >= 0.0
+    if tstats["avg_mae_error"] is not None:
+        assert tstats["avg_mae_error"] >= 0.0
     if tstats["avg_spatial_error"] is not None:
         assert tstats["avg_spatial_error"] >= 0.0
 

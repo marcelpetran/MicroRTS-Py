@@ -317,7 +317,7 @@ for epoch in range(num_epochs):
         [],
         [],
     )
-    epoch_eval_kl_errors, epoch_eval_spatial_errors = [], []
+    epoch_eval_mae_errors, epoch_eval_spatial_errors = [], []
 
     # Training
     pbar = tqdm(
@@ -342,13 +342,13 @@ for epoch in range(num_epochs):
         eval_rets.append(test_stats["return"])
         eval_opp_rets.append(test_stats["opp_return"])
         eval_steps.append(test_stats["steps"])
-        epoch_eval_kl_errors.append(test_stats["avg_kl_error"])
+        epoch_eval_mae_errors.append(test_stats["avg_mae_error"])
         epoch_eval_spatial_errors.append(test_stats["avg_spatial_error"])
 
     avg_eval_ret = sum(eval_rets) / eval_episodes
     avg_eval_opp = sum(eval_opp_rets) / eval_episodes
     avg_eval_steps = sum(eval_steps) / eval_episodes
-    avg_eval_kl_error = sum(epoch_eval_kl_errors) / len(epoch_eval_kl_errors)
+    avg_eval_mae_error = sum(epoch_eval_mae_errors) / len(epoch_eval_mae_errors)
     avg_eval_spatial_error = sum(epoch_eval_spatial_errors) / len(
         epoch_eval_spatial_errors
     )
@@ -379,7 +379,7 @@ for epoch in range(num_epochs):
             "om/eval_return": avg_eval_ret,
             "om/eval_opp_return": avg_eval_opp,
             "om/eval_steps": avg_eval_steps,
-            "om/eval_kl_error": avg_eval_kl_error,
+            "om/eval_mae": avg_eval_mae_error,
             "om/eval_spatial_error": avg_eval_spatial_error,
             "epoch": epoch + 1,
         }

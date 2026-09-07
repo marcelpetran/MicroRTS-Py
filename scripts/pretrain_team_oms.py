@@ -92,7 +92,7 @@ def pretrain_oms(dataset, args, epochs, batch_size, device, use_wandb=True):
     for epoch in range(epochs):
         order = list(range(len(dataset)))
         random.shuffle(order)
-        h_losses, f_losses, h_kls, f_kls = [], [], [], []
+        h_losses, f_losses, h_maes, f_maes = [], [], [], []
         pbar = tqdm(
             range(0, len(order), batch_size), desc=f"Epoch {epoch + 1}/{epochs}"
         )
@@ -102,16 +102,16 @@ def pretrain_oms(dataset, args, epochs, batch_size, device, use_wandb=True):
             h_batch = build_om_batch(
                 items, args, device, "true_goal_cells", "true_opp_heatmap_cells"
             )
-            loss, kl, _ = hostile_om.pretrain_step(h_batch)
+            loss, mae, _ = hostile_om.pretrain_step(h_batch)
             h_losses.append(loss)
-            h_kls.append(kl)
+            h_maes.append(mae)
 
             f_batch = build_om_batch(
                 items, args, device, "true_team_cells", "true_team_heatmap_cells"
             )
-            loss, kl, _ = friendly_om.pretrain_step(f_batch)
+            loss, mae, _ = friendly_om.pretrain_step(f_batch)
             f_losses.append(loss)
-            f_kls.append(kl)
+            f_maes.append(mae)
 
             pbar.set_postfix(
                 h_loss=f"{np.mean(h_losses[-20:]):.4f}",
@@ -121,17 +121,17 @@ def pretrain_oms(dataset, args, epochs, batch_size, device, use_wandb=True):
         metrics = {
             "pretrain/hostile_loss": float(np.mean(h_losses)),
             "pretrain/friendly_loss": float(np.mean(f_losses)),
-            "pretrain/hostile_kl": float(np.mean(h_kls)),
-            "pretrain/friendly_kl": float(np.mean(f_kls)),
+            "pretrain/hostile_mae": float(np.mean(h_maes)),
+            "pretrain/friendly_mae": float(np.mean(f_maes)),
             "epoch": epoch + 1,
         }
         if use_wandb:
             wandb.log(metrics)
         print(
             f"Epoch {epoch + 1:02d} | hostile {metrics['pretrain/hostile_loss']:.4f} "
-            f"(kl {metrics['pretrain/hostile_kl']:.4f}) | "
+            f"(mae {metrics['pretrain/hostile_mae']:.4f}) | "
             f"friendly {metrics['pretrain/friendly_loss']:.4f} "
-            f"(kl {metrics['pretrain/friendly_kl']:.4f})"
+            f"(mae {metrics['pretrain/friendly_mae']:.4f})"
         )
 
     return hostile_om, friendly_om

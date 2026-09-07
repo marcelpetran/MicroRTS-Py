@@ -78,6 +78,9 @@ SPEC = {
     "tau_end": ("--tau_end", ("train",)),
     "tau_decay_steps": ("--tau_decay_steps", ("train",)),
     "wandb_project": ("--wandb_project", ("train",)),
+    # reward shaping (train stage only; team_scores/goal counts unaffected)
+    "shaping_alpha": ("--shaping_alpha", ("train",)),
+    "shaping_beta": ("--shaping_beta", ("train",)),
     # devices
     "device": ("--device", ("pretrain", "train")),
 }
@@ -85,6 +88,7 @@ SPEC = {
 # Boolean keys: "key=true|false" (flag carries no value on the CLI).
 BOOL_KEYS = {
     "friendly_om": ("train",),  # false -> --no_friendly_om (ablation)
+    "shaping": ("train",),  # true -> --shaping (default off in the script)
     "no_wandb": ("pretrain", "train"),
 }
 
@@ -168,6 +172,9 @@ def build_cmd(stage, cfg, dataset: Path, om_dir: Path, folder_id) -> list:
             b = _as_bool(val)
             if key == "friendly_om":
                 cmd += ["--friendly_om" if b else "--no_friendly_om"]
+            elif key == "shaping":
+                if b:
+                    cmd += ["--shaping"]
             elif b:  # no_wandb
                 cmd += ["--no_wandb"]
             continue

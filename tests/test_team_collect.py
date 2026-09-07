@@ -156,16 +156,16 @@ def main():
     batch = build_om_batch(
         items, args, device, "true_goal_cells", "true_opp_heatmap_cells"
     )
-    loss, kl, sp = hostile_om.pretrain_step(batch)
+    loss, mae, sp = hostile_om.pretrain_step(batch)
     assert np.isfinite(loss), f"hostile pretrain loss not finite: {loss}"
-    print(f"Hostile pretrain smoke: loss={loss:.4f} kl={kl:.4f} spatial={sp:.4f}")
+    print(f"Hostile pretrain smoke: loss={loss:.4f} mae={mae:.4f} spatial={sp:.4f}")
 
     fbatch = build_om_batch(
         items, args, device, "true_team_cells", "true_team_heatmap_cells"
     )
-    floss, fkl, _ = friendly_om.pretrain_step(fbatch)
+    floss, fmae, _ = friendly_om.pretrain_step(fbatch)
     assert np.isfinite(floss), f"friendly pretrain loss not finite: {floss}"
-    print(f"Friendly pretrain smoke: loss={floss:.4f} kl={fkl:.4f}")
+    print(f"Friendly pretrain smoke: loss={floss:.4f} mae={fmae:.4f}")
 
     # Save + load roundtrip, then a forward pass.
     with tempfile.TemporaryDirectory() as tmp:
@@ -179,9 +179,10 @@ def main():
         hist2 = collate_history_packed(items[:2], args, "cpu")
         with torch.no_grad():
             out = fresh_h(batch["states"][:2], hist2, cached_features=False)
-            probs = torch.softmax(out.flatten(1), dim=-1).sum(dim=-1)
+            probs = torch.sigmoid(out)
         assert torch.isfinite(out).all()
-        assert torch.allclose(probs, torch.ones(2), atol=1e-4), probs
+        # Per-cell target probabilities: bounded [0, 1], not a distribution.
+        assert (probs >= 0).all() and (probs <= 1).all(), probs
     print("Checkpoint save/load + forward OK")
 
     print("\nALL TEAM COLLECTION TESTS PASSED")

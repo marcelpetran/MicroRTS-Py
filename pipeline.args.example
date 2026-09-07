@@ -45,6 +45,11 @@ tau_end=0.1
 tau_decay_steps=2000000
 wandb_project=om-team-exploration
 
+# ---- reward shaping (learning team; goal counts in *_return stay clean) ----
+# shaping=true             # novelty + goal-approach shaping for team 0
+# shaping_alpha=0.02       # approach weight (full approach ~ 1 goal)
+# shaping_beta=0.00025     # novelty weight per newly covered cell
+
 # friendly_om=true        # set false for the --no_friendly_om ablation arm
 # no_wandb=true           # offline / smoke runs
 # device=auto             # auto|cpu|cuda|mps

@@ -274,7 +274,7 @@ def t_test_episode():
     opp = GreedySwitchAgent(agent_id=1, map_layout=MAP_1)
     stats = agent.run_test_episode(opp, max_steps=15, render=False)
     assert stats["steps"] <= 15
-    assert stats["avg_kl_error"] is None or np.isfinite(stats["avg_kl_error"])
+    assert stats["avg_mae_error"] is None or np.isfinite(stats["avg_mae_error"])
     if stats["avg_spatial_error"] is not None:
         assert stats["avg_spatial_error"] >= 0.0
 

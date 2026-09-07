@@ -109,6 +109,28 @@ parser.add_argument(
     help="Dir with hostile_om.pth / friendly_om.pth from "
     "scripts/pretrain_team_oms.py (arch flags must match)",
 )
+parser.add_argument(
+    "--shaping",
+    action="store_true",
+    default=False,
+    help="Potential-based reward shaping for the learning team: novelty "
+    "(newly covered cells) + goal approach (BFS distance decrease to the "
+    "nearest goal visible before the move). Goals collected are unaffected "
+    "(team_scores); shaping only enters the learned rewards.",
+)
+parser.add_argument(
+    "--shaping_alpha",
+    type=float,
+    default=0.02,
+    help="Goal-approach weight; full approach to a goal ~ this * its "
+    "BFS distance (0.02 * ~40 steps ~ 1 goal)",
+)
+parser.add_argument(
+    "--shaping_beta",
+    type=float,
+    default=2.5e-4,
+    help="Novelty weight per newly covered cell (full map ~ 1 goal)",
+)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--folder_id", type=int, default=0)
 parser.add_argument("--wandb_project", type=str, default="om-team-exploration")
@@ -144,6 +166,9 @@ env = TeamRoadmapEnv(
     vision_radius=args_parsed.vision_radius,
     num_goals=args_parsed.num_goals,
     team_sizes=team_sizes,
+    shaping=args_parsed.shaping,
+    shaping_alpha=args_parsed.shaping_alpha,
+    shaping_beta=args_parsed.shaping_beta,
 )
 obs_sample = env.reset()
 
@@ -221,7 +246,7 @@ train_hist = {
     "eval_returns": [],
     "eval_opp_returns": [],
     "eval_steps": [],
-    "eval_kl": [],
+    "eval_mae": [],
     "eval_spatial": [],
     "eval_coverage": [],
     "eval_opp_coverage": [],
@@ -229,7 +254,7 @@ train_hist = {
 
 for epoch in range(num_epochs):
     ep_returns, ep_opp, ep_steps, ep_ent = [], [], [], []
-    ep_q, ep_m, ep_tm = [], [], []
+    ep_q, ep_m, ep_tm, ep_sh = [], [], [], []
 
     pbar = tqdm(
         range(args_parsed.episodes_per_epoch),
@@ -245,6 +270,7 @@ for epoch in range(num_epochs):
         ep_q.append(stats["avg_q_loss"])
         ep_m.append(stats["avg_model_loss"])
         ep_tm.append(stats["avg_team_model_loss"])
+        ep_sh.append(stats["shaped_return"])
         pbar.set_postfix(
             ret=f"{stats['return']:.1f}",
             opp=f"{stats['opp_return']:.1f}",
@@ -252,15 +278,16 @@ for epoch in range(num_epochs):
         )
 
     # Evaluation
-    ev_rets, ev_opp, ev_steps, ev_kl, ev_sp = [], [], [], [], []
-    ev_cov, ev_opp_cov = [], []
+    ev_rets, ev_opp, ev_steps, ev_mae, ev_sp = [], [], [], [], []
+    ev_cov, ev_opp_cov, ev_sh = [], [], []
     for _ in range(args_parsed.eval_episodes):
         t = agent.run_test_episode(opponent, max_steps=args_parsed.max_steps)
         ev_rets.append(t["return"])
         ev_opp.append(t["opp_return"])
         ev_steps.append(t["steps"])
-        if t["avg_kl_error"] is not None:
-            ev_kl.append(t["avg_kl_error"])
+        ev_sh.append(t["shaped_return"])
+        if t["avg_mae_error"] is not None:
+            ev_mae.append(t["avg_mae_error"])
         if t["avg_spatial_error"] is not None:
             ev_sp.append(t["avg_spatial_error"])
         # coverage is read after the episode ended (env state is post-terminal)
@@ -279,10 +306,12 @@ for epoch in range(num_epochs):
         "train_q_loss": _avg(ep_q),
         "train_model_loss": _avg(ep_m),
         "train_team_model_loss": _avg(ep_tm),
+        "train_shaped_return": _avg(ep_sh),
         "eval_return": _avg(ev_rets),
         "eval_opp_return": _avg(ev_opp),
         "eval_steps": _avg(ev_steps),
-        "eval_kl_error": _avg(ev_kl),
+        "eval_shaped_return": _avg(ev_sh),
+        "eval_mae": _avg(ev_mae),
         "eval_spatial_error": _avg(ev_sp),
         "eval_coverage": _avg(ev_cov),
         "eval_opp_coverage": _avg(ev_opp_cov),
@@ -298,7 +327,7 @@ for epoch in range(num_epochs):
     train_hist["eval_returns"].append(avg["eval_return"])
     train_hist["eval_opp_returns"].append(avg["eval_opp_return"])
     train_hist["eval_steps"].append(avg["eval_steps"])
-    train_hist["eval_kl"].append(avg["eval_kl_error"])
+    train_hist["eval_mae"].append(avg["eval_mae"])
     train_hist["eval_spatial"].append(avg["eval_spatial_error"])
     train_hist["eval_coverage"].append(avg["eval_coverage"])
     train_hist["eval_opp_coverage"].append(avg["eval_opp_coverage"])
@@ -317,8 +346,10 @@ for epoch in range(num_epochs):
 
     print(
         f"Epoch {epoch + 1:02d} | Train Ret {avg['train_return']:>5.2f} "
-        f"(opp {avg['train_opp_return']:.2f}) | Eval Ret {avg['eval_return']:>5.2f} "
-        f"(opp {avg['eval_opp_return']:.2f}) | Cov {avg['eval_coverage']:.3f} "
+        f"(opp {avg['train_opp_return']:.2f}, shaped {avg['train_shaped_return']:.2f}) "
+        f"| Eval Ret {avg['eval_return']:>5.2f} "
+        f"(opp {avg['eval_opp_return']:.2f}, shaped {avg['eval_shaped_return']:.2f}) "
+        f"| Cov {avg['eval_coverage']:.3f} "
         f"(opp {avg['eval_opp_coverage']:.3f}) | Q {avg['train_q_loss']:.3f} "
         f"| OM {avg['train_model_loss']:.3f} | tOM {avg['train_team_model_loss']:.3f}"
     )
@@ -369,7 +400,7 @@ plt.title("Opponent Model Losses")
 plt.legend()
 
 plt.subplot(2, 3, 6)
-plt.plot(epochs, train_hist["eval_kl"], label="KL error", color="teal")
+plt.plot(epochs, train_hist["eval_mae"], label="Target MAE", color="teal")
 plt.plot(epochs, train_hist["eval_spatial"], label="Spatial error", color="gray")
 plt.xlabel("Training Episodes")
 plt.ylabel("Error")

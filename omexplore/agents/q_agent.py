@@ -304,15 +304,11 @@ class QLearningAgent:
         x_aug = torch.from_numpy(s_aug).float().unsqueeze(0).to(self.device)
         with torch.no_grad():
             g_logits = self.model(x, history)  # (1, H, W)
-            g_map = F.softmax(g_logits.view(g_logits.shape[0], -1), dim=-1).view_as(
-                g_logits
-            )  # (1, H, W)
+            g_map = torch.sigmoid(g_logits)  # (1, H, W)
             g_team_map = None
             if self.args.friendly_om:
                 gt_logits = self.team_model(x, history)  # (1, H, W)
-                g_team_map = F.softmax(
-                    gt_logits.view(gt_logits.shape[0], -1), dim=-1
-                ).view_as(gt_logits)  # (1, H, W)
+                g_team_map = torch.sigmoid(gt_logits)  # (1, H, W)
 
         qvals = self.q(x_aug, g_map, g_team_map)
 
@@ -360,7 +356,7 @@ class QLearningAgent:
         with torch.no_grad():
             hist = history
             g_logits = self.model.tgt_model(s, hist, cached_features=False)
-            g_map = F.softmax(g_logits.view(len(batch), -1), dim=-1).view_as(g_logits)
+            g_map = torch.sigmoid(g_logits)  # (B, H, W)
 
             # Friendly claim maps from the same team-level history (the acting
             # agent's own goal is not part of the label/prediction).
@@ -368,9 +364,7 @@ class QLearningAgent:
             g_team_map_next = None
             if self.args.friendly_om:
                 gt_logits = self.team_model.tgt_model(s, hist, cached_features=False)
-                g_team_map = F.softmax(gt_logits.view(len(batch), -1), dim=-1).view_as(
-                    gt_logits
-                )
+                g_team_map = torch.sigmoid(gt_logits)  # (B, H, W)
 
             hist_states = history["states"].clone()  # [B, max_len, H, W, F_dim]
             hist_mask = history["mask"].clone()  # [B, max_len]
@@ -392,16 +386,12 @@ class QLearningAgent:
                 "prev_first": prev_first_next,
             }
             g_logits_next = self.model.tgt_model(sp, hist_next, cached_features=False)
-            g_map_next = F.softmax(g_logits_next.view(len(batch), -1), dim=-1).view_as(
-                g_logits_next
-            )
+            g_map_next = torch.sigmoid(g_logits_next)  # (B, H, W)
             if self.args.friendly_om:
                 gt_logits_next = self.team_model.tgt_model(
                     sp, hist_next, cached_features=False
                 )
-                g_team_map_next = F.softmax(
-                    gt_logits_next.view(len(batch), -1), dim=-1
-                ).view_as(gt_logits_next)
+                g_team_map_next = torch.sigmoid(gt_logits_next)  # (B, H, W)
 
         # 1. Q(s, g, a)
         q_sa = self.q(squ, g_map, g_team_map).gather(1, a.unsqueeze(1)).squeeze(1)
@@ -538,6 +528,7 @@ class QLearningAgent:
         H, W, _ = obs[anchor].shape
 
         ep_entropy = 0.0
+        ep_shaped = 0.0
         q_losses, model_losses, team_losses = [], [], []
 
         # History buffer for the transformer (team-level: anchor obs stream;
@@ -587,8 +578,8 @@ class QLearningAgent:
             next_obs, rewards, done, info = self.env.step(actions)
             self.tracker.update(next_obs[anchor])
             next_belief = self.tracker.channels()
-
-            # Store the step without the true label (added post-episode).
+            # True optimization return (goal shares + any reward shaping).
+            ep_shaped += sum(rewards[a] for a in self.learn_ids)
             for a in self.learn_ids:
                 episode_transitions.append(
                     {
@@ -661,6 +652,7 @@ class QLearningAgent:
             "return": team_score,
             "steps": step + 1,
             "opp_return": opp_score,
+            "shaped_return": ep_shaped,
             "avg_entropy": ep_entropy / max(1, (step + 1) * len(self.learn_ids)),
             "avg_q_loss": _avg(q_losses),
             "avg_model_loss": _avg(model_losses),
@@ -672,9 +664,9 @@ class QLearningAgent:
     ) -> Dict[str, float]:
         """
         Evaluation rollout: no exploration noise schedule, no replay /
-        training. Reports the hostile OM's prediction quality (KL / spatial
-        error) against the opponent team's true claim heatmap whenever the
-        opponents have a known target. `render` is accepted for API
+        training. Reports the hostile OM's prediction quality (target MAE /
+        spatial error) against the opponent team's true claim heatmap whenever
+        the opponents have a known target. `render` is accepted for API
         compatibility; a team-env renderer is still TBD.
         """
         self.model.inference_model.eval()
@@ -686,7 +678,8 @@ class QLearningAgent:
         self.tracker.update(obs[anchor])
 
         ep_entropy = 0.0
-        ep_kl_errors = []
+        ep_shaped = 0.0
+        ep_mae_errors = []
         ep_spatial_errors = []
 
         history_len = self.args.max_history_length
@@ -723,26 +716,23 @@ class QLearningAgent:
             for a in self.hostile_ids:
                 actions[a] = opp_actions[a]
 
-            # OM prediction quality vs the hostile team's true claims.
+            # OM prediction quality vs the hostile team's true claims
+            # (per-cell probabilities vs the binarized claim map).
             opp_heat = opponent_agent.get_team_heatmap()
             if g_map_anchor is not None and opp_heat is not None:
-                total = opp_heat.sum()
-                if total > 0:
+                if opp_heat.sum() > 0:
                     g2 = (
                         g_map_anchor.unsqueeze(0)
                         if g_map_anchor.dim() == 2
                         else g_map_anchor
                     )
-                    opp_dist = (
-                        torch.from_numpy(opp_heat / total).to(self.device).unsqueeze(0)
-                    )
-                    ep_kl_errors.append(self.model.heatmap_kl_divergence(g2, opp_dist))
-                    ep_spatial_errors.append(
-                        self.model.expected_spatial_error(g2, opp_dist)
-                    )
+                    tgt = torch.from_numpy(opp_heat).to(self.device).unsqueeze(0)
+                    ep_mae_errors.append(self.model.heatmap_mae(g2, tgt))
+                    ep_spatial_errors.append(self.model.expected_spatial_error(g2, tgt))
 
             next_obs, rewards, done, info = self.env.step(actions)
             self.tracker.update(next_obs[anchor])
+            ep_shaped += sum(rewards[a] for a in self.learn_ids)
 
             state_tensor = (
                 torch.from_numpy(obs[anchor]).float().unsqueeze(0).to(self.device)
@@ -773,8 +763,9 @@ class QLearningAgent:
             "return": team_score,
             "steps": step + 1,
             "opp_return": opp_score,
+            "shaped_return": ep_shaped,
             "avg_entropy": ep_entropy / max(1, (step + 1) * len(self.learn_ids)),
-            "avg_kl_error": float(np.mean(ep_kl_errors)) if ep_kl_errors else None,
+            "avg_mae_error": float(np.mean(ep_mae_errors)) if ep_mae_errors else None,
             "avg_spatial_error": (
                 float(np.mean(ep_spatial_errors)) if ep_spatial_errors else None
             ),

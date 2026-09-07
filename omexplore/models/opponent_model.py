@@ -115,21 +115,35 @@ class OpponentModel(nn.Module):
         self._pw_cache = (key, dist)
         return dist
 
+    def heatmap_mae(self, g_map: torch.Tensor, true_goal_map: torch.Tensor) -> float:
+        """
+        Mean absolute error between the predicted per-cell target
+        probabilities and the binarized claim map (any claim -> 1). Lower is
+        better (0.0 is perfect).
+
+        g_map: sigmoid probabilities (B, H, W)
+        true_goal_map: claim counts (B, H, W); binarized here
+        """
+        tgt = (true_goal_map > 0).float()
+        return (g_map - tgt).abs().mean().item()
+
     def expected_spatial_error(
         self, g_map: torch.Tensor, true_goal_map: torch.Tensor
     ) -> float:
         """
-        Probability-weighted Manhattan distance from each cell to the nearest valid
-        target, averaged over the batch. Vectorized over the batch dimension.
+        Probability-weighted Manhattan distance from each cell to the nearest
+        valid target, averaged over the batch. Vectorized over the batch
+        dimension.
 
-        Args:
-            g_map: Predicted probabilities after softmax (B, H, W)
-            true_goal_map: Ground truth probabilities (B, H, W)
+        g_map: predicted per-cell probabilities (B, H, W); normalized
+        internally (per-cell maps need not sum to 1)
+        true_goal_map: ground-truth claim map; cells > 0 count as targets
         """
         B, H, W = g_map.shape
         dist = self._pairwise_manhattan(H, W, g_map.device)  # (HW, HW)
 
         g_flat = g_map.reshape(B, -1)  # (B, HW)
+        g_flat = g_flat / g_flat.sum(dim=-1, keepdim=True).clamp_min(1e-8)
         tgt_flat = true_goal_map.reshape(B, -1)  # (B, HW)
         valid = tgt_flat > 0  # (B, HW)
 
@@ -160,7 +174,7 @@ class OpponentModel(nn.Module):
         for epoch in range(epochs):
             random.shuffle(dataset)
             epoch_losses = []
-            epoch_kl_divs = []
+            epoch_maes = []
             epoch_spatial_errors = []
 
             pbar = tqdm(
@@ -189,9 +203,9 @@ class OpponentModel(nn.Module):
                     ).to(self.device, non_blocking=True),
                 }
 
-                loss, kl_error, spatial_error = self.pretrain_step(om_batch)
+                loss, mae_error, spatial_error = self.pretrain_step(om_batch)
                 epoch_losses.append(loss)
-                epoch_kl_divs.append(kl_error)
+                epoch_maes.append(mae_error)
                 epoch_spatial_errors.append(spatial_error)
                 global_step += 1
 
@@ -199,7 +213,7 @@ class OpponentModel(nn.Module):
                 pbar.set_postfix({"loss": f"{loss:.4f}"})
 
             avg_loss = sum(epoch_losses) / len(epoch_losses)
-            avg_kl_div = sum(epoch_kl_divs) / len(epoch_kl_divs)
+            avg_mae = sum(epoch_maes) / len(epoch_maes)
             avg_spatial_error = sum(epoch_spatial_errors) / len(epoch_spatial_errors)
             print(f"  => Average Loss: {avg_loss:.6f}")
 
@@ -207,7 +221,7 @@ class OpponentModel(nn.Module):
             wandb.log(
                 {
                     "pretrain/epoch_loss": avg_loss,
-                    "pretrain/epoch_kl_divergence": avg_kl_div,
+                    "pretrain/epoch_target_mae": avg_mae,
                     "pretrain/epoch_spatial_error": avg_spatial_error,
                     "epoch": epoch,
                 }
@@ -230,15 +244,39 @@ class OpponentModel(nn.Module):
         self.inference_model.eval()  # Ensure the model is in evaluation mode
         return self.inference_model(x, history, cached_features=cached_features)
 
+    def _bce_loss(self, pred_logits: torch.Tensor, soft_targets: torch.Tensor):
+        """Class-balanced BCE for per-cell "is this a target" probabilities.
+
+        Positive cells are extremely rare (~2 of H*W), so the positive term
+        is weighted by neg_mass/pos_mass derived from the soft targets —
+        without it the model collapses to all-zeros.
+        """
+        flat_t = soft_targets.view(soft_targets.shape[0], -1)
+        pos_mass = flat_t.sum()
+        pos_weight = ((flat_t.numel() - pos_mass) / pos_mass.clamp_min(1.0)).clamp_min(
+            1.0
+        )
+        return F.binary_cross_entropy_with_logits(
+            pred_logits.view(pred_logits.shape[0], -1),
+            flat_t,
+            pos_weight=pos_weight,
+            reduction="mean",
+        )
+
     def _generate_soft_targets(self, target_map: torch.Tensor):
         """
-        Applies a Gaussian filter directly on the GPU using PyTorch Conv2d.
-        This makes model learn faster and maybe even avoids getting stuck in local minima
-        as it provides a smoother gradient signal compared to a hard one-hot target.
-        The sigma parameter controls how much smoothing is applied,
-        with higher values creating a wider "hill" around the true target location.
+        Binarizes the claim-count map (any cell claimed by >=1 agent -> 1,
+        i.e. per-cell "is this a target") and blurs it with a Gaussian filter
+        on the GPU. The blur provides a smoother gradient signal than hard
+        0/1 targets; sigma controls the hill width around each target.
+
+        Blur of a {0,1} map with a non-negative kernel summing to 1 is a
+        convex combination, so targets stay in [0,1] as BCE requires — raw
+        counts would make the BCE loss unbounded below. Counts stay in the
+        dataset; binarization happens only here, at train time.
         target_map: (B, H, W)
         """
+        target_map = (target_map > 0).float()
         kernel_size = int(2 * math.ceil(2 * self._sigma()) + 1)
 
         # Create 1D Gaussian kernel
@@ -257,11 +295,6 @@ class OpponentModel(nn.Module):
         # Apply padding to maintain spatial dimensions
         padding = kernel_size // 2
         soft_targets = F.conv2d(target_reshaped, kernel_2d, padding=padding)
-        soft_targets = torch.clamp(soft_targets, min=0.0)
-        # Normalize the soft targets to ensure they sum to 1 across the spatial dimensions
-        soft_targets = soft_targets / soft_targets.sum(
-            dim=(2, 3), keepdim=True
-        ).clamp_min(1e-8)
 
         return soft_targets.squeeze(1)  # Return to (B, H, W)
 
@@ -270,21 +303,15 @@ class OpponentModel(nn.Module):
         history = batch["history"]
         # (B, H, W) Ground Truth from Hindsight
         target_map = batch["true_goal_map"]
-        true_opp_heatmap = batch["true_opp_heatmap"]
+        target_map = (target_map > 0).float()
 
         self.inference_model.train()
         pred_logits = self.forward(x, history, cached_features=False)  # (B, H, W)
 
-        # Generate soft targets with Gaussian smoothing
+        # Per-cell "is this a target" probabilities: blurred binary
+        # targets + class-balanced BCE
         soft_targets = self._generate_soft_targets(target_map)
-        soft_true_targets = self._generate_soft_targets(true_opp_heatmap)
-        log_probs = F.log_softmax(pred_logits.view(pred_logits.shape[0], -1), dim=-1)
-        target_dist = soft_targets.view(soft_targets.shape[0], -1)
-        target_true_dist = soft_true_targets.view(soft_true_targets.shape[0], -1)
-        loss = (
-            F.kl_div(log_probs, target_true_dist, reduction="batchmean")
-            + F.kl_div(log_probs, target_dist, reduction="batchmean") * 0.3
-        )
+        loss = self._bce_loss(pred_logits, soft_targets)
 
         loss_val = loss.item()
         self.optimizer.zero_grad()
@@ -298,14 +325,11 @@ class OpponentModel(nn.Module):
             ):
                 target_param.lerp_(param, self.args.tau_soft)
 
-        opp_heatmap = batch["true_opp_heatmap"].to(self.device)
-        g_map = F.softmax(pred_logits.view(pred_logits.shape[0], -1), dim=-1).view_as(
-            pred_logits
-        )  # (B, H, W)
-        kl_div = self.heatmap_kl_divergence(g_map, opp_heatmap)
-        spatial_error = self.expected_spatial_error(g_map, opp_heatmap)
+        g_map = torch.sigmoid(pred_logits)  # (B, H, W)
+        mae = self.heatmap_mae(g_map, target_map)
+        spatial_error = self.expected_spatial_error(g_map, target_map)
 
-        return loss_val, kl_div, spatial_error
+        return loss_val, mae, spatial_error
 
     def train_step(self, batch, cached_features=False):
         x = batch["states"]
@@ -315,11 +339,10 @@ class OpponentModel(nn.Module):
         self.inference_model.train()
         pred_logits = self.forward(x, history, cached_features)  # (B, H, W)
 
-        # Generate soft targets with Gaussian smoothing
+        # Per-cell "is this a target" probabilities: blurred binary
+        # targets + class-balanced BCE
         soft_targets = self._generate_soft_targets(target_map)
-        log_probs = F.log_softmax(pred_logits.view(pred_logits.shape[0], -1), dim=-1)
-        target_dist = soft_targets.view(soft_targets.shape[0], -1)
-        loss = F.kl_div(log_probs, target_dist, reduction="batchmean")
+        loss = self._bce_loss(pred_logits, soft_targets)
 
         loss_val = loss.item()
         self.optimizer.zero_grad()

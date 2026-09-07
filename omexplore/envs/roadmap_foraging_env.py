@@ -551,7 +551,30 @@ class TeamRoadmapEnv(RoadmapForagingEnv):
         num_goals: int = 16,
         team_sizes: tuple = (2, 2),
         maps_dir: str | None = None,
+        shaping: bool = False,
+        shaping_alpha: float = 0.02,
+        shaping_beta: float = 2.5e-4,
+        shaping_teams: tuple = (0,),
     ):
+        # Potential-based reward shaping (Ng et al. 1999) for the learning
+        # team(s) only. Two terms, both computed from team-observable
+        # information:
+        #   (a) novelty: beta * cells that THIS agent newly brought into the
+        #       team's pooled vision this step
+        #   (b) goal approach: alpha * (d_t - d_t1) where d is the BFS
+        #       distance to the nearest goal that was visible to the team
+        #       BEFORE the move (reference set fixed at t, so collecting the
+        #       goal pays out the full remaining distance; unobserved goals
+        #       never contribute)
+        # team_scores / logged returns are NOT affected; shaping only enters
+        # the per-agent rewards fed to the replay buffer.
+        self.shaping = bool(shaping)
+        self.shaping_alpha = float(shaping_alpha)
+        self.shaping_beta = float(shaping_beta)
+        self.shaping_teams = tuple(shaping_teams)
+        # cell -> BFS distance field cache; walls are fixed for the map, so
+        # fields stay valid across episodes (goals/spawns never change them).
+        self._dist_field_cache: dict = {}
         self.team_sizes = tuple(team_sizes)
         self.num_teams = len(self.team_sizes)
         self._num_goals_target = num_goals
@@ -659,8 +682,32 @@ class TeamRoadmapEnv(RoadmapForagingEnv):
             obs = self._get_ego_centric_obs()
         return obs
 
+    def _dist_field(self, cell) -> np.ndarray:
+        """Cached BFS distance field FROM cell (walls fixed -> valid forever)."""
+        f = self._dist_field_cache.get(cell)
+        if f is None:
+            if len(self._dist_field_cache) >= 4096:
+                self._dist_field_cache.clear()
+            f = self._bfs(cell)[0]
+            self._dist_field_cache[cell] = f
+        return f
+
     def step(self, actions):
         rewards = {a: 0.0 for a in self.agents}
+        # Pre-step snapshots for shaping (only the shaped teams need them).
+        if self.shaping:
+            pre_coverage = {t: self._coverage[t].copy() for t in self.shaping_teams}
+            pre_pos = {
+                a: pos
+                for a, pos in self.agents.items()
+                if self.teams[a] in self.shaping_teams
+            }
+            pre_visible_goals = {}
+            for t in self.shaping_teams:
+                vis = self._team_vis[t]
+                pre_visible_goals[t] = [
+                    g for g in self.food_positions if vis[g[0], g[1]]
+                ]
         new_positions = {}
         for agent_id in self.agents:
             new_positions[agent_id] = self._try_move(agent_id, actions.get(agent_id))
@@ -686,11 +733,38 @@ class TeamRoadmapEnv(RoadmapForagingEnv):
                 for a in self._team_members[t]:
                     rewards[a] += share
 
+        team_shaping = {}
+        if self.shaping:
+            for a in self.agents:
+                t = self.teams[a]
+                if t not in self.shaping_teams:
+                    continue
+                r_shape = 0.0
+                # (a) novelty: own post-move visibility minus the team's
+                # pre-step coverage (per-agent credit: standing still or
+                # re-traversing known area pays nothing).
+                vis_a = self.get_visibility_map(a).astype(bool)
+                new_cells = int((vis_a & ~pre_coverage[t]).sum())
+                r_shape += self.shaping_beta * new_cells
+                # (b) goal approach w.r.t. the pre-step visible goal set;
+                # fields are cached per goal cell so this is a lookup.
+                goals = pre_visible_goals[t]
+                if goals:
+                    pos_t, pos_t1 = pre_pos[a], self.agents[a]
+                    fields = [self._dist_field(g) for g in goals]
+                    ds_t = [f[pos_t] for f in fields if f[pos_t] >= 0]
+                    ds_t1 = [f[pos_t1] for f in fields if f[pos_t1] >= 0]
+                    if ds_t and ds_t1:
+                        r_shape += self.shaping_alpha * (min(ds_t) - min(ds_t1))
+                rewards[a] += r_shape
+                team_shaping[t] = team_shaping.get(t, 0.0) + r_shape
+
         info = {
             "collected": collected,
             "collectors": collectors,
             "team_rewards": team_rewards,
             "team_scores": dict(self.team_scores),
+            "team_shaping": team_shaping,
             "coverage": {t: self.get_coverage(t) for t in range(self.num_teams)},
         }
         return self._get_ego_centric_obs(), rewards, self._check_terminal(), info

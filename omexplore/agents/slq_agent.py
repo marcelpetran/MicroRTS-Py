@@ -116,9 +116,7 @@ class FSPAgentOM:
         x_aug = torch.from_numpy(s_aug).float().unsqueeze(0).to(self.device)
 
         g_logits = self.model(x, history)  # OM uses raw state (cached_features=True)
-        g_map = F.softmax(g_logits.view(g_logits.shape[0], -1), dim=-1).view_as(
-            g_logits
-        )
+        g_map = torch.sigmoid(g_logits)  # per-cell target probabilities
 
         qvals = self.q(x_aug, g_map)  # QNet uses belief-augmented state
         tau = 0.05 if eval else self._tau()
@@ -194,7 +192,7 @@ class FSPAgentOM:
         with torch.no_grad():
             hist = history
             g_logits = self.model.tgt_model(s, hist, cached_features=False)
-            g_map = F.softmax(g_logits.view(len(batch), -1), dim=-1).view_as(g_logits)
+            g_map = torch.sigmoid(g_logits)
 
             # Build next-state history by shifting and appending current state
             hist_states = history["states"].clone()  # (B, max_len, H, W, F)
@@ -207,9 +205,7 @@ class FSPAgentOM:
 
             hist_next = {"states": hist_states, "mask": hist_mask}
             g_logits_next = self.model.tgt_model(sp, hist_next, cached_features=False)
-            g_map_next = F.softmax(g_logits_next.view(len(batch), -1), dim=-1).view_as(
-                g_logits_next
-            )
+            g_map_next = torch.sigmoid(g_logits_next)
 
         # Helper log: KL between live and EMA (target) OM predictions
         with torch.no_grad():
