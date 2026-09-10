@@ -1,6 +1,6 @@
 import math
 import random
-from typing import Dict, List
+from typing import Dict
 
 import numpy as np
 import torch
@@ -14,25 +14,29 @@ from omexplore.utils.omg_args import OMGArgs
 
 
 class OpponentModel(nn.Module):
+    """Trains a SpatialOpponentModel on hindsight claim maps.
+
+    inference_model is the online network used for acting and training;
+    tgt_model is a frozen copy that is soft-updated each step and provides
+    stable targets for the Q-learning agent.
+    """
+
     def __init__(self, model: SpatialOpponentModel, args: OMGArgs = OMGArgs()):
-        super(OpponentModel, self).__init__()
+        super().__init__()
         self.inference_model = model.to(args.device)
         self.tgt_model = SpatialOpponentModel(args).to(args.device)
         self.tgt_model.load_state_dict(self.inference_model.state_dict())
         for param in self.tgt_model.parameters():
             param.requires_grad = False
         self.tgt_model.eval()
-        # self.inference_model = torch.compile(self.inference_model)
         self.optimizer = torch.optim.Adam(
             self.inference_model.parameters(), lr=args.lr_om
         )
         self.device = args.device
         self.args = args
 
-    def _sigma(self):
-        """
-        Computes the current sigma value based on the decay schedule.
-        """
+    def _sigma(self) -> float:
+        """Current sigma of the label-blur schedule (linear decay)."""
         if self.args.sigma_decay_steps <= 0:
             return self.args.sigma_end
         state = self.optimizer.state_dict().get("state", [])
@@ -74,6 +78,87 @@ class OpponentModel(nn.Module):
                 prev_first[i] = torch.from_numpy(seq[start - 1]).float()
         return {"states": states, "mask": mask, "prev_first": prev_first}
 
+    def collate_cached_history_pair(
+        self, items, key: str
+    ) -> Dict[str, Dict[str, torch.Tensor]]:
+        """Collate the per-step cached OM features into current + next windows.
+
+        Matches the rollout's rolling-feature buffer exactly: transition t
+        (hist_len L, state = episode index L, next_state = index L+1) had, at
+        decision time, a feature window over states (L-T..L-1) right-aligned
+        into a T-slot buffer + prev_obs = the raw anchor state L-1.
+
+        Returns two dicts, each {"state_features": (B,T,d_model),
+        "mask": (B,T), "prev_obs": (B,H,W,F)}:
+          cur  -> OM history for the current state s (state L)
+          nxt  -> OM history for the next state s' (state L+1): window states
+                  (L-T+1..L) + prev_obs = anchor state L.
+
+        key selects which OM's cached features to use ("feats_hostile" /
+        "feats_friendly"); features and states are the ANCHOR stream shared by
+        reference across each episode's transitions. Unlike collate_history,
+        this never re-embeds raw states, so the update path skips the CNN.
+        """
+        max_len = self.args.max_history_length
+        B = len(items)
+        H, W, F_dim = self.args.state_shape
+        dmodel = self.args.d_model
+
+        cur_feats = torch.zeros(
+            (B, max_len, dmodel), dtype=torch.float32, device=self.device
+        )
+        cur_mask = torch.zeros((B, max_len), dtype=torch.bool, device=self.device)
+        nxt_feats = torch.zeros(
+            (B, max_len, dmodel), dtype=torch.float32, device=self.device
+        )
+        nxt_mask = torch.zeros((B, max_len), dtype=torch.bool, device=self.device)
+        cur_prev = torch.zeros(
+            (B, H, W, F_dim), dtype=torch.float32, device=self.device
+        )
+        nxt_prev = torch.zeros(
+            (B, H, W, F_dim), dtype=torch.float32, device=self.device
+        )
+
+        for i, t in enumerate(items):
+            feats = t["history"][key]
+            states = t["history"]["states"]
+            L = t["hist_len"]
+            if not isinstance(feats, np.ndarray):
+                feats = np.stack(feats)
+            if not isinstance(states, np.ndarray):
+                states = np.stack(states)
+
+            # current window: states (L-take .. L-1), right-aligned
+            take = min(L, max_len)
+            if take > 0:
+                cur_feats[i, -take:] = torch.from_numpy(
+                    feats[L - take : L].astype(np.float32)
+                )
+                cur_mask[i, -take:] = True
+                cur_prev[i] = torch.from_numpy(states[L - 1].astype(np.float32))
+
+            # next window: states (L+1-take_n .. L), right-aligned
+            take_n = min(L + 1, max_len)
+            if take_n > 0:
+                nxt_feats[i, -take_n:] = torch.from_numpy(
+                    feats[L + 1 - take_n : L + 1].astype(np.float32)
+                )
+                nxt_mask[i, -take_n:] = True
+                nxt_prev[i] = torch.from_numpy(states[L].astype(np.float32))
+
+        return {
+            "cur": {
+                "state_features": cur_feats,
+                "mask": cur_mask,
+                "prev_obs": cur_prev,
+            },
+            "nxt": {
+                "state_features": nxt_feats,
+                "mask": nxt_mask,
+                "prev_obs": nxt_prev,
+            },
+        }
+
     def heatmap_kl_divergence(
         self, g_map: torch.Tensor, true_goal_map: torch.Tensor
     ) -> float:
@@ -88,10 +173,7 @@ class OpponentModel(nn.Module):
         B = g_map.shape[0]
         g_map_flat = g_map.view(B, -1)  # (B, H*W)
         true_goal_flat = true_goal_map.view(B, -1)  # (B, H*W)
-        # Add small value to prevent log(0)
         log_g_map = torch.log(g_map_flat + 1e-8)
-
-        # Compute KL Divergence
         kl_div = F.kl_div(log_g_map, true_goal_flat, reduction="batchmean")
 
         return kl_div.item()
@@ -183,8 +265,6 @@ class OpponentModel(nn.Module):
 
             for i in pbar:
                 batch_data = dataset[i : i + batch_size]
-
-                # Prepare batch data
                 om_batch = {
                     "states": torch.from_numpy(
                         np.stack([b["state"] for b in batch_data], dtype=np.float32)
@@ -195,12 +275,6 @@ class OpponentModel(nn.Module):
                             [b["true_goal_map"] for b in batch_data], dtype=np.float32
                         )
                     ).to(self.device, non_blocking=True),
-                    "true_opp_heatmap": torch.from_numpy(
-                        np.stack(
-                            [b["true_opp_heatmap"] for b in batch_data],
-                            dtype=np.float32,
-                        )
-                    ).to(self.device, non_blocking=True),
                 }
 
                 loss, mae_error, spatial_error = self.pretrain_step(om_batch)
@@ -208,8 +282,6 @@ class OpponentModel(nn.Module):
                 epoch_maes.append(mae_error)
                 epoch_spatial_errors.append(spatial_error)
                 global_step += 1
-
-                # Update progress bar suffix with current loss
                 pbar.set_postfix({"loss": f"{loss:.4f}"})
 
             avg_loss = sum(epoch_losses) / len(epoch_losses)
@@ -217,7 +289,6 @@ class OpponentModel(nn.Module):
             avg_spatial_error = sum(epoch_spatial_errors) / len(epoch_spatial_errors)
             print(f"  => Average Loss: {avg_loss:.6f}")
 
-            # Log epoch-level metrics
             wandb.log(
                 {
                     "pretrain/epoch_loss": avg_loss,
@@ -230,18 +301,8 @@ class OpponentModel(nn.Module):
     def forward(
         self, x: torch.Tensor, history: Dict, cached_features=True
     ) -> torch.Tensor:
-        """
-        Calculates the forward pass, using the inference model
-        to predict the opponent's subgoal.
-
-        Args:
-            x (Tensor): Current state s_t (B, H, W, F).
-            history (Dict): Historical trajectory (states/opp_actions).
-
-        Returns:
-            Heatmap (B, H, W) of the predicted subgoal location.
-        """
-        self.inference_model.eval()  # Ensure the model is in evaluation mode
+        """Predict the subgoal heatmap (B, H, W) for state x (B, H, W, F)."""
+        self.inference_model.eval()
         return self.inference_model(x, history, cached_features=cached_features)
 
     def _bce_loss(self, pred_logits: torch.Tensor, soft_targets: torch.Tensor):
@@ -274,42 +335,52 @@ class OpponentModel(nn.Module):
         convex combination, so targets stay in [0,1] as BCE requires — raw
         counts would make the BCE loss unbounded below. Counts stay in the
         dataset; binarization happens only here, at train time.
+
+        Boundary handling: zero padding truncates the kernel at the map edge,
+        so a claim near a border would blur to less total mass than the same
+        claim in the middle (position-dependent targets). We correct this by
+        dividing each claimed cell by its in-bounds kernel mass (the conv of
+        an all-ones map with the same kernel, evaluated at the claim) BEFORE
+        the blur: each claim's truncated Gaussian hill is renormalized to
+        exactly one unit of target mass, independent of position. The final
+        clamp keeps the [0,1] guarantee for extreme corners at low sigma.
         target_map: (B, H, W)
         """
         target_map = (target_map > 0).float()
         kernel_size = int(2 * math.ceil(2 * self._sigma()) + 1)
 
-        # Create 1D Gaussian kernel
         x = torch.arange(kernel_size, dtype=torch.float32, device=target_map.device)
         x = x - kernel_size // 2
         kernel_1d = torch.exp(-(x**2) / (2 * self._sigma() ** 2))
         kernel_1d = kernel_1d / kernel_1d.sum()
 
-        # Create 2D Gaussian kernel via outer product
         kernel_2d = kernel_1d.unsqueeze(1) @ kernel_1d.unsqueeze(0)
         kernel_2d = kernel_2d.unsqueeze(0).unsqueeze(0)  # (1, 1, K, K)
 
-        # Reshape target map for convolution: (B, C, H, W) where C=1
-        target_reshaped = target_map.unsqueeze(1)
-
-        # Apply padding to maintain spatial dimensions
+        target_reshaped = target_map.unsqueeze(1)  # (B, 1, H, W)
         padding = kernel_size // 2
-        soft_targets = F.conv2d(target_reshaped, kernel_2d, padding=padding)
 
-        return soft_targets.squeeze(1)  # Return to (B, H, W)
+        # Divide each claim by its in-bounds kernel mass (conv of an all-ones
+        # map with the same kernel) before blurring, so each claimed cell
+        # contributes one unit of target mass regardless of how the kernel is
+        # truncated at the map edge (see docstring).
+        coverage = F.conv2d(
+            torch.ones_like(target_reshaped), kernel_2d, padding=padding
+        )
+        weighted_claims = target_reshaped / coverage.clamp_min(1e-8)
+
+        soft_targets = F.conv2d(weighted_claims, kernel_2d, padding=padding)
+        # Extreme corners at low sigma can push the hill center past 1.
+        return soft_targets.clamp(max=1.0).squeeze(1)  # (B, H, W)
 
     def pretrain_step(self, batch):
         x = batch["states"]
         history = batch["history"]
-        # (B, H, W) Ground Truth from Hindsight
-        target_map = batch["true_goal_map"]
-        target_map = (target_map > 0).float()
+        target_map = batch["true_goal_map"]  # hindsight claim map (B, H, W)
 
         self.inference_model.train()
         pred_logits = self.forward(x, history, cached_features=False)  # (B, H, W)
 
-        # Per-cell "is this a target" probabilities: blurred binary
-        # targets + class-balanced BCE
         soft_targets = self._generate_soft_targets(target_map)
         loss = self._bce_loss(pred_logits, soft_targets)
 
@@ -319,6 +390,7 @@ class OpponentModel(nn.Module):
         torch.nn.utils.clip_grad_norm_(self.inference_model.parameters(), 1.0)
         self.optimizer.step()
 
+        # Soft target update
         with torch.no_grad():
             for param, target_param in zip(
                 self.inference_model.parameters(), self.tgt_model.parameters()
@@ -334,13 +406,10 @@ class OpponentModel(nn.Module):
     def train_step(self, batch, cached_features=False):
         x = batch["states"]
         history = batch["history"]
-        # (B, H, W) Ground Truth from Hindsight
-        target_map = batch["true_goal_map"]
+        target_map = batch["true_goal_map"]  # hindsight claim map (B, H, W)
         self.inference_model.train()
         pred_logits = self.forward(x, history, cached_features)  # (B, H, W)
 
-        # Per-cell "is this a target" probabilities: blurred binary
-        # targets + class-balanced BCE
         soft_targets = self._generate_soft_targets(target_map)
         loss = self._bce_loss(pred_logits, soft_targets)
 
@@ -350,7 +419,7 @@ class OpponentModel(nn.Module):
         torch.nn.utils.clip_grad_norm_(self.inference_model.parameters(), 1.0)
         self.optimizer.step()
 
-        # Target update (soft update)
+        # Soft target update
         with torch.no_grad():
             for param, target_param in zip(
                 self.inference_model.parameters(), self.tgt_model.parameters()
@@ -363,7 +432,7 @@ class OpponentModel(nn.Module):
 if __name__ == "__main__":
     wandb.init(mode="disabled", project="om-test")
     model = OpponentModel(SpatialOpponentModel(OMGArgs()), OMGArgs())
-    dataset_path = f"./dataset/dataset_map_3.pt"
+    dataset_path = "./dataset/dataset_map_3.pt"
 
     print("Loading dataset and pretraining OM...")
     dataset = torch.load(dataset_path, weights_only=False)
