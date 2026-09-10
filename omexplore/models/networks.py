@@ -61,6 +61,13 @@ class QNet(nn.Module):
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0.01)
 
+    @staticmethod
+    def _head_forward(head: nn.Sequential, x: torch.Tensor) -> torch.Tensor:
+        if x.size(0) == 1:
+            x = torch.addmv(head[0].bias, head[0].weight, x[0]).unsqueeze(0)
+            return head[1:](x)
+        return head(x)
+
     def forward(
         self, batch: torch.Tensor, g_map: torch.Tensor, g_team_map: torch.Tensor = None
     ) -> torch.Tensor:
@@ -83,8 +90,8 @@ class QNet(nn.Module):
         features = self.cnn(x)
 
         # Dueling Heads
-        adv = self.advantage_head(features)
-        val = self.value_head(features)
+        adv = self._head_forward(self.advantage_head, features)
+        val = self._head_forward(self.value_head, features)
         q_vals = val + adv - adv.mean(dim=1, keepdim=True)
 
         return q_vals
