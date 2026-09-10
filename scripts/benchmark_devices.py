@@ -91,8 +91,14 @@ def bench_select_action(agent, opp, env, repeats=50):
     return timeit(run, repeats=repeats)
 
 
-def bench_update(agent, opp, env, n_updates=20):
-    """Isolated update() cost (needs a filled replay buffer)."""
+def bench_update(agent, opp, env, n_updates=20, profile_cuda=False):
+    """Isolated update() cost (needs a filled replay buffer).
+
+    profile_cuda: after the timed loop, run 5 more update() calls under
+    torch.profiler and print the per-op CUDA breakdown. cProfile cannot
+    attribute GPU kernel time (async launches), so update() needs the
+    torch profiler instead.
+    """
     agent.args.train_every = 1  # force updates
     ts = []
     for _ in range(n_updates):
@@ -100,7 +106,26 @@ def bench_update(agent, opp, env, n_updates=20):
         t0 = time.perf_counter()
         agent.update()
         ts.append(time.perf_counter() - t0)
-    return {"median": statistics.median(ts)}
+    if profile_cuda and agent.device.type == "cuda":
+        from torch.profiler import ProfilerActivity, profile
+
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            record_shapes=True,
+        ) as prof:
+            for _ in range(5):
+                agent.global_step += 1
+                agent.update()
+        print(
+            prof.key_averages(group_by_input_shape=True).table(
+                sort_by="cuda_time_total", row_limit=20
+            )
+        )
+    return {
+        "median": statistics.median(ts),
+        "min": min(ts),
+        "max": max(ts),
+    }
 
 
 def main():
@@ -127,6 +152,11 @@ def main():
     parser.add_argument("--cnn_hidden", type=int, default=64)
     parser.add_argument("--num_goals", type=int, default=16)
     parser.add_argument("--vision_radius", type=int, default=5)
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="cProfile one episode (CPU side) + torch.profiler 5 update() calls (cuda only)",
+    )
     args_cli = parser.parse_args()
 
     wandb.init(mode="disabled")
@@ -221,13 +251,33 @@ def main():
                 print(f"  [FAIL] training episode: {type(e).__name__}: {e}")
                 continue
 
+            # 3b. optional cProfile of one full episode (CPU-side attribution:
+            #     env stepping, python overhead, sync points)
+            if args_cli.profile:
+                import cProfile
+                import pstats
+
+                pr = cProfile.Profile()
+                pr.enable()
+                agent.run_episode(opp, max_steps=args_cli.max_steps)
+                pr.disable()
+                print("  --- cProfile (1 episode, cumulative) ---")
+                pstats.Stats(pr).sort_stats("cumulative").print_stats(25)
+
             # 4. isolated update()
             try:
                 if len(agent.replay) >= agent.args.min_replay:
-                    res = bench_update(agent, opp, env, n_updates=args_cli.updates)
+                    res = bench_update(
+                        agent,
+                        opp,
+                        env,
+                        n_updates=args_cli.updates,
+                        profile_cuda=args_cli.profile,
+                    )
                     print(
                         f"  update() (B={batch_size}, L={args_cli.history_length}): "
-                        f"{res['median'] * 1000:.0f} ms median"
+                        f"{res['median'] * 1000:.0f} ms median "
+                        f"(min {res['min'] * 1000:.0f} / max {res['max'] * 1000:.0f})"
                     )
                 else:
                     print(
