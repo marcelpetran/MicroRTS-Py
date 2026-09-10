@@ -4,8 +4,7 @@ Learning team (one shared Q-net + hostile/friendly OMs, QLearningAgent)
 vs. a scripted greedy TeamAgent on a MovingAI benchmark map.
 
 Run (from project root):
-  /opt/homebrew/anaconda3/envs/om/bin/python scripts/train_team_exploration.py \
-      --map den312d --episodes 3000
+  python scripts/train_team_exploration.py --map den312d --episodes 3000
 
 Ablation (Q-net without friendly-OM conditioning; OM still trained for
 comparable metrics):
@@ -21,6 +20,7 @@ import argparse
 import os
 import random
 import sys
+import warnings
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -32,6 +32,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from tqdm import tqdm
+
+warnings.filterwarnings("ignore", message=".*HIPBLAS_STATUS_NOT_SUPPORTED.*")
 
 import wandb
 from omexplore.agents.q_agent import QLearningAgent
@@ -141,7 +143,6 @@ args_parsed = parser.parse_args()
 
 team_sizes = tuple(int(s) for s in args_parsed.team_sizes.split(","))
 
-# Setup
 os.makedirs(f"./models/{args_parsed.folder_id}", exist_ok=True)
 os.makedirs(f"./diagrams/{args_parsed.folder_id}", exist_ok=True)
 
@@ -211,8 +212,8 @@ friendly_om = OpponentModel(SpatialOpponentModel(args), args)
 
 if args_parsed.pretrained_om:
     for om, fname in (
-        (hostile_om, "hostile_om.pth"),
-        (friendly_om, "friendly_om.pth"),
+        (hostile_om, "team_hostile_om.pth"),
+        (friendly_om, "team_friendly_om.pth"),
     ):
         sd = torch.load(
             os.path.join(args_parsed.pretrained_om, fname), map_location=device
@@ -231,9 +232,13 @@ print(
 
 num_epochs = max(1, args_parsed.episodes // args_parsed.episodes_per_epoch)
 
-# ==========================================
-# TRAINING
-# ==========================================
+
+def _avg(xs):
+    xs = [x for x in xs if x is not None]
+    return sum(xs) / len(xs) if xs else 0.0
+
+
+# --- Training loop ---
 train_hist = {
     "returns": [],
     "opp_returns": [],
@@ -294,10 +299,6 @@ for epoch in range(num_epochs):
         ev_cov.append(env.get_coverage(0))
         ev_opp_cov.append(env.get_coverage(1))
 
-    def _avg(xs):
-        xs = [x for x in xs if x is not None]
-        return sum(xs) / len(xs) if xs else 0.0
-
     avg = {
         "train_return": _avg(ep_returns),
         "train_opp_return": _avg(ep_opp),
@@ -354,9 +355,7 @@ for epoch in range(num_epochs):
         f"| OM {avg['train_model_loss']:.3f} | tOM {avg['train_team_model_loss']:.3f}"
     )
 
-# ==========================================
-# PLOTTING
-# ==========================================
+# --- Evaluation charts ---
 print("\n--- Generating Evaluation Charts ---")
 epochs = [(i + 1) * args_parsed.episodes_per_epoch for i in range(num_epochs)]
 
