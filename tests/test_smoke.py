@@ -157,28 +157,108 @@ def t_forward():
         assert torch.isfinite(t_).all(), "NaN/Inf in model output"
 
 
+def t_forward_padding_equiv():
+    H, W, F = args.state_shape
+    B, T = 3, 5
+    torch.manual_seed(1)
+
+    # Partially masked history: each batch row has a different valid prefix.
+    hist_states = torch.randint(0, 3, (B, T, H, W, F), device=args.device).float()
+    mask = torch.zeros((B, T), dtype=torch.bool, device=args.device)
+    lens = torch.tensor([1, 3, 5])
+    for b in range(B):
+        mask[b, : lens[b]] = True
+    x = torch.randint(0, 3, (B, H, W, F), device=args.device).float()
+    hist = {"states": hist_states, "mask": mask}
+
+    # Deterministic comparison: both passes must run in eval() so dropout is
+    # off — otherwise the two passes draw different dropout masks and then
+    # differ even when the padding logic is identical.
+    was_training = model.training
+    model.eval()
+    try:
+        with torch.no_grad():
+            out_new = model(x, hist, cached_features=False)
+
+        # Reference: old valid-only gather + scatter (as in the pre-fix code).
+        prev_states = torch.zeros_like(hist_states)
+        prev_states[:, 1:] = hist_states[:, :-1]
+        valid = mask.reshape(-1)
+        hist_flat = hist_states.reshape(B * T, H, W, F)[valid]
+        prev_flat = prev_states.reshape(B * T, H, W, F)[valid]
+        feats_valid = model.get_features(hist_flat, prev_flat)
+        hist_feat = torch.zeros(B * T, args.d_model, device=x.device)
+        hist_feat[valid] = feats_valid
+        hist_feat = hist_feat.reshape(B, T, -1)
+
+        # Current-state feature must mirror forward(): x_prev is the last
+        # history frame, zeroed when that position is padding.
+        x_prev = hist_states[:, -1] * mask[:, -1].view(B, 1, 1, 1).float()
+        x_feat = model.get_features(x, x_prev).unsqueeze(1)
+        seq_feats = torch.cat([x_feat, hist_feat], dim=1)
+        x_mask = torch.ones((B, 1), dtype=torch.bool, device=x.device)
+        full_mask = torch.cat([x_mask, mask], dim=1)
+        seq_feats = seq_feats * np.sqrt(args.d_model)
+        seq_feats = model.pos_encoder(seq_feats)
+        src_key_padding_mask = ~full_mask
+        memory = model.transformer(seq_feats, src_key_padding_mask=src_key_padding_mask)
+        final_memory = memory[:, 0, :]
+        logits = model.spatial_head(final_memory)
+        out_ref = logits.view(B, H, W)
+    finally:
+        model.train(was_training)
+
+    assert out_new.shape == out_ref.shape
+    torch.testing.assert_close(
+        out_new, out_ref, atol=1e-4, rtol=1e-4, msg="fixed-shape conv leaked padding"
+    )
+
+
+check(
+    "forward: fixed-shape conv == valid-only gather (masked inputs)",
+    t_forward_padding_equiv,
+)
+
+
 check("SpatialOpponentModel.forward (fresh + cached ± prev_obs)", t_forward)
 
 
 # --------------------------------------------------------------------------
-# 3. Soft targets: peak = 1, no NaN on all-zero maps
+# 3. Soft targets: mass-conserving blur in [0,1], no NaN on all-zero maps
 # --------------------------------------------------------------------------
 def t_soft_targets():
     H, W, _ = args.state_shape
-    tm = np.zeros((3, H, W), dtype=np.float32)
-    tm[0, 2, 3] = 1.0
-    tm[2, 3, 3] = 1.0
-    tm[2, 3, 4] = 1.0
-    # tm[1] stays all-zero (HER can produce this when no goal was found)
+    tm = np.zeros((4, H, W), dtype=np.float32)
+    # Interior peak (5,5): coverage ~= 1, so mass must be ~1 to numerical
+    # precision — this is the sharp test of kernel normalization.
+    tm[0, 5, 5] = 1.0
+    # Near-corner peak (2,3): boundary-corrected, so mass is conserved
+    # approximately (not exactly — the coverage term varies over the blur
+    # support) and stays in [0,1].
+    tm[1, 2, 3] = 1.0
+    # Two adjacent interior peaks (overlapping Gaussians) -> total mass ~2.
+    tm[2, 5, 5] = 1.0
+    tm[2, 5, 6] = 1.0
+    # tm[3] stays all-zero (HER can produce this when no goal was found)
     st = om._generate_soft_targets(torch.from_numpy(tm).to(args.device))
-    assert st.shape == (3, H, W)
+    assert st.shape == (4, H, W)
     assert torch.isfinite(st).all()
-    assert abs(st[0].sum().item() - 1.0) < 1e-3, "target should normalize to sum 1"
-    assert abs(st[2].sum().item() - 1.0) < 1e-3, "multi-peak target should sum to 1"
-    assert st[1].sum().item() == 0.0, "zero target must stay zero (clamp prevents NaN)"
+    assert (st >= 0.0).all() and (st <= 1.0).all(), "[0,1] bound violated"
+    # Mass conservation per claimed cell.
+    assert abs(st[0].sum().item() - 1.0) < 1e-3, (
+        f"interior peak mass {st[0].sum().item()}"
+    )
+    assert 0.5 < st[1].sum().item() < 1.5, f"edge-corrected mass {st[1].sum().item()}"
+    assert abs(st[2].sum().item() - 2.0) < 1e-2, (
+        f"double peak mass {st[2].sum().item()}"
+    )
+    assert st[3].sum().item() == 0.0, "zero target must stay zero (clamp prevents NaN)"
 
 
-check("_generate_soft_targets (sum-norm, multi-peak, zero-map)", t_soft_targets)
+check(
+    "_generate_soft_targets (mass-conserving [0,1], interior + edge + multi + zero)",
+    t_soft_targets,
+)
 
 
 # --------------------------------------------------------------------------
