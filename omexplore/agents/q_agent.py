@@ -1,5 +1,5 @@
 import random
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +9,6 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 from torch.types import Number
 
-import wandb
 from omexplore.envs.roadmap_foraging_env import TeamRoadmapEnv
 from omexplore.models.beliefs import BeliefTracker
 from omexplore.models.buffers import ReplayBuffer
@@ -94,7 +93,7 @@ class QLearningAgent:
     def reset(self):
         pass
 
-    # ------------- Tau schedules --------------
+    # ------------- tau schedule -------------
 
     def _tau(self) -> float:
         t = min(self.global_step, self.args.tau_decay_steps)
@@ -102,48 +101,40 @@ class QLearningAgent:
             1 - t / self.args.tau_decay_steps
         )
 
-    # ------------- evaluation --------------
+    # ------------- evaluation -------------
 
     @torch.no_grad()
     def value(self, s_t: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
-        """
-        s_t: (1, H, W, F), g: (1, latent_dim) -> Q(1, A)
-        API to compute V(s,g) = mean_a Q(s,g,a)
-        """
+        """Q(s_t, g) -> (1, A); s_t: (1, H, W, F), g: (1, latent_dim)."""
         self.q.eval()
-        return self.q(s_t, g)  # (1, A)
+        return self.q(s_t, g)
 
-    # ------------- visualization utility -------------
+    # ------------- visualization -------------
     @torch.no_grad()
     def heatmap_q_values(
         self, g: torch.Tensor, filename: str = "q_heatmap.png", save: bool = True
     ):
-        """
-        Utility to visualize Q-values as a heatmap over the grid for a given state and subgoal.
+        """Visualize max-Q and the greedy action per grid cell.
 
-        Args:
-            state_hwf (np.ndarray): The current state grid, shape (H, W, F).
-            g (torch.Tensor): The inferred subgoal, shape (1, latent_dim).
-            filename (str): Path to save the heatmap image.
+        Teleports the anchor agent to every free cell and evaluates Q with the
+        fixed subgoal g (an approximation: g is only valid at the agent's real
+        position, but per-cell subgoals would be too expensive).
+        g: (latent_dim) or (1, latent_dim).
         """
         self.q.eval()
         H, W, _ = self.args.state_shape
         g = g.unsqueeze(0)  # (1, latent_dim)
 
-        # This will store the max Q-value for each grid cell
         q_value_map = np.zeros((H, W))
-        # This will store the best action (0-7) for each cell
         policy_map = np.zeros((H, W))
 
-        # Find the original position of our agent (self channel of the anchor)
         anchor = self.learn_ids[0]
         original_pos = self.env.agents[anchor]
-        # Iterate over every possible cell in the grid
         for pos in self.env._get_freed_positions() + [original_pos]:
             r, c = pos
 
             self.env.agents[anchor] = pos
-            temp_state = self.env._get_observations()[anchor]  # modified state
+            temp_state = self.env._get_observations()[anchor]
 
             s_tensor = (
                 torch.from_numpy(
@@ -160,9 +151,6 @@ class QLearningAgent:
                 .to(self.device)
             )
 
-            # subgoal is valid only for the current agent position
-            # but true q-values with correct subgoals are expensive to compute
-            # so this is an approximation
             q_values = self.q(s_tensor, g)  # (1, num_actions)
 
             max_q_val, best_action = torch.max(q_values, dim=1)
@@ -171,16 +159,19 @@ class QLearningAgent:
 
         # Restore the agent's original position
         self.env.agents[anchor] = original_pos
-        agent_pos = self.env.agents[anchor]
         opp_pos = self.env.agents[self.hostile_ids[0]]
         food_pos = self.env.food_positions
         wall_pos = self.env.walls
 
-        # --- Plotting the Heatmap ---
+        # --- Plotting ---
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
-        # Mark agent, opponent, and food positions on the heatmap
         ax1.scatter(
-            agent_pos[1], agent_pos[0], color="blue", marker="X", s=100, label="Agent"
+            original_pos[1],
+            original_pos[0],
+            color="blue",
+            marker="X",
+            s=100,
+            label="Agent",
         )
         ax1.scatter(
             opp_pos[1], opp_pos[0], color="red", marker="X", s=100, label="Opponent"
@@ -193,14 +184,14 @@ class QLearningAgent:
             wall_x = [pos[1] for pos in wall_pos]
             wall_y = [pos[0] for pos in wall_pos]
             ax1.scatter(wall_x, wall_y, color="black", marker="s", s=50, label="Wall")
-        # Plot Q-value heatmap
+        # Q-value heatmap
         im1 = ax1.imshow(q_value_map, cmap="viridis")
         ax1.set_title("Max Q(s, g, a) Heatmap")
         fig.colorbar(im1, ax=ax1)
         ax1.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=4)
 
-        # Plot Policy map with arrows
-        ax2.imshow(q_value_map, cmap="gray")  # Show background values
+        # Policy map with arrows
+        ax2.imshow(q_value_map, cmap="gray")
         ax2.set_title("Learned Policy (Arrows)")
         action_arrows = ["↑", "↓", "←", "→", "↖", "↗", "↙", "↘"]
         for r in range(H):
@@ -230,13 +221,9 @@ class QLearningAgent:
         filename: str = "subgoal_heatmap.png",
         save: bool = True,
     ):
-        """
-        Utility to visualize the inferred subgoal heatmap, with marked agent positions and food locations.
+        """Visualize the inferred subgoal heatmap with agent/food/wall markers.
 
-        Args:
-            s_t (torch.Tensor): Current state, shape (1, H, W, F).
-            g_map (torch.Tensor): Inferred subgoal heatmap, shape (1, H, W).
-            filename (str): Path to save the heatmap image.
+        g_map: (1, H, W); filename: where to save the image.
         """
         self.q.eval()
         g_map_np = g_map.squeeze(0).cpu().numpy()  # (H, W)
@@ -278,14 +265,14 @@ class QLearningAgent:
     # ------------- acting -------------
 
     def choose_action(self, qvals: torch.Tensor, beta: float, eval=False) -> int:
-        gumbel_noise = -beta * torch.empty_like(qvals).exponential_().log()
-
-        if eval == True:
+        """Gumbel-argmax exploration; eval samples the Boltzmann policy."""
+        if eval:
             dist = F.softmax(
                 qvals / beta - qvals.max(dim=-1, keepdim=True).values, dim=-1
             )
             return int(torch.multinomial(dist, num_samples=1).item())
 
+        gumbel_noise = -beta * torch.empty_like(qvals).exponential_().log()
         return int(torch.argmax(qvals + gumbel_noise))
 
     @torch.no_grad()
@@ -294,11 +281,16 @@ class QLearningAgent:
         s_t: np.ndarray,
         s_aug: np.ndarray,
         history: Dict[str, torch.Tensor],
+        team_history: Optional[Dict[str, torch.Tensor]] = None,
         eval=False,
     ) -> tuple[int, torch.Tensor, Number]:
         """
         (interaction phase) Infer the hostile and friendly claim maps and act
         eps-greedily on Q(s, g_hostile, g_friendly, *)
+
+        history: cached-feature history dict for the hostile OM (its own
+            extractor's features). team_history: same format for the friendly
+            OM; defaults to history for single-OM / legacy callers.
         """
         x = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
         x_aug = torch.from_numpy(s_aug).float().unsqueeze(0).to(self.device)
@@ -307,13 +299,15 @@ class QLearningAgent:
             g_map = torch.sigmoid(g_logits)  # (1, H, W)
             g_team_map = None
             if self.args.friendly_om:
-                gt_logits = self.team_model(x, history)  # (1, H, W)
+                gt_logits = self.team_model(
+                    x, team_history if team_history is not None else history
+                )  # (1, H, W)
                 g_team_map = torch.sigmoid(gt_logits)  # (1, H, W)
 
         qvals = self.q(x_aug, g_map, g_team_map)
 
-        tau = 0.05 if eval else self._tau()
-        entropy = Categorical(logits=qvals / 0.05).entropy().item()
+        tau = self.args.tau_end if eval else self._tau()
+        entropy = Categorical(logits=qvals / self.args.tau_end).entropy().item()
 
         a = self.choose_action(qvals, tau, eval)
 
@@ -326,10 +320,18 @@ class QLearningAgent:
         return np.concatenate([state.astype(np.float32), belief], axis=-1)
 
     def compute_targets(
-        self, batch: List[Dict], history: Dict[str, torch.Tensor]
+        self,
+        batch: List[Dict],
+        hist_h: Dict[str, torch.Tensor],
+        hist_h_nxt: Dict[str, torch.Tensor],
+        hist_f: Dict[str, torch.Tensor],
+        hist_f_nxt: Dict[str, torch.Tensor],
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Standard DDQN target computation using Hindsight Experience Replay Goal Maps.
+
+        hist_h / hist_h_nxt: hostile-OM cached histories (current / next).
+        hist_f / hist_f_nxt: friendly-OM cached histories (current / next).
         """
         s = torch.from_numpy(
             np.array([b["state"] for b in batch], dtype=np.float32)
@@ -354,8 +356,7 @@ class QLearningAgent:
         ).to(self.device)
 
         with torch.no_grad():
-            hist = history
-            g_logits = self.model.tgt_model(s, hist, cached_features=False)
+            g_logits = self.model.tgt_model(s, hist_h, cached_features=True)
             g_map = torch.sigmoid(g_logits)  # (B, H, W)
 
             # Friendly claim maps from the same team-level history (the acting
@@ -363,33 +364,14 @@ class QLearningAgent:
             g_team_map = None
             g_team_map_next = None
             if self.args.friendly_om:
-                gt_logits = self.team_model.tgt_model(s, hist, cached_features=False)
+                gt_logits = self.team_model.tgt_model(s, hist_f, cached_features=True)
                 g_team_map = torch.sigmoid(gt_logits)  # (B, H, W)
 
-            hist_states = history["states"].clone()  # [B, max_len, H, W, F_dim]
-            hist_mask = history["mask"].clone()  # [B, max_len]
-
-            # The dropped oldest frame is the true predecessor of the shifted
-            # window's new oldest frame (zeros while it was padding).
-            prev_first_next = hist_states[:, 0].clone()
-
-            # Shift left: drop timestep 0, move everything back
-            hist_states[:, :-1] = hist_states[:, 1:]
-            hist_mask[:, :-1] = hist_mask[:, 1:]
-
-            hist_states[:, -1] = s
-            hist_mask[:, -1] = True
-
-            hist_next = {
-                "states": hist_states,
-                "mask": hist_mask,
-                "prev_first": prev_first_next,
-            }
-            g_logits_next = self.model.tgt_model(sp, hist_next, cached_features=False)
+            g_logits_next = self.model.tgt_model(sp, hist_h_nxt, cached_features=True)
             g_map_next = torch.sigmoid(g_logits_next)  # (B, H, W)
             if self.args.friendly_om:
                 gt_logits_next = self.team_model.tgt_model(
-                    sp, hist_next, cached_features=False
+                    sp, hist_f_nxt, cached_features=True
                 )
                 g_team_map_next = torch.sigmoid(gt_logits_next)  # (B, H, W)
 
@@ -399,7 +381,7 @@ class QLearningAgent:
         # 2. Target = r + gamma * max_a' Q_tgt(s', g, a')
         with torch.no_grad():
             q_val = self.q(spu, g_map_next, g_team_map_next)
-            noise = torch.rand_like(q_val) * 1e-6
+            noise = torch.rand_like(q_val) * 1e-6  # tie-breaking noise
             best_actions = (q_val + noise).argmax(dim=1, keepdim=True)
 
             q_next = (
@@ -422,23 +404,28 @@ class QLearningAgent:
 
         batch_list = self.replay.sample(self.args.batch_size)
 
-        # One shared history collation for both OMs and the Q targets.
-        history = self.model.collate_history(batch_list)
+        # One shared cache: per-step OM features stored at rollout are collated
+        # into the current/next history windows for each OM (no re-embedding).
+        h_cache = self.model.collate_cached_history_pair(batch_list, "feats_hostile")
+        hist_h, hist_h_nxt = h_cache["cur"], h_cache["nxt"]
+        f_cache = self.model.collate_cached_history_pair(batch_list, "feats_friendly")
+        hist_f, hist_f_nxt = f_cache["cur"], f_cache["nxt"]
+
         states = torch.from_numpy(
             np.array([b["state"] for b in batch_list], dtype=np.float32)
         ).to(self.device)
 
-        # --- Update both Opponent Models (hostile + friendly) ---
+        # OM training batches: hostile + friendly claim-map targets
         om_batch = {
             "states": states,
-            "history": history,
+            "history": hist_h,
             "true_goal_map": torch.from_numpy(
                 np.array([b["true_goal_map"] for b in batch_list], dtype=np.float32)
             ).to(self.device),
         }
         team_batch = {
             "states": states,
-            "history": history,
+            "history": hist_f,
             "true_goal_map": torch.from_numpy(
                 np.array(
                     [b["true_team_goal_map"] for b in batch_list], dtype=np.float32
@@ -446,8 +433,10 @@ class QLearningAgent:
             ).to(self.device),
         }
 
-        # --- Update the Q-Network ---
-        q_sa, target = self.compute_targets(batch_list, history)
+        # Q-network update
+        q_sa, target = self.compute_targets(
+            batch_list, hist_h, hist_h_nxt, hist_f, hist_f_nxt
+        )
         loss = F.smooth_l1_loss(q_sa, target, reduction="mean")
         loss_val = loss.item()
 
@@ -456,15 +445,16 @@ class QLearningAgent:
         nn.utils.clip_grad_norm_(self.q.parameters(), 5.0)
         self.opt.step()
 
-        # --- Target Update ---
+        # Soft target update
         with torch.no_grad():
             for param, target_param in zip(
                 self.q.parameters(), self.q_tgt.parameters()
             ):
                 target_param.lerp_(param, self.args.tau_soft)
 
-        model_loss = self.model.train_step(om_batch, cached_features=False)
-        team_loss = self.team_model.train_step(team_batch, cached_features=False)
+        # OM updates (cached features: no re-embedding)
+        model_loss = self.model.train_step(om_batch, cached_features=True)
+        team_loss = self.team_model.train_step(team_batch, cached_features=True)
 
         return loss_val, model_loss, team_loss
 
@@ -531,10 +521,14 @@ class QLearningAgent:
         ep_shaped = 0.0
         q_losses, model_losses, team_losses = [], [], []
 
-        # History buffer for the transformer (team-level: anchor obs stream;
-        # team members' obs differ only in the self channel)
+        # History buffers for the transformer (team-level: anchor obs stream;
+        # team members' obs differ only in the self channel). One rolling
+        # feature window per OM (each has its own CNN extractor).
         history_len = self.args.max_history_length
         rolling_feats = torch.zeros(
+            (1, history_len, self.args.d_model), device=self.device
+        )
+        team_rolling_feats = torch.zeros(
             (1, history_len, self.args.d_model), device=self.device
         )
         rolling_mask = torch.zeros(
@@ -545,26 +539,30 @@ class QLearningAgent:
 
         episode_transitions = []
         ep_states = []
+        ep_feats_hostile = []
+        ep_feats_friendly = []
         step_records = []
 
-        done = False
         for step in range(max_steps):
-            history_gpu = {
+            history = {
                 "state_features": rolling_feats,
+                "mask": rolling_mask,
+                "prev_obs": prev_state_tensor,
+            }
+            team_history = {
+                "state_features": team_rolling_feats,
                 "mask": rolling_mask,
                 "prev_obs": prev_state_tensor,
             }
 
             # The learning team: one shared Q-net, one action per member.
             actions = {}
-            member_acts = {}
             for a in self.learn_ids:
                 s_aug = self.tracker.augment(obs[a])
-                act, g_map, step_entropy = self.select_action(
-                    obs[a], s_aug, history_gpu
+                act, _, step_entropy = self.select_action(
+                    obs[a], s_aug, history, team_history
                 )
                 actions[a] = act
-                member_acts[a] = act
                 ep_entropy += step_entropy
 
             # The hostile team(s), controlled externally.
@@ -586,7 +584,7 @@ class QLearningAgent:
                         "agent_id": a,
                         "state": obs[a].copy(),
                         "belief": belief_now.copy(),
-                        "action": member_acts[a],
+                        "action": actions[a],
                         "reward": float(rewards[a]),
                         "next_state": next_obs[a].copy(),
                         "next_belief": next_belief.copy(),
@@ -598,7 +596,8 @@ class QLearningAgent:
             ep_states.append(obs[anchor].copy())
             step_records.append({"collectors": info.get("collectors", {})})
 
-            # Update history from the anchor's observation stream.
+            # Update history from the anchor's observation stream: cache the
+            # feature for this state once per OM (prev = previous anchor state).
             state_tensor = (
                 torch.from_numpy(obs[anchor]).float().unsqueeze(0).to(self.device)
             )
@@ -606,17 +605,25 @@ class QLearningAgent:
                 new_feat = self.model.inference_model.get_features(
                     state_tensor, prev_state_tensor
                 )
+                new_team_feat = self.team_model.inference_model.get_features(
+                    state_tensor, prev_state_tensor
+                )
+
+            ep_feats_hostile.append(new_feat.squeeze(0).cpu().numpy())
+            ep_feats_friendly.append(new_team_feat.squeeze(0).cpu().numpy())
 
             rolling_feats = torch.roll(rolling_feats, shifts=-1, dims=1)
+            team_rolling_feats = torch.roll(team_rolling_feats, shifts=-1, dims=1)
             rolling_mask = torch.roll(rolling_mask, shifts=-1, dims=1)
             rolling_feats[:, -1, :] = new_feat
+            team_rolling_feats[:, -1, :] = new_team_feat
             if current_seq_len < history_len:
                 current_seq_len += 1
             rolling_mask[:, -current_seq_len:] = True
 
             prev_state_tensor = state_tensor
 
-            # Train Step
+            # Train step
             self.global_step += 1
             Q_loss, model_loss, team_loss = self.update()
             q_losses.append(Q_loss)
@@ -633,13 +640,28 @@ class QLearningAgent:
             episode_transitions, step_records, final_positions, H, W
         )
 
-        # Push to replay buffer (the history array is shared by reference)
+        # Push to replay buffer (shared arrays by reference: states + cached
+        # per-step features for both OMs)
         if ep_states:
             states_arr = np.stack(ep_states)
         else:
             states_arr = np.zeros((0, H, W, self.args.state_shape[2]), dtype=np.int8)
+        feats_h_arr = (
+            np.stack(ep_feats_hostile)
+            if ep_feats_hostile
+            else np.zeros((0, self.args.d_model), dtype=np.float32)
+        )
+        feats_f_arr = (
+            np.stack(ep_feats_friendly)
+            if ep_feats_friendly
+            else np.zeros((0, self.args.d_model), dtype=np.float32)
+        )
         for t in episode_transitions:
-            t["history"] = {"states": states_arr}
+            t["history"] = {
+                "states": states_arr,
+                "feats_hostile": feats_h_arr,
+                "feats_friendly": feats_f_arr,
+            }
             self.replay.push(t)
 
         def _avg(xs):
@@ -686,16 +708,23 @@ class QLearningAgent:
         rolling_feats = torch.zeros(
             (1, history_len, self.args.d_model), device=self.device
         )
+        team_rolling_feats = torch.zeros(
+            (1, history_len, self.args.d_model), device=self.device
+        )
         rolling_mask = torch.zeros(
             (1, history_len), dtype=torch.bool, device=self.device
         )
         current_seq_len = 0
         prev_state_tensor = torch.zeros((1, *obs[anchor].shape), device=self.device)
 
-        done = False
         for step in range(max_steps):
             history = {
                 "state_features": rolling_feats,
+                "mask": rolling_mask,
+                "prev_obs": prev_state_tensor,
+            }
+            team_history = {
+                "state_features": team_rolling_feats,
                 "mask": rolling_mask,
                 "prev_obs": prev_state_tensor,
             }
@@ -705,7 +734,7 @@ class QLearningAgent:
             for a in self.learn_ids:
                 s_aug = self.tracker.augment(obs[a])
                 act, g_map, step_entropy = self.select_action(
-                    obs[a], s_aug, history, eval=True
+                    obs[a], s_aug, history, team_history, eval=True
                 )
                 actions[a] = act
                 ep_entropy += step_entropy
@@ -741,11 +770,16 @@ class QLearningAgent:
                 new_feat = self.model.inference_model.get_features(
                     state_tensor, prev_state_tensor
                 )
+                new_team_feat = self.team_model.inference_model.get_features(
+                    state_tensor, prev_state_tensor
+                )
 
             rolling_feats = torch.roll(rolling_feats, shifts=-1, dims=1)
+            team_rolling_feats = torch.roll(team_rolling_feats, shifts=-1, dims=1)
             rolling_mask = torch.roll(rolling_mask, shifts=-1, dims=1)
 
             rolling_feats[:, -1, :] = new_feat
+            team_rolling_feats[:, -1, :] = new_team_feat
 
             if current_seq_len < history_len:
                 current_seq_len += 1
