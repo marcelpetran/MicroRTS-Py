@@ -183,8 +183,8 @@ class QLearningAgentClassic:
         s = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
         qvals = self.q(s)
 
-        tau = 0.05 if eval else self._tau()
-        entropy = Categorical(logits=qvals / 0.05).entropy().item()
+        tau = self.args.tau_end if eval else self._tau()
+        entropy = Categorical(logits=qvals / self.args.tau_end).entropy().item()
 
         return self.choose_action(qvals, tau, eval), entropy
 
