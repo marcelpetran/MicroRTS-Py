@@ -212,8 +212,8 @@ friendly_om = OpponentModel(SpatialOpponentModel(args), args)
 
 if args_parsed.pretrained_om:
     for om, fname in (
-        (hostile_om, "team_hostile_om.pth"),
-        (friendly_om, "team_friendly_om.pth"),
+        (hostile_om, "hostile_om.pth"),
+        (friendly_om, "friendly_om.pth"),
     ):
         sd = torch.load(
             os.path.join(args_parsed.pretrained_om, fname), map_location=device
