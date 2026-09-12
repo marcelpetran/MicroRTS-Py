@@ -56,6 +56,8 @@ MOVES = [
 ]
 PASSABLE_CHARS = {".", "G"}
 
+REWARD_GOAL = 10.0
+
 
 def load_movingai_map(path: str) -> list[str]:
     """Parse a MovingAI .map into normalized rows of '.' (free) / '#' (wall)."""
@@ -242,15 +244,15 @@ class RoadmapForagingEnv:
         pos1 = self.agents[1]
 
         if pos0 == pos1 and pos0 in self.food_positions:
-            rewards[0] += 0.5
-            rewards[1] += 0.5
+            rewards[0] += REWARD_GOAL / 2
+            rewards[1] += REWARD_GOAL / 2
             self.food_positions.remove(pos0)
         else:
             if pos0 in self.food_positions:
-                rewards[0] += 1.0
+                rewards[0] += REWARD_GOAL
                 self.food_positions.remove(pos0)
             if pos1 in self.food_positions:
-                rewards[1] += 1.0
+                rewards[1] += REWARD_GOAL
                 self.food_positions.remove(pos1)
 
         return self._get_ego_centric_obs(), rewards, self._check_terminal(), {}
