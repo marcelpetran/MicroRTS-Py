@@ -195,6 +195,11 @@ def main():
         help="run id; defaults to $SLURM_JOB_ID (else 0)",
     )
     ap.add_argument(
+        "--om_dir",
+        default=None,
+        help="optional override for the pretrained_oms output directory (default: runs/<folder_id>/pretrained_oms)",
+    )
+    ap.add_argument(
         "--stages",
         default=",".join(ALL_STAGES),
         help="comma-separated subset of: collect,pretrain,train",
@@ -224,7 +229,10 @@ def main():
 
     run_dir = REPO / "runs" / str(a.folder_id)
     dataset = run_dir / "team_dataset.pt"
-    om_dir = run_dir / "pretrained_oms"
+    if a.om_dir is not None:
+        om_dir = Path(a.om_dir).resolve()
+    else:
+        om_dir = run_dir / "pretrained_oms"
 
     print(f"config : {cfg_path}")
     for k in sorted(cfg):
