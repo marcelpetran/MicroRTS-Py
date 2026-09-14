@@ -335,7 +335,7 @@ for epoch in range(num_epochs):
 
     wandb.log({f"team/{k}": v for k, v in avg.items()} | {"epoch": epoch + 1})
 
-    torch.save(agent.q.state_dict(), f"./models/{args.folder_id}/team_qnet.pth")
+    torch.save(agent.q.state_dict(), f"./models/{args.folder_id}/qnet.pth")
     torch.save(
         agent.model.inference_model.state_dict(),
         f"./models/{args.folder_id}/hostile_om.pth",
