@@ -286,7 +286,7 @@ for epoch in range(num_epochs):
     )
     print(
         f"Replay buffer: {agent.replay.size} transitions, "
-        f"{nonzero_shaped} with |r| > 0.1 (shaping reward)"
+        f"{nonzero_shaped / agent.replay.size * 100:.1f}% ({nonzero_shaped}) with |r| > 0.1 (shaping reward)"
     )
 
     # Evaluation
