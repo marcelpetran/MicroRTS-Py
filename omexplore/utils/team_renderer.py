@@ -229,7 +229,7 @@ def render_episode(
         marker="o",
         edgecolors="white",
         linewidths=0.6,
-        label=f"{team_names[0]} (learner)",
+        label=f"{team_names[0]}",
     )
     ax_main.scatter(
         [],
@@ -241,7 +241,7 @@ def render_episode(
         linewidths=0.6,
         label=f"{team_names[1]}",
     )
-    ax_main.scatter([], [], s=42, c=COL["goal"], marker="*", label="visible goal")
+    ax_main.scatter([], [], s=42, c=COL["goal"], marker="s", label="goals")
     ax_main.legend(
         loc="lower left",
         fontsize=7,

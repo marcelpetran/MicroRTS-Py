@@ -56,7 +56,7 @@ MOVES = [
 ]
 PASSABLE_CHARS = {".", "G"}
 
-REWARD_GOAL = 10.0
+REWARD_GOAL = 1.0
 
 
 def load_movingai_map(path: str) -> list[str]:

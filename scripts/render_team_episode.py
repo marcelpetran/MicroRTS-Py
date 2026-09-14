@@ -270,8 +270,8 @@ def main():
 
     gif, pngs = render_episode(frames, a.out, fps=a.fps, title=title)
     print(f"\nSaved GIF: {gif}")
-    for png in pngs:
-        print(f"Saved PNG: {png}")
+    # for png in pngs:
+    #     print(f"Saved PNG: {png}")
     s0 = frames[-1].scores.get(0, 0.0)
     s1 = frames[-1].scores.get(1, 0.0)
     print(f"Final score: team0={s0:g} team1={s1:g} ({frames[-1].step} steps)")

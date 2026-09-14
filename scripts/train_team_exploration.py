@@ -338,11 +338,11 @@ for epoch in range(num_epochs):
     torch.save(agent.q.state_dict(), f"./models/{args.folder_id}/team_qnet.pth")
     torch.save(
         agent.model.inference_model.state_dict(),
-        f"./models/{args.folder_id}/team_hostile_om.pth",
+        f"./models/{args.folder_id}/hostile_om.pth",
     )
     torch.save(
         agent.team_model.inference_model.state_dict(),
-        f"./models/{args.folder_id}/team_friendly_om.pth",
+        f"./models/{args.folder_id}/friendly_om.pth",
     )
 
     print(
