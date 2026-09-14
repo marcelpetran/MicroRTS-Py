@@ -71,6 +71,7 @@ SPEC = {
     "batch_size": ("--batch_size", ("train",)),
     "replay_capacity": ("--replay_capacity", ("train",)),
     "min_replay": ("--min_replay", ("train",)),
+    "n_step": ("--n_step", ("train",)),
     "train_every": ("--train_every", ("train",)),
     "gamma": ("--gamma", ("train",)),
     "qnet_dim": ("--qnet_dim", ("train",)),
