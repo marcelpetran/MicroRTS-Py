@@ -281,12 +281,19 @@ for epoch in range(num_epochs):
             opp=f"{stats['opp_return']:.1f}",
             ql=f"{stats['avg_q_loss']:.3f}",
         )
-    nonzero_shaped = sum(
-        1 for t in agent.replay.buf if t is not None and abs(t["reward"]) > 0.1
-    )
+    rs = [t["reward"] for t in agent.replay.buf if t is not None]
+    n = len(rs)
+    n_dense = sum(r != 0.0 for r in rs)
+    n_strong = sum(abs(r) > 0.1 for r in rs)
+    n_goal = sum(r > 0.5 for r in rs)
+    pos = sum(r for r in rs if r > 0)
+    neg = sum(r for r in rs if r < 0)
     print(
-        f"Replay buffer: {agent.replay.size} transitions, "
-        f"{nonzero_shaped / agent.replay.size * 100:.1f}% ({nonzero_shaped}) with |r| > 0.1 (shaping reward)"
+        f"Replay buffer: {n} transitions, "
+        f"{n_dense / n * 100:.1f}% r != 0, "
+        f"{n_strong / n * 100:.1f}% |r| > 0.1, "
+        f"{n_goal} goal collections, "
+        f"shaping +/-: {pos:.1f}/{abs(neg):.1f}"
     )
 
     # Evaluation

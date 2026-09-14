@@ -3,7 +3,7 @@ den312d
 --team_sizes
 2,2
 --num_goals
-32
+64
 --vision_radius
 10
 --max_steps
