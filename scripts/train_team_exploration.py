@@ -72,6 +72,13 @@ parser.add_argument("--replay_capacity", type=int, default=20_000)
 parser.add_argument("--min_replay", type=int, default=2_000)
 parser.add_argument("--train_every", type=int, default=8)
 parser.add_argument("--gamma", type=float, default=0.995)
+parser.add_argument(
+    "--n_step",
+    type=int,
+    default=1,
+    help="n-step returns for the DDQN target (1 = previous 1-step TD; "
+    "Rainbow-style 3-5 recommended)",
+)
 parser.add_argument("--qnet_dim", type=int, default=256)
 parser.add_argument("--cnn_hidden", type=int, default=64)
 parser.add_argument("--d_model", type=int, default=64)
@@ -190,6 +197,7 @@ args = OMGArgs(
     train_every=args_parsed.train_every,
     max_steps=args_parsed.max_steps,
     gamma=args_parsed.gamma,
+    n_step=args_parsed.n_step,
     tau_start=args_parsed.tau_start,
     tau_end=args_parsed.tau_end,
     tau_decay_steps=args_parsed.tau_decay_steps,
@@ -295,15 +303,6 @@ for epoch in range(num_epochs):
         f"{n_goal} goal collections, "
         f"shaping +/-: {pos:.1f}/{abs(neg):.1f}"
     )
-    # log to wandb
-    wandb.log(
-        {
-            "team/replay_size": n,
-            "team/replay_dense": n_dense / n,
-            "team/replay_strong": n_strong / n,
-            "team/replay_goal": n_goal,
-        }
-    )
     # Evaluation
     ev_rets, ev_opp, ev_steps, ev_mae, ev_sp = [], [], [], [], []
     ev_cov, ev_opp_cov, ev_sh = [], [], []
@@ -338,6 +337,12 @@ for epoch in range(num_epochs):
         "eval_spatial_error": _avg(ev_sp),
         "eval_coverage": _avg(ev_cov),
         "eval_opp_coverage": _avg(ev_opp_cov),
+        "replay_size": n,
+        "replay_dense": n_dense / n,
+        "replay_strong": n_strong / n,
+        "replay_goal": n_goal,
+        "pos_shaping": pos,
+        "neg_shaping": neg,
     }
 
     train_hist["returns"].append(avg["train_return"])

@@ -328,10 +328,16 @@ class QLearningAgent:
         hist_f_nxt: Dict[str, torch.Tensor],
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Standard DDQN target computation using Hindsight Experience Replay Goal Maps.
+        DDQN target computation using cached OM histories.
 
-        hist_h / hist_h_nxt: hostile-OM cached histories (current / next).
-        hist_f / hist_f_nxt: friendly-OM cached histories (current / next).
+        n-step form: target = sum_{k<n} gamma^k r_{t+k}
+            + (1 - done_n) * gamma^n * Q_tgt(s_{t+n}, argmax_a Q(s_{t+n}, a)).
+        For n_step=1 this reduces exactly to the previous 1-step target
+        (n_reward = r, next_state_n = next_state, done_n = done).
+
+        hist_h / hist_h_nxt: hostile-OM cached histories; the "nxt" windows are
+        collated at hist_len_n (the bootstrap state t+n).
+        hist_f / hist_f_nxt: friendly-OM cached histories (same indices).
         """
         s = torch.from_numpy(
             np.array([b["state"] for b in batch], dtype=np.float32)
@@ -339,20 +345,24 @@ class QLearningAgent:
         squ = torch.from_numpy(
             np.stack([self._augment(b["state"], b["belief"]) for b in batch])
         ).to(self.device)
+        # Bootstrap state / belief at t+n (== next_state / next_belief when
+        # n_step=1).
         sp = torch.from_numpy(
-            np.array([b["next_state"] for b in batch], dtype=np.float32)
+            np.array([b["next_state_n"] for b in batch], dtype=np.float32)
         ).to(self.device)
         spu = torch.from_numpy(
-            np.stack([self._augment(b["next_state"], b["next_belief"]) for b in batch])
+            np.stack(
+                [self._augment(b["next_state_n"], b["next_belief_n"]) for b in batch]
+            )
         ).to(self.device)
         a = torch.from_numpy(np.array([b["action"] for b in batch], dtype=np.int64)).to(
             self.device
         )
         r = torch.from_numpy(
-            np.array([b["reward"] for b in batch], dtype=np.float32)
+            np.array([b["n_reward"] for b in batch], dtype=np.float32)
         ).to(self.device)
         done = torch.from_numpy(
-            np.array([b["done"] for b in batch], dtype=np.float32)
+            np.array([b["done_n"] for b in batch], dtype=np.float32)
         ).to(self.device)
 
         with torch.no_grad():
@@ -378,7 +388,7 @@ class QLearningAgent:
         # 1. Q(s, g, a)
         q_sa = self.q(squ, g_map, g_team_map).gather(1, a.unsqueeze(1)).squeeze(1)
 
-        # 2. Target = r + gamma * max_a' Q_tgt(s', g, a')
+        # 2. Target = n-step return + gamma^n * max_a' Q_tgt(s_{t+n}, a')
         with torch.no_grad():
             q_val = self.q(spu, g_map_next, g_team_map_next)
             noise = torch.rand_like(q_val) * 1e-6  # tie-breaking noise
@@ -390,7 +400,7 @@ class QLearningAgent:
                 .squeeze(1)
             )
 
-            target = r + (1.0 - done) * self.args.gamma * q_next
+            target = r + (1.0 - done) * (self.args.gamma**self.args.n_step) * q_next
             target = torch.clamp(target, min=-15.0, max=15.0)
 
         return q_sa, target
@@ -495,6 +505,45 @@ class QLearningAgent:
             tr["true_team_goal_map"] = claim_count_map(
                 [m for m in self.learn_ids if m != tr["agent_id"]], goals, H, W
             )
+
+    def _add_n_step_returns(self, episode_transitions: List[Dict]):
+        """Rewrite each transition as an n-step transition (Dopamine-style).
+
+        For each agent's stream (step order), transition i stores the
+        discounted reward sum over the next n steps plus, when t+n is still
+        inside the episode, the state / belief / history index at t+n used
+        for bootstrapping. Bootstrapped state arrays are shared by REFERENCE
+        with the transition at t+n (pushed later and evicted later under the
+        FIFO replay, so the reference outlives the referring transition).
+        Episodes are terminal at their last transition, so t+n past the end
+        gets done_n=True (no bootstrap). n_step=1 reproduces the previous
+        1-step semantics exactly ("n_reward" == "reward", next_state_n ==
+        next_state, done_n == done).
+        """
+        n = max(1, int(self.args.n_step))
+        gamma = self.args.gamma
+        by_agent: Dict[int, List[Dict]] = {}
+        for t in episode_transitions:
+            by_agent.setdefault(t["agent_id"], []).append(t)
+        for stream in by_agent.values():
+            L = len(stream)
+            for i, t in enumerate(stream):
+                n_eff = min(n, L - i)
+                t["n_reward"] = sum(
+                    (gamma**k) * stream[i + k]["reward"] for k in range(n_eff)
+                )
+                if i + n < L:
+                    nxt = stream[i + n]
+                    t["done_n"] = False
+                    t["next_state_n"] = nxt["state"]
+                    t["next_belief_n"] = nxt["belief"]
+                    t["hist_len_n"] = nxt["hist_len"]
+                else:
+                    last = stream[-1]
+                    t["done_n"] = True
+                    t["next_state_n"] = last["next_state"]
+                    t["next_belief_n"] = last["next_belief"]
+                    t["hist_len_n"] = last["hist_len"] + 1
 
     # ------------- rollout -------------
 
@@ -639,6 +688,7 @@ class QLearningAgent:
         self._apply_hindsight_relabeling(
             episode_transitions, step_records, final_positions, H, W
         )
+        self._add_n_step_returns(episode_transitions)
 
         # Push to replay buffer (shared arrays by reference: states + cached
         # per-step features for both OMs)

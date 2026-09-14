@@ -91,8 +91,10 @@ class OpponentModel(nn.Module):
         Returns two dicts, each {"state_features": (B,T,d_model),
         "mask": (B,T), "prev_obs": (B,H,W,F)}:
           cur  -> OM history for the current state s (state L)
-          nxt  -> OM history for the next state s' (state L+1): window states
-                  (L-T+1..L) + prev_obs = anchor state L.
+          nxt  -> OM history for the bootstrap state s^(t+n) (episode index
+                  L + n, read from the transition's hist_len_n; absent ->
+                  L + 1, the 1-step case): window states
+                  (m-T+1..m-1) + prev_obs = anchor state m-1, m = hist_len_n.
 
         key selects which OM's cached features to use ("feats_hostile" /
         "feats_friendly"); features and states are the ANCHOR stream shared by
@@ -137,14 +139,17 @@ class OpponentModel(nn.Module):
                 cur_mask[i, -take:] = True
                 cur_prev[i] = torch.from_numpy(states[L - 1].astype(np.float32))
 
-            # next window: states (L+1-take_n .. L), right-aligned
-            take_n = min(L + 1, max_len)
+            # next window: ends at the bootstrap state (episode index
+            # hist_len_n = L + n; absent -> L + 1, the 1-step case), clamped
+            # to the features actually cached for the episode.
+            Ln = min(t.get("hist_len_n", L + 1), len(feats))
+            take_n = min(Ln, max_len)
             if take_n > 0:
                 nxt_feats[i, -take_n:] = torch.from_numpy(
-                    feats[L + 1 - take_n : L + 1].astype(np.float32)
+                    feats[Ln - take_n : Ln].astype(np.float32)
                 )
                 nxt_mask[i, -take_n:] = True
-                nxt_prev[i] = torch.from_numpy(states[L].astype(np.float32))
+                nxt_prev[i] = torch.from_numpy(states[Ln - 1].astype(np.float32))
 
         return {
             "cur": {

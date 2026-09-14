@@ -5,6 +5,7 @@ from dataclasses import dataclass
 class OMGArgs:
     device: str = "cpu"  # cpu, cuda, mps
     gamma: float = 0.985
+    n_step: int = 1  # n-step returns for the DDQN target (1 = plain 1-step TD)
     lr: float = 3e-4
     lr_om: float = 1e-4
     batch_size: int = 128
