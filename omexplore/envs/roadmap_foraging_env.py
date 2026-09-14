@@ -725,7 +725,7 @@ class TeamRoadmapEnv(RoadmapForagingEnv):
             teams_on = {self.teams[a] for a in on}
             if not teams_on:
                 continue
-            share = 1.0 / len(teams_on)
+            share = REWARD_GOAL / len(teams_on)
             self.food_positions.remove(goal)
             collected.append(goal)
             collectors[goal] = on
@@ -1039,9 +1039,11 @@ if __name__ == "__main__":
     tenv.agents = {0: goal, 1: freed[0], 2: freed[1], 3: freed[2]}
     tenv._update_team_vis()
     _, rewards, _, info = tenv.step({a: None for a in range(4)})
-    assert rewards == {0: 1.0, 1: 1.0, 2: 0.0, 3: 0.0}, rewards
-    assert info["team_rewards"] == {0: 1.0}, info["team_rewards"]
-    print("team-shared reward: OK (agent 0 on goal -> both team-0 agents +1.0)")
+    assert rewards == {0: REWARD_GOAL, 1: REWARD_GOAL, 2: 0.0, 3: 0.0}, rewards
+    assert info["team_rewards"] == {0: REWARD_GOAL}, info["team_rewards"]
+    print(
+        f"team-shared reward: OK (agent 0 on goal -> both team-0 agents +{REWARD_GOAL})"
+    )
 
     # --- Targeted (b): agents 0 and 2 on the same goal -> 0.5 per team.
     tenv.reset()
@@ -1050,9 +1052,18 @@ if __name__ == "__main__":
     tenv.agents = {0: goal, 1: freed[0], 2: goal, 3: freed[1]}
     tenv._update_team_vis()
     _, rewards, _, info = tenv.step({a: None for a in range(4)})
-    assert rewards == {0: 0.5, 1: 0.5, 2: 0.5, 3: 0.5}, rewards
-    assert info["team_rewards"] == {0: 0.5, 1: 0.5}, info["team_rewards"]
-    print("cross-team tie: OK (split 0.5/0.5 between the two teams)")
+    assert rewards == {
+        0: REWARD_GOAL / 2,
+        1: REWARD_GOAL / 2,
+        2: REWARD_GOAL / 2,
+        3: REWARD_GOAL / 2,
+    }, rewards
+    assert info["team_rewards"] == {0: REWARD_GOAL / 2, 1: REWARD_GOAL / 2}, info[
+        "team_rewards"
+    ]
+    print(
+        f"cross-team tie: OK (split {REWARD_GOAL / 2}/{REWARD_GOAL / 2} between the two teams)"
+    )
 
     # --- Targeted (c): goal visible ONLY through the teammate's vision.
     tenv.reset()
