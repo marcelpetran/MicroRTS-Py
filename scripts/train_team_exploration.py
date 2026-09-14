@@ -295,7 +295,15 @@ for epoch in range(num_epochs):
         f"{n_goal} goal collections, "
         f"shaping +/-: {pos:.1f}/{abs(neg):.1f}"
     )
-
+    # log to wandb
+    wandb.log(
+        {
+            "team/replay_size": n,
+            "team/replay_dense": n_dense / n,
+            "team/replay_strong": n_strong / n,
+            "team/replay_goal": n_goal,
+        }
+    )
     # Evaluation
     ev_rets, ev_opp, ev_steps, ev_mae, ev_sp = [], [], [], [], []
     ev_cov, ev_opp_cov, ev_sh = [], [], []
