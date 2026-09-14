@@ -281,6 +281,13 @@ for epoch in range(num_epochs):
             opp=f"{stats['opp_return']:.1f}",
             ql=f"{stats['avg_q_loss']:.3f}",
         )
+    nonzero_shaped = sum(
+        1 for t in agent.replay.buf if t is not None and abs(t["reward"]) > 0.1
+    )
+    print(
+        f"Replay buffer: {agent.replay.size} transitions, "
+        f"{nonzero_shaped} with |r| > 0.1 (shaping reward)"
+    )
 
     # Evaluation
     ev_rets, ev_opp, ev_steps, ev_mae, ev_sp = [], [], [], [], []

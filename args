@@ -9,9 +9,9 @@ den312d
 --max_steps
 400
 --episodes
-1_000
+1_00
 --episodes_per_epoch
-100
+10
 --eval_episodes
 20
 --batch_size
@@ -23,7 +23,7 @@ den312d
 --train_every
 8
 --gamma
-0.995
+0.998
 --qnet_dim
 256
 --cnn_hidden
@@ -41,7 +41,7 @@ den312d
 --tau_start
 1.5
 --tau_end
-0.05
+0.01
 --tau_decay_steps
 200_000
 --friendly_om
@@ -51,7 +51,7 @@ den312d
 --shaping_alpha
 0.1
 --shaping_beta
-0.002
+0.01
 --seed
 0
 --folder_id
