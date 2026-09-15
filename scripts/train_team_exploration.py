@@ -257,7 +257,7 @@ if args_parsed.demo_episodes > 0:
     ep = 0
     pbar = tqdm(
         range(args_parsed.demo_episodes),
-        desc=f"Epoch {ep + 1:02d}/{args_parsed.demo_episodes} [Train]",
+        desc=f"Episode {ep + 1:02d}/{args_parsed.demo_episodes} [Warmup]",
         leave=False,
     )
     for _ in pbar:
