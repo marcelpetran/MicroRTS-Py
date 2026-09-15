@@ -65,6 +65,7 @@ SPEC = {
     "lr_om": ("--lr_om", ("pretrain",)),
     "pretrain_wandb_project": ("--wandb_project", ("pretrain",)),
     # RL training
+    "demo_episodes": ("--demo_episodes", ("train",)),
     "episodes": ("--episodes", ("train",)),
     "episodes_per_epoch": ("--episodes_per_epoch", ("train",)),
     "eval_episodes": ("--eval_episodes", ("train",)),
