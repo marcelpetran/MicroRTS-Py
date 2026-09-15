@@ -253,17 +253,28 @@ num_epochs = max(1, args_parsed.episodes // args_parsed.episodes_per_epoch)
 if args_parsed.demo_episodes > 0:
     demo_policy = TeamAgent(env, team_id=0)
     print(f"DQfD warmup: {args_parsed.demo_episodes} scripted episodes...")
-    for i in range(args_parsed.demo_episodes):
+    avg_demo_stats = {"return": 0.0, "opp_return": 0.0}
+    ep = 0
+    pbar = tqdm(
+        range(args_parsed.demo_episodes),
+        desc=f"Epoch {ep + 1:02d}/{args_parsed.demo_episodes} [Train]",
+        leave=False,
+    )
+    for _ in pbar:
         stats = agent.run_episode(
             opponent,
             max_steps=args_parsed.max_steps,
             demo_policy=demo_policy,
         )
-        print(
-            f"  demo ep {i + 1}/{args_parsed.demo_episodes}: "
-            f"return {stats['return']:.1f} (opp {stats['opp_return']:.1f}), "
-            f"replay {len(agent.replay)}"
-        )
+        avg_demo_stats["return"] += stats["return"]
+        avg_demo_stats["opp_return"] += stats["opp_return"]
+    avg_demo_stats["return"] /= args_parsed.demo_episodes
+    avg_demo_stats["opp_return"] /= args_parsed.demo_episodes
+    print(
+        f"  demo collection finished: "
+        f"avg return {avg_demo_stats['return']:.1f} (opp {avg_demo_stats['opp_return']:.1f}), "
+        f"Buffer filled to {(len(agent.replay) / args.capacity):.1f}%, Total transitions in replay: {len(agent.replay)}"
+    )
 
 
 def _avg(xs):
