@@ -9,9 +9,9 @@ den312d
 --max_steps
 400
 --episodes
-1_00
+1000
 --episodes_per_epoch
-10
+100
 --eval_episodes
 20
 --batch_size
