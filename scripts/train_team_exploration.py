@@ -271,9 +271,9 @@ if args_parsed.demo_episodes > 0:
     avg_demo_stats["return"] /= args_parsed.demo_episodes
     avg_demo_stats["opp_return"] /= args_parsed.demo_episodes
     print(
-        f"  demo collection finished: "
-        f"avg return {avg_demo_stats['return']:.1f} (opp {avg_demo_stats['opp_return']:.1f}), "
-        f"Buffer filled to {(len(agent.replay) / args.capacity):.1f}%, Total transitions in replay: {len(agent.replay)}"
+        f"  demo collection finished: \n"
+        f"    Avg return {avg_demo_stats['return']:.1f} (opp {avg_demo_stats['opp_return']:.1f}) \n"
+        f"    Buffer filled to {(len(agent.replay) / args.capacity) * 100:.1f}%, Total transitions in replay: {len(agent.replay)}"
     )
 
 
