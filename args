@@ -25,7 +25,7 @@ den312d
 --train_every
 8
 --n_step
-20
+10
 --gamma
 0.998
 --qnet_dim
@@ -60,4 +60,7 @@ den312d
 0
 --folder_id
 0
+--individual_goal_rewards
+--target_clamp
+0.0
 --no_wandb

@@ -75,6 +75,7 @@ SPEC = {
     "n_step": ("--n_step", ("train",)),
     "train_every": ("--train_every", ("train",)),
     "gamma": ("--gamma", ("train",)),
+    "target_clamp": ("--target_clamp", ("train",)),
     "qnet_dim": ("--qnet_dim", ("train",)),
     "tau_start": ("--tau_start", ("train",)),
     "tau_end": ("--tau_end", ("train",)),
@@ -92,6 +93,7 @@ BOOL_KEYS = {
     "friendly_om": ("train",),  # false -> --no_friendly_om (ablation)
     "shaping": ("train",),  # true -> --shaping (default off in the script)
     "no_wandb": ("pretrain", "train"),
+    "individual_goal_rewards": ("train",),  # true -> --individual_goal_rewards
 }
 
 ALL_STAGES = ("collect", "pretrain", "train")
@@ -177,8 +179,8 @@ def build_cmd(stage, cfg, dataset: Path, om_dir: Path, folder_id) -> list:
             elif key == "shaping":
                 if b:
                     cmd += ["--shaping"]
-            elif b:  # no_wandb
-                cmd += ["--no_wandb"]
+            elif b:  # no_wandb, individual_goal_rewards (flag name == key)
+                cmd += [f"--{key}"]
             continue
         flag, stages = SPEC[key]
         if stage in stages:

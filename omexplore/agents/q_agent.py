@@ -404,16 +404,18 @@ class QLearningAgent:
             )
 
             target = r + (1.0 - done) * (self.args.gamma**self.args.n_step) * q_next
-            target = torch.clamp(target, min=-15.0, max=15.0)
+            clamp = self.args.target_clamp
+            if clamp > 0:
+                target = torch.clamp(target, min=-clamp, max=clamp)
 
         return q_sa, target
 
     def update(self):
         if len(self.replay) < self.args.min_replay:
-            return (None, None, None)
+            return (None, None, None, None)
 
         if self.global_step % self.args.train_every != 0:
-            return (None, None, None)
+            return (None, None, None, None)
 
         batch_list = self.replay.sample(self.args.batch_size)
 
@@ -455,7 +457,7 @@ class QLearningAgent:
 
         self.opt.zero_grad(set_to_none=True)
         loss.backward()
-        nn.utils.clip_grad_norm_(self.q.parameters(), 5.0)
+        grad_norm = nn.utils.clip_grad_norm_(self.q.parameters(), 5.0).item()
         self.opt.step()
 
         # Soft target update
@@ -469,7 +471,7 @@ class QLearningAgent:
         model_loss = self.model.train_step(om_batch, cached_features=True)
         team_loss = self.team_model.train_step(team_batch, cached_features=True)
 
-        return loss_val, model_loss, team_loss
+        return loss_val, model_loss, team_loss, grad_norm
 
     def _apply_hindsight_relabeling(
         self,
@@ -583,7 +585,7 @@ class QLearningAgent:
         ep_entropy = 0.0
         ep_shaped = 0.0
         ep_qspread = 0.0
-        q_losses, model_losses, team_losses = [], [], []
+        q_losses, model_losses, team_losses, grad_norms = [], [], [], []
 
         # History buffers for the transformer (team-level: anchor obs stream;
         # team members' obs differ only in the self channel). One rolling
@@ -699,10 +701,11 @@ class QLearningAgent:
             # Train step (skipped in DQfD warmup: collection only).
             if demo_policy is None:
                 self.global_step += 1
-                Q_loss, model_loss, team_loss = self.update()
+                Q_loss, model_loss, team_loss, grad_norm = self.update()
                 q_losses.append(Q_loss)
                 model_losses.append(model_loss)
                 team_losses.append(team_loss)
+                grad_norms.append(grad_norm)
 
             obs = next_obs
 
@@ -755,6 +758,12 @@ class QLearningAgent:
             "avg_q_loss": _avg(q_losses),
             "avg_model_loss": _avg(model_losses),
             "avg_team_model_loss": _avg(team_losses),
+            "avg_grad_norm": _avg(grad_norms),
+            "frac_clipped": (
+                float(np.mean([g > 5.0 for g in grad_norms if g is not None]))
+                if any(g is not None for g in grad_norms)
+                else 0.0
+            ),
         }
 
     def run_test_episode(

@@ -149,6 +149,22 @@ parser.add_argument(
     default=2.5e-4,
     help="Novelty weight per newly covered cell (full map ~ 1 goal)",
 )
+parser.add_argument(
+    "--individual_goal_rewards",
+    action="store_true",
+    default=False,
+    help="Pay goal rewards to the collectors only instead of sharing them "
+    "across the whole team (per-agent credit for the shared Q-net; "
+    "team_scores / logged returns are unaffected)",
+)
+parser.add_argument(
+    "--target_clamp",
+    type=float,
+    default=15.0,
+    help="Clamp DDQN targets to +-this value; <=0 disables the clamp. "
+    "Must exceed the plausible discounted episode return or the targets "
+    "saturate and the advantage signal is crushed.",
+)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--folder_id", type=int, default=0)
 parser.add_argument("--wandb_project", type=str, default="om-team-exploration")
@@ -186,6 +202,7 @@ env = TeamRoadmapEnv(
     shaping=args_parsed.shaping,
     shaping_alpha=args_parsed.shaping_alpha,
     shaping_beta=args_parsed.shaping_beta,
+    individual_goal_rewards=args_parsed.individual_goal_rewards,
 )
 obs_sample = env.reset()
 
@@ -207,6 +224,7 @@ args = OMGArgs(
     max_steps=args_parsed.max_steps,
     gamma=args_parsed.gamma,
     n_step=args_parsed.n_step,
+    target_clamp=args_parsed.target_clamp,
     tau_start=args_parsed.tau_start,
     tau_end=args_parsed.tau_end,
     tau_decay_steps=args_parsed.tau_decay_steps,
@@ -306,7 +324,7 @@ train_hist = {
 for epoch in range(num_epochs):
     ep_returns, ep_opp, ep_steps, ep_ent = [], [], [], []
     ep_q, ep_m, ep_tm, ep_sh = [], [], [], []
-    ep_qspd = []
+    ep_qspd, ep_gn, ep_clip = [], [], []
 
     pbar = tqdm(
         range(args_parsed.episodes_per_epoch),
@@ -324,6 +342,8 @@ for epoch in range(num_epochs):
         ep_tm.append(stats["avg_team_model_loss"])
         ep_sh.append(stats["shaped_return"])
         ep_qspd.append(stats["avg_q_spread"])
+        ep_gn.append(stats["avg_grad_norm"])
+        ep_clip.append(stats["frac_clipped"])
         pbar.set_postfix(
             ret=f"{stats['return']:.1f}",
             opp=f"{stats['opp_return']:.1f}",
@@ -336,13 +356,6 @@ for epoch in range(num_epochs):
     n_goal = sum(r > 0.5 for r in rs)
     pos = sum(r for r in rs if r > 0)
     neg = sum(r for r in rs if r < 0)
-    print(
-        f"Replay buffer: {n} transitions, "
-        f"{n_dense / n * 100:.1f}% r != 0, "
-        f"{n_strong / n * 100:.1f}% |r| > 0.1, "
-        f"{n_goal} goal collections, "
-        f"shaping +/-: {pos:.1f}/{abs(neg):.1f}"
-    )
     # Evaluation
     ev_rets, ev_opp, ev_steps, ev_mae, ev_sp = [], [], [], [], []
     ev_cov, ev_opp_cov, ev_sh = [], [], []
@@ -372,6 +385,8 @@ for epoch in range(num_epochs):
         "train_team_model_loss": _avg(ep_tm),
         "train_shaped_return": _avg(ep_sh),
         "train_q_spread": _avg(ep_qspd),
+        "train_grad_norm": _avg(ep_gn),
+        "train_frac_clipped": _avg(ep_clip),
         "eval_return": _avg(ev_rets),
         "eval_opp_return": _avg(ev_opp),
         "eval_steps": _avg(ev_steps),
@@ -417,7 +432,6 @@ for epoch in range(num_epochs):
         agent.team_model.inference_model.state_dict(),
         f"./models/{args.folder_id}/friendly_om.pth",
     )
-
     print(
         f"Epoch {epoch + 1:02d} | Train Ret {avg['train_return']:>5.2f} "
         f"(opp {avg['train_opp_return']:.2f}, shaped {avg['train_shaped_return']:.2f}) "
@@ -426,7 +440,15 @@ for epoch in range(num_epochs):
         f"| Cov {avg['eval_coverage']:.3f} "
         f"(opp {avg['eval_opp_coverage']:.3f}) | Q {avg['train_q_loss']:.3f} "
         f"| OM {avg['train_model_loss']:.3f} | tOM {avg['train_team_model_loss']:.3f} "
-        f"| ΔQ(max-min) {avg['train_q_spread']:.3f}"
+        f"| ΔQ(max-min) {avg['train_q_spread']:.3f} "
+        f"| ‖∇‖ {avg['train_grad_norm']:.2f} "
+        f"(clip {avg['train_frac_clipped'] * 100:.0f}%) "
+        f"| Entropy {avg['train_entropy']:.3f} "
+        f"| Replay buffer {n / args.capacity * 100:.1f}% ({n}) "
+        f"| r != 0 {n_dense / n * 100:.1f}% "
+        f"| |r| > 0.1 {n_strong / n * 100:.1f}% "
+        f"| goal collections {n_goal} "
+        f"| shaping +/- {pos:.1f}/{abs(neg):.1f}"
     )
 
 # --- Evaluation charts ---

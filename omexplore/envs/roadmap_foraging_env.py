@@ -560,6 +560,7 @@ class TeamRoadmapEnv(RoadmapForagingEnv):
         shaping_alpha: float = 0.02,
         shaping_beta: float = 2.5e-4,
         shaping_teams: tuple = (0,),
+        individual_goal_rewards: bool = False,
     ):
         # Potential-based reward shaping (Ng et al. 1999) for the learning
         # team(s) only. Two terms, both computed from team-observable
@@ -577,6 +578,12 @@ class TeamRoadmapEnv(RoadmapForagingEnv):
         self.shaping_alpha = float(shaping_alpha)
         self.shaping_beta = float(shaping_beta)
         self.shaping_teams = tuple(shaping_teams)
+        # Goal-reward attribution: True pays only the team members actually
+        # standing on a collected goal (per-agent credit for the shared
+        # Q-net); False (default) keeps the historical team-shared reward
+        # where every member of a collecting team is paid. team_scores /
+        # team_rewards / logged returns are identical either way.
+        self.individual_goal_rewards = bool(individual_goal_rewards)
         # cell -> BFS distance field cache; walls are fixed for the map, so
         # fields stay valid across episodes (goals/spawns never change them).
         self._dist_field_cache: dict = {}
@@ -735,7 +742,11 @@ class TeamRoadmapEnv(RoadmapForagingEnv):
             for t in teams_on:
                 self.team_scores[t] += share
                 team_rewards[t] = team_rewards.get(t, 0.0) + share
-                for a in self._team_members[t]:
+                if self.individual_goal_rewards:
+                    paid = [a for a in on if self.teams[a] == t]
+                else:
+                    paid = self._team_members[t]
+                for a in paid:
                     rewards[a] += share
 
         team_shaping = {}
@@ -1073,6 +1084,21 @@ if __name__ == "__main__":
     print(
         f"cross-team tie: OK (split {REWARD_GOAL / 2}/{REWARD_GOAL / 2} between the two teams)"
     )
+
+    # --- Targeted (d): individual goal rewards -> only the collector is paid.
+    tenv_i = TeamRoadmapEnv(
+        num_goals=16, team_sizes=(2, 2), max_steps=400, individual_goal_rewards=True
+    )
+    tenv_i.reset()
+    goal = next(iter(tenv_i.food_positions))
+    freed = [p for p in tenv_i._get_freed_positions() if p != goal]
+    tenv_i.agents = {0: goal, 1: freed[0], 2: freed[1], 3: freed[2]}
+    tenv_i._update_team_vis()
+    _, rewards, _, info = tenv_i.step({a: None for a in range(4)})
+    assert rewards == {0: REWARD_GOAL, 1: 0.0, 2: 0.0, 3: 0.0}, rewards
+    assert info["team_rewards"] == {0: REWARD_GOAL}, info["team_rewards"]
+    assert tenv_i.team_scores[0] == REWARD_GOAL, tenv_i.team_scores
+    print("individual goal reward: OK (agent 0 on goal -> only agent 0 paid)")
 
     # --- Targeted (c): goal visible ONLY through the teammate's vision.
     tenv.reset()
