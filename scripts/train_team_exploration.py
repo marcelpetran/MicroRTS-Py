@@ -65,6 +65,15 @@ parser.add_argument(
     "--episodes_per_epoch", type=int, default=100, help="Episodes per logged epoch"
 )
 parser.add_argument("--eval_episodes", type=int, default=20)
+parser.add_argument(
+    "--demo_episodes",
+    type=int,
+    default=0,
+    help="DQfD warmup: prefill the replay buffer with this many scripted "
+    "greedy-vs-greedy episodes before training starts. The scripted policy "
+    "collects most goals, so goal reward becomes action-correlated in the "
+    "data from step one.",
+)
 # --- hyperparameters (scaled for the big map) ---
 parser.add_argument("--batch_size", type=int, default=64)
 parser.add_argument("--max_history_length", type=int, default=8)
@@ -239,6 +248,22 @@ print(
 )
 
 num_epochs = max(1, args_parsed.episodes // args_parsed.episodes_per_epoch)
+
+# --- DQfD warmup: scripted data collection before learning ---
+if args_parsed.demo_episodes > 0:
+    demo_policy = TeamAgent(env, team_id=0)
+    print(f"DQfD warmup: {args_parsed.demo_episodes} scripted episodes...")
+    for i in range(args_parsed.demo_episodes):
+        stats = agent.run_episode(
+            opponent,
+            max_steps=args_parsed.max_steps,
+            demo_policy=demo_policy,
+        )
+        print(
+            f"  demo ep {i + 1}/{args_parsed.demo_episodes}: "
+            f"return {stats['return']:.1f} (opp {stats['opp_return']:.1f}), "
+            f"replay {len(agent.replay)}"
+        )
 
 
 def _avg(xs):

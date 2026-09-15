@@ -550,12 +550,21 @@ class QLearningAgent:
 
     # ------------- rollout -------------
 
-    def run_episode(self, opponent_agent, max_steps: int = 500) -> Dict[str, float]:
+    def run_episode(
+        self, opponent_agent, max_steps: int = 500, demo_policy=None
+    ) -> Dict[str, float]:
         """
         Gathers a trajectory for the whole learning team (one shared Q-net),
         controls the hostile teams via opponent_agent (TeamAgent interface:
         reset() + select_actions(obs) -> {agent_id: action}), and labels
         per-team claim maps with hindsight at the end of the episode.
+
+        demo_policy: optional scripted policy for the learning team (same
+            interface as opponent_agent). When given, the episode is pure
+            data collection (DQfD warmup): beliefs, cached OM features,
+            hindsight labels and n-step returns are built exactly as in
+            training, but no Q inference / no gradient step happens and
+            global_step (the tau decay clock) is not advanced.
         """
         obs = self.env.reset()
         if random.random() < 0.3:
@@ -563,6 +572,8 @@ class QLearningAgent:
         elif random.random() < 0.5:
             obs = self.env.swap_agents()
         opponent_agent.reset()
+        if demo_policy is not None:
+            demo_policy.reset()
         self.tracker.reset(use_map_prior=self.args.belief_map_prior)
         anchor = self.learn_ids[0]
         self.tracker.update(obs[anchor])
@@ -608,16 +619,22 @@ class QLearningAgent:
                 "prev_obs": prev_state_tensor,
             }
 
-            # The learning team: one shared Q-net, one action per member.
+            # The learning team: one shared Q-net, one action per member
+            # (or the scripted policy during DQfD warmup).
             actions = {}
-            for a in self.learn_ids:
-                s_aug = self.tracker.augment(obs[a])
-                act, _, step_entropy, step_qspread = self.select_action(
-                    obs[a], s_aug, history, team_history
-                )
-                actions[a] = act
-                ep_entropy += step_entropy
-                ep_qspread += step_qspread
+            if demo_policy is not None:
+                demo_actions = demo_policy.select_actions(obs)
+                for a in self.learn_ids:
+                    actions[a] = demo_actions[a]
+            else:
+                for a in self.learn_ids:
+                    s_aug = self.tracker.augment(obs[a])
+                    act, _, step_entropy, step_qspread = self.select_action(
+                        obs[a], s_aug, history, team_history
+                    )
+                    actions[a] = act
+                    ep_entropy += step_entropy
+                    ep_qspread += step_qspread
 
             # The hostile team(s), controlled externally.
             opp_actions = opponent_agent.select_actions(obs)
@@ -679,12 +696,13 @@ class QLearningAgent:
 
             prev_state_tensor = state_tensor
 
-            # Train step
-            self.global_step += 1
-            Q_loss, model_loss, team_loss = self.update()
-            q_losses.append(Q_loss)
-            model_losses.append(model_loss)
-            team_losses.append(team_loss)
+            # Train step (skipped in DQfD warmup: collection only).
+            if demo_policy is None:
+                self.global_step += 1
+                Q_loss, model_loss, team_loss = self.update()
+                q_losses.append(Q_loss)
+                model_losses.append(model_loss)
+                team_losses.append(team_loss)
 
             obs = next_obs
 
