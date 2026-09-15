@@ -389,7 +389,8 @@ for epoch in range(num_epochs):
         f"(opp {avg['eval_opp_return']:.2f}, shaped {avg['eval_shaped_return']:.2f}) "
         f"| Cov {avg['eval_coverage']:.3f} "
         f"(opp {avg['eval_opp_coverage']:.3f}) | Q {avg['train_q_loss']:.3f} "
-        f"| OM {avg['train_model_loss']:.3f} | tOM {avg['train_team_model_loss']:.3f}"
+        f"| OM {avg['train_model_loss']:.3f} | tOM {avg['train_team_model_loss']:.3f} "
+        f"| ΔQ(max-min) {avg['train_q_spread']:.3f}"
     )
 
 # --- Evaluation charts ---

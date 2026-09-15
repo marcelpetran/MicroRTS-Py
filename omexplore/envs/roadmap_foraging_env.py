@@ -152,6 +152,9 @@ class RoadmapForagingEnv:
         else:
             self._wall_rows = np.empty(0, dtype=np.int64)
             self._wall_cols = np.empty(0, dtype=np.int64)
+        self._wall_mask = np.zeros((self.height, self.width), dtype=bool)
+        if self._wall_rows.size:
+            self._wall_mask[self._wall_rows, self._wall_cols] = True
 
         self.base_obs = np.zeros(
             (self.height, self.width, self.features), dtype=np.int8
@@ -855,9 +858,15 @@ class TeamRoadmapEnv(RoadmapForagingEnv):
         return list(self._team_members[team_id])
 
     def get_coverage(self, team_id):
-        """Fraction of passable cells ever seen by team_id this episode."""
+        """Fraction of passable cells ever seen by team_id this episode.
+
+        _coverage also accumulates seen wall cells (walls are observable),
+        but the denominator counts passable cells only — mask walls out of
+        the numerator so the ratio stays in [0, 1].
+        """
         free = self.height * self.width - len(self.walls)
-        return float(self._coverage[team_id].sum()) / max(free, 1)
+        seen = self._coverage[team_id] & ~self._wall_mask
+        return float(seen.sum()) / max(free, 1)
 
     # ------------------------------------------------------------------ #
     # Rendering                                                           #
