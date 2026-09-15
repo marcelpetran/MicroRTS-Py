@@ -18,7 +18,7 @@ import numpy as np
 import wandb
 from omexplore.agents.q_agent import QLearningAgent
 from omexplore.agents.team_agents import TeamAgent
-from omexplore.envs.roadmap_foraging_env import TeamRoadmapEnv
+from omexplore.envs.roadmap_foraging_env import REWARD_GOAL, TeamRoadmapEnv
 from omexplore.models.opponent_model import OpponentModel
 from omexplore.models.transformers import SpatialOpponentModel
 from omexplore.utils.omg_args import OMGArgs
@@ -59,8 +59,8 @@ def main():
         stats = agent.run_episode(opp, max_steps=60)
         print(f"train ep {ep}: {stats}")
         assert stats["steps"] <= 60
-        assert 0.0 <= stats["return"] <= 8.0
-        assert 0.0 <= stats["opp_return"] <= 8.0
+        assert 0.0 <= stats["return"] <= 8.0 * REWARD_GOAL
+        assert 0.0 <= stats["opp_return"] <= 8.0 * REWARD_GOAL
         # shared team rewards: every member's per-step reward is identical
         assert (
             len(agent.replay) == (ep + 1) * 60 * 2 - min((ep + 1) * 60 * 2, 2000)
@@ -91,8 +91,8 @@ def main():
     # --- Test episode with OM-quality metrics.
     tstats = agent.run_test_episode(opp, max_steps=60)
     print(f"test ep: {tstats}")
-    assert 0.0 <= tstats["return"] <= 8.0
-    assert 0.0 <= tstats["opp_return"] <= 8.0
+    assert 0.0 <= tstats["return"] <= 8.0 * REWARD_GOAL
+    assert 0.0 <= tstats["opp_return"] <= 8.0 * REWARD_GOAL
     if tstats["avg_mae_error"] is not None:
         assert tstats["avg_mae_error"] >= 0.0
     if tstats["avg_spatial_error"] is not None:

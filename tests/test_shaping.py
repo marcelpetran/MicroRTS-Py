@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 
-from omexplore.envs.roadmap_foraging_env import MOVES, TeamRoadmapEnv
+from omexplore.envs.roadmap_foraging_env import MOVES, REWARD_GOAL, TeamRoadmapEnv
 
 FREEZE = 99  # not 0-7 -> _try_move no-op (agent stays put)
 
@@ -218,13 +218,13 @@ def test_walk_telescoping():
         _, rewards, done, info = env.step({0: act, 1: FREEZE, 2: FREEZE, 3: FREEZE})
         steps += 1
         assert steps <= d0 + 2, "walked past the goal"
-        approach_total += rewards[0] - (1.0 if done else 0.0)
+        approach_total += rewards[0] - (REWARD_GOAL if done else 0.0)
 
     assert steps == d0, (steps, d0)
     assert env.agents[0] == g
     # Potential-based telescoping: total approach reward == alpha * d0.
     assert abs(approach_total - alpha * d0) < 1e-9, (approach_total, alpha * d0)
-    assert env.team_scores == {0: 1.0, 1: 0.0}
+    assert env.team_scores == {0: REWARD_GOAL, 1: 0.0}
     print(
         f"[ok] walk telescoping: {steps} steps, approach {approach_total:.4f} == alpha*d0 ({alpha}*{d0})"
     )

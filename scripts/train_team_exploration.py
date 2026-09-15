@@ -253,11 +253,13 @@ train_hist = {
     "steps": [],
     "entropy": [],
     "q_loss": [],
+    "q_spread": [],
     "model_loss": [],
     "team_model_loss": [],
     "coverage": [],
     "eval_returns": [],
     "eval_opp_returns": [],
+    "eval_q_spread": [],
     "eval_steps": [],
     "eval_mae": [],
     "eval_spatial": [],
@@ -268,6 +270,7 @@ train_hist = {
 for epoch in range(num_epochs):
     ep_returns, ep_opp, ep_steps, ep_ent = [], [], [], []
     ep_q, ep_m, ep_tm, ep_sh = [], [], [], []
+    ep_qspd = []
 
     pbar = tqdm(
         range(args_parsed.episodes_per_epoch),
@@ -284,6 +287,7 @@ for epoch in range(num_epochs):
         ep_m.append(stats["avg_model_loss"])
         ep_tm.append(stats["avg_team_model_loss"])
         ep_sh.append(stats["shaped_return"])
+        ep_qspd.append(stats["avg_q_spread"])
         pbar.set_postfix(
             ret=f"{stats['return']:.1f}",
             opp=f"{stats['opp_return']:.1f}",
@@ -306,12 +310,14 @@ for epoch in range(num_epochs):
     # Evaluation
     ev_rets, ev_opp, ev_steps, ev_mae, ev_sp = [], [], [], [], []
     ev_cov, ev_opp_cov, ev_sh = [], [], []
+    ev_qspd = []
     for _ in range(args_parsed.eval_episodes):
         t = agent.run_test_episode(opponent, max_steps=args_parsed.max_steps)
         ev_rets.append(t["return"])
         ev_opp.append(t["opp_return"])
         ev_steps.append(t["steps"])
         ev_sh.append(t["shaped_return"])
+        ev_qspd.append(t["avg_q_spread"])
         if t["avg_mae_error"] is not None:
             ev_mae.append(t["avg_mae_error"])
         if t["avg_spatial_error"] is not None:
@@ -329,10 +335,12 @@ for epoch in range(num_epochs):
         "train_model_loss": _avg(ep_m),
         "train_team_model_loss": _avg(ep_tm),
         "train_shaped_return": _avg(ep_sh),
+        "train_q_spread": _avg(ep_qspd),
         "eval_return": _avg(ev_rets),
         "eval_opp_return": _avg(ev_opp),
         "eval_steps": _avg(ev_steps),
         "eval_shaped_return": _avg(ev_sh),
+        "eval_q_spread": _avg(ev_qspd),
         "eval_mae": _avg(ev_mae),
         "eval_spatial_error": _avg(ev_sp),
         "eval_coverage": _avg(ev_cov),
@@ -350,10 +358,12 @@ for epoch in range(num_epochs):
     train_hist["steps"].append(avg["train_steps"])
     train_hist["entropy"].append(avg["train_entropy"])
     train_hist["q_loss"].append(avg["train_q_loss"])
+    train_hist["q_spread"].append(avg["train_q_spread"])
     train_hist["model_loss"].append(avg["train_model_loss"])
     train_hist["team_model_loss"].append(avg["train_team_model_loss"])
     train_hist["eval_returns"].append(avg["eval_return"])
     train_hist["eval_opp_returns"].append(avg["eval_opp_return"])
+    train_hist["eval_q_spread"].append(avg["eval_q_spread"])
     train_hist["eval_steps"].append(avg["eval_steps"])
     train_hist["eval_mae"].append(avg["eval_mae"])
     train_hist["eval_spatial"].append(avg["eval_spatial_error"])

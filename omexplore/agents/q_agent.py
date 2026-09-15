@@ -308,10 +308,13 @@ class QLearningAgent:
 
         tau = self.args.tau_end if eval else self._tau()
         entropy = Categorical(logits=qvals / self.args.tau_end).entropy().item()
+        # Q-spread across the 8 actions: the direct read on whether the
+        # advantage head is differentiating actions (dead advantage => ~0).
+        q_spread = (qvals.max() - qvals.min()).item()
 
         a = self.choose_action(qvals, tau, eval)
 
-        return a, g_map.squeeze(0), entropy
+        return a, g_map.squeeze(0), entropy, q_spread
 
     # ------------- training -------------
 
@@ -568,6 +571,7 @@ class QLearningAgent:
 
         ep_entropy = 0.0
         ep_shaped = 0.0
+        ep_qspread = 0.0
         q_losses, model_losses, team_losses = [], [], []
 
         # History buffers for the transformer (team-level: anchor obs stream;
@@ -608,11 +612,12 @@ class QLearningAgent:
             actions = {}
             for a in self.learn_ids:
                 s_aug = self.tracker.augment(obs[a])
-                act, _, step_entropy = self.select_action(
+                act, _, step_entropy, step_qspread = self.select_action(
                     obs[a], s_aug, history, team_history
                 )
                 actions[a] = act
                 ep_entropy += step_entropy
+                ep_qspread += step_qspread
 
             # The hostile team(s), controlled externally.
             opp_actions = opponent_agent.select_actions(obs)
@@ -625,8 +630,10 @@ class QLearningAgent:
             next_obs, rewards, done, info = self.env.step(actions)
             self.tracker.update(next_obs[anchor])
             next_belief = self.tracker.channels()
-            # True optimization return (goal shares + any reward shaping).
-            ep_shaped += sum(rewards[a] for a in self.learn_ids)
+
+            ep_shaped += info["team_rewards"].get(0, 0.0) + info["team_shaping"].get(
+                0, 0.0
+            )
             for a in self.learn_ids:
                 episode_transitions.append(
                     {
@@ -726,6 +733,7 @@ class QLearningAgent:
             "opp_return": opp_score,
             "shaped_return": ep_shaped,
             "avg_entropy": ep_entropy / max(1, (step + 1) * len(self.learn_ids)),
+            "avg_q_spread": ep_qspread / max(1, (step + 1) * len(self.learn_ids)),
             "avg_q_loss": _avg(q_losses),
             "avg_model_loss": _avg(model_losses),
             "avg_team_model_loss": _avg(team_losses),
@@ -751,6 +759,7 @@ class QLearningAgent:
 
         ep_entropy = 0.0
         ep_shaped = 0.0
+        ep_qspread = 0.0
         ep_mae_errors = []
         ep_spatial_errors = []
 
@@ -783,11 +792,12 @@ class QLearningAgent:
             g_map_anchor = None
             for a in self.learn_ids:
                 s_aug = self.tracker.augment(obs[a])
-                act, g_map, step_entropy = self.select_action(
+                act, g_map, step_entropy, step_qspread = self.select_action(
                     obs[a], s_aug, history, team_history, eval=True
                 )
                 actions[a] = act
                 ep_entropy += step_entropy
+                ep_qspread += step_qspread
                 if a == anchor:
                     g_map_anchor = g_map
 
@@ -811,7 +821,10 @@ class QLearningAgent:
 
             next_obs, rewards, done, info = self.env.step(actions)
             self.tracker.update(next_obs[anchor])
-            ep_shaped += sum(rewards[a] for a in self.learn_ids)
+
+            ep_shaped += info["team_rewards"].get(0, 0.0) + info["team_shaping"].get(
+                0, 0.0
+            )
 
             state_tensor = (
                 torch.from_numpy(obs[anchor]).float().unsqueeze(0).to(self.device)
@@ -849,6 +862,7 @@ class QLearningAgent:
             "opp_return": opp_score,
             "shaped_return": ep_shaped,
             "avg_entropy": ep_entropy / max(1, (step + 1) * len(self.learn_ids)),
+            "avg_q_spread": ep_qspread / max(1, (step + 1) * len(self.learn_ids)),
             "avg_mae_error": float(np.mean(ep_mae_errors)) if ep_mae_errors else None,
             "avg_spatial_error": (
                 float(np.mean(ep_spatial_errors)) if ep_spatial_errors else None
