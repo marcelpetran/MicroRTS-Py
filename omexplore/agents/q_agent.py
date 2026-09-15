@@ -11,7 +11,7 @@ from torch.types import Number
 
 from omexplore.envs.roadmap_foraging_env import TeamRoadmapEnv
 from omexplore.models.beliefs import BeliefTracker
-from omexplore.models.buffers import ReplayBuffer
+from omexplore.models.buffers import ReplayBuffer, ReservoirBuffer
 from omexplore.models.networks import QNet
 from omexplore.models.opponent_model import OpponentModel
 from omexplore.utils.labeling import claim_count_map, compute_agent_goals
@@ -73,7 +73,7 @@ class QLearningAgent:
         self.opt = torch.optim.Adam(self.q.parameters(), lr=self.args.lr, eps=1e-6)
 
         # Replay
-        self.replay = ReplayBuffer(self.args.capacity)
+        self.replay = ReservoirBuffer(self.args.capacity)
 
         # Belief map (team-level: the team obs already pools team vision).
         # Channel indices depend on the obs layout: (1, 4, 6) for the
