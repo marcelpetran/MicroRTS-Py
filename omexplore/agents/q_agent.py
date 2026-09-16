@@ -576,6 +576,7 @@ class QLearningAgent:
         opponent_agent.reset()
         if demo_policy is not None:
             demo_policy.reset()
+        self.tracker.set_food_prior(self.env.food_positions)
         self.tracker.reset(use_map_prior=self.args.belief_map_prior)
         anchor = self.learn_ids[0]
         self.tracker.update(obs[anchor])
@@ -780,6 +781,7 @@ class QLearningAgent:
         self.team_model.inference_model.eval()
         obs = self.env.reset()
         opponent_agent.reset()
+        self.tracker.set_food_prior(self.env.food_positions)
         self.tracker.reset(use_map_prior=self.args.belief_map_prior)
         anchor = self.learn_ids[0]
         self.tracker.update(obs[anchor])

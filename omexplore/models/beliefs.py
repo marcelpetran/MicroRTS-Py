@@ -3,8 +3,9 @@ import numpy as np
 
 class BeliefTracker:
     """
-    Belief channels derived ONLY from the observing side's observation
-    history. Update rules mirror the heuristic opponents' beliefs:
+    Belief channels derived from the observing side's observation history,
+    optionally seeded with an initial prior. Update rules mirror the
+    heuristic opponents' beliefs:
       - food: add where food observed, discard where cell observed empty [6]
       - opponents: cells where opponents were last seen, cleared when a cell
         is later observed visible-and-empty (they have left); opp_age keeps
@@ -41,6 +42,9 @@ class BeliefTracker:
         self.belief_food = set(self.prior_food) if use_map_prior else set()
         self.belief_opp = set(self.prior_opp) if use_map_prior else set()
         self.opp_age = 0
+
+    def set_food_prior(self, cells):
+        self.prior_food = set(cells)
 
     def update(self, obs):
         vis = obs[:, :, self.VIS_CH]
