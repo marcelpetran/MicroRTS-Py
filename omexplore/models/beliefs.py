@@ -46,6 +46,9 @@ class BeliefTracker:
     def set_food_prior(self, cells):
         self.prior_food = set(cells)
 
+    def set_opp_prior(self, cells):
+        self.prior_opp = set(cells)
+
     def update(self, obs):
         vis = obs[:, :, self.VIS_CH]
         for r, c in np.argwhere(vis == 1):
