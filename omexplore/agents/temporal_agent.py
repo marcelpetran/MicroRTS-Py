@@ -73,7 +73,7 @@ class QLearningAgent:
         self.opt = torch.optim.Adam(self.q.parameters(), lr=self.args.lr, eps=1e-6)
 
         # Replay
-        self.replay = ReservoirBuffer(self.args.capacity)
+        self.replay = ReplayBuffer(self.args.capacity)
 
         # Belief map (team-level: the team obs already pools team vision).
         # Channel indices depend on the obs layout: (1, 4, 6) for the
