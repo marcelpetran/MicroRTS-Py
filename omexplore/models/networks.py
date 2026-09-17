@@ -97,6 +97,93 @@ class QNet(nn.Module):
         return q_vals
 
 
+class QNetTemporal(nn.Module):
+    """Q(s, g, a) with a map-wide receptive field (temporal agent).
+
+    Drop-in replacement for QNet: same forward signature
+    (batch (B, H, W, F'), g_map (B, H, W), g_team_map (B, H, W)) -> (B, A),
+    built for the large MovingAI maps where QNet's 3x(3x3) backbone
+    (7x7 receptive field) cannot relate distant believed goals / OM
+    heatmap cells to the acting agent's position.
+
+    Differences vs QNet:
+    - Backbone: dilated 3x3 conv blocks (dilation 1..32, receptive field
+      ~253 cells) with GroupNorm (no batch statistics: eval-safe and
+      uncorrelated with TD targets, unlike BatchNorm).
+    - Readout: features at the SELF cell (gathered via the input's self
+      channel) + global avg/max pool, then dueling heads. Spatially
+      shared and ~1000x fewer parameters than QNet's Flatten->Linear
+      heads (~345M on den312d with qnet_hidden=512).
+    """
+
+    def __init__(self, args: OMGArgs):
+        super().__init__()
+        H, W, F_dim = args.state_shape
+        self.action_dim: int = args.action_dim
+        self.friendly_om: bool = getattr(args, "friendly_om", True)
+        c = args.cnn_hidden
+        groups = 8 if c % 8 == 0 else 1
+        input_channels = F_dim + args.belief_channels + (2 if self.friendly_om else 1)
+
+        blocks: list[nn.Module] = []
+        in_ch = input_channels
+        for d in (1, 2, 4, 8, 16, 32):
+            blocks += [
+                nn.Conv2d(in_ch, c, 3, padding=d, dilation=d),
+                nn.GroupNorm(groups, c),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(c, c, 3, padding=d, dilation=d),
+                nn.GroupNorm(groups, c),
+                nn.ReLU(inplace=True),
+            ]
+            in_ch = c
+        self.cnn = nn.Sequential(*blocks)
+
+        head_in = 3 * c  # self-cell features + global avg + global max
+        self.advantage_head = nn.Sequential(
+            nn.Linear(head_in, args.qnet_hidden),
+            nn.ReLU(),
+            nn.Linear(args.qnet_hidden, self.action_dim),
+        )
+        self.value_head = nn.Sequential(
+            nn.Linear(head_in, args.qnet_hidden),
+            nn.ReLU(),
+            nn.Linear(args.qnet_hidden, 1),
+        )
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0.01)
+
+    def forward(
+        self, batch: torch.Tensor, g_map: torch.Tensor, g_team_map: torch.Tensor = None
+    ) -> torch.Tensor:
+        s = batch.permute(0, 3, 1, 2)
+        chans = [s, g_map.unsqueeze(1)]
+        if self.friendly_om:
+            if g_team_map is None:
+                g_team_map = torch.zeros_like(g_map)
+            chans.append(g_team_map.unsqueeze(1))
+        feats = self.cnn(torch.cat(chans, dim=1))  # (B, c, H, W)
+
+        b, c, h, w = feats.shape
+        flat = feats.reshape(b, c, h * w)
+        # Features at the acting agent's cell (input state channel 2 = self).
+        self_pos = batch[:, :, :, 2].reshape(b, h * w).argmax(dim=1)  # (B,)
+        idx = self_pos.view(b, 1, 1).expand(b, c, 1)
+        f_self = flat.gather(2, idx).squeeze(2)  # (B, c)
+        f_avg = feats.mean(dim=(2, 3))
+        f_max = feats.amax(dim=(2, 3))
+        h_vec = torch.cat([f_self, f_avg, f_max], dim=1)  # (B, 3c)
+
+        adv = self.advantage_head(h_vec)
+        val = self.value_head(h_vec)
+        return val + adv - adv.mean(dim=1, keepdim=True)
+
+
 class QNetClassic(nn.Module):
     """
     RL Network: Q(s, a)

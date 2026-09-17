@@ -86,6 +86,7 @@ SPEC = {
     "shaping_beta": ("--shaping_beta", ("train",)),
     # devices
     "device": ("--device", ("pretrain", "train")),
+    "qnet_arch": ("--qnet_arch", ("train",)),
 }
 
 # Boolean keys: "key=true|false" (flag carries no value on the CLI).

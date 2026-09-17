@@ -38,6 +38,7 @@ warnings.filterwarnings("ignore", message=".*HIPBLAS_STATUS_NOT_SUPPORTED.*")
 import wandb
 from omexplore.agents.q_agent import QLearningAgent
 from omexplore.agents.team_agents import TeamAgent
+from omexplore.agents.temporal_agent import QLearningAgent as QLearningAgentTemporal
 from omexplore.envs.roadmap_foraging_env import TeamRoadmapEnv
 from omexplore.models.opponent_model import OpponentModel
 from omexplore.models.transformers import SpatialOpponentModel
@@ -87,6 +88,14 @@ parser.add_argument(
     default=1,
     help="n-step returns for the DDQN target (1 = previous 1-step TD; "
     "Rainbow-style 3-5 recommended)",
+)
+parser.add_argument(
+    "--qnet_arch",
+    type=str,
+    choices=["cnn", "temporal"],
+    default="cnn",
+    help="cnn = legacy QNet (3x conv3x3 + flatten heads); temporal = QNetTemporal "
+    "(dilated convs, map-wide RF, self-cell + pooled readout; use agents/temporal_agent.py)",
 )
 parser.add_argument("--qnet_dim", type=int, default=256)
 parser.add_argument("--cnn_hidden", type=int, default=64)
@@ -257,7 +266,10 @@ if args_parsed.pretrained_om:
         om.tgt_model.load_state_dict(sd)
     print(f"Loaded pretrained OMs from {args_parsed.pretrained_om}")
 
-agent = QLearningAgent(env, hostile_om, friendly_om, args=args)
+AgentCls = (
+    QLearningAgentTemporal if args_parsed.qnet_arch == "temporal" else QLearningAgent
+)
+agent = AgentCls(env, hostile_om, friendly_om, args=args)
 opponent = TeamAgent(env, team_id=1)
 
 print(f"learn_ids={agent.learn_ids} hostile_ids={agent.hostile_ids}")
