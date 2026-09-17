@@ -158,6 +158,20 @@ class GreedyMember(TeamMember):
         return self._follow_path(self.env.agents[self.agent_id])
 
 
+class RandomMember(TeamMember):
+    """Randomly chooses a believed goal each step; ignores team coordination."""
+
+    def act(self, taken):
+        if self.belief_food:
+            self.target = list(self.belief_food)[
+                np.random.randint(len(self.belief_food))
+            ]
+            self.path = []
+            return self._follow_path(self.env.agents[self.agent_id])
+        else:
+            return np.random.randint(8)  # wander (explore)
+
+
 class SimpleMember(TeamMember):
     """Commits to a random believed goal; ignores team coordination."""
 
@@ -308,6 +322,7 @@ PERSONAS = {
     "simple": SimpleMember,
     "switch": GreedySwitchMember,
     "stalker": StalkerMember,
+    "random": RandomMember,
 }
 
 

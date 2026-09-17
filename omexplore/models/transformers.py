@@ -88,7 +88,11 @@ class SpatialOpponentModel(nn.Module):
         """x, x_prev: (B, H, W, F). x_prev=None means 'no previous frame' (zeros)."""
         # (B, H, W, 2F): state + motion (x - x_prev)
         x_pair = torch.cat([x, x - x_prev], dim=-1)
-        x = x_pair.permute(0, 3, 1, 2).contiguous(memory_format=torch.channels_last)
+        x = x_pair.permute(0, 3, 1, 2)
+        if x.is_cuda:
+            x = x.contiguous(memory_format=torch.channels_last)
+        else:
+            x = x.contiguous()
         return self.feature_extractor(x)
 
     def forward(

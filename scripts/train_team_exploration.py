@@ -270,7 +270,7 @@ AgentCls = (
     QLearningAgentTemporal if args_parsed.qnet_arch == "temporal" else QLearningAgent
 )
 agent = AgentCls(env, hostile_om, friendly_om, args=args)
-opponent = TeamAgent(env, team_id=1)
+opponent = TeamAgent(env, team_id=1, personas=("random", "random"))
 
 print(f"learn_ids={agent.learn_ids} hostile_ids={agent.hostile_ids}")
 print(
