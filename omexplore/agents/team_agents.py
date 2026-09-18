@@ -162,14 +162,7 @@ class RandomMember(TeamMember):
     """Randomly chooses a believed goal each step; ignores team coordination."""
 
     def act(self, taken):
-        if self.belief_food:
-            self.target = list(self.belief_food)[
-                np.random.randint(len(self.belief_food))
-            ]
-            self.path = []
-            return self._follow_path(self.env.agents[self.agent_id])
-        else:
-            return np.random.randint(8)  # wander (explore)
+        return np.random.randint(8)
 
 
 class SimpleMember(TeamMember):
