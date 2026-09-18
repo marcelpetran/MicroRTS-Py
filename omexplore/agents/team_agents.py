@@ -159,7 +159,7 @@ class GreedyMember(TeamMember):
 
 
 class RandomMember(TeamMember):
-    """Randomly chooses a believed goal each step; ignores team coordination."""
+    """Uniformly random actions every step (pure-noise baseline)."""
 
     def act(self, taken):
         return np.random.randint(8)

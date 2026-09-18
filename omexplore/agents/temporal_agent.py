@@ -329,7 +329,7 @@ class QLearningAgent:
         hist_h_nxt: Dict[str, torch.Tensor],
         hist_f: Dict[str, torch.Tensor],
         hist_f_nxt: Dict[str, torch.Tensor],
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, Dict[str, float]]:
         """
         DDQN target computation using cached OM histories.
 
@@ -389,7 +389,16 @@ class QLearningAgent:
                 g_team_map_next = torch.sigmoid(gt_logits_next)  # (B, H, W)
 
         # 1. Q(s, g, a)
-        q_sa = self.q(squ, g_map, g_team_map).gather(1, a.unsqueeze(1)).squeeze(1)
+        q_all = self.q(squ, g_map, g_team_map)
+        q_sa = q_all.gather(1, a.unsqueeze(1)).squeeze(1)
+        with torch.no_grad():
+            qd = q_all.detach()
+            head_stats = {
+                "val_abs": qd.mean(dim=1).abs().mean().item(),
+                "adv_spread": (qd.max(dim=1).values - qd.min(dim=1).values)
+                .mean()
+                .item(),
+            }
 
         # 2. Target = n-step return + gamma^n * max_a' Q_tgt(s_{t+n}, a')
         with torch.no_grad():
@@ -408,14 +417,14 @@ class QLearningAgent:
             if clamp > 0:
                 target = torch.clamp(target, min=-clamp, max=clamp)
 
-        return q_sa, target
+        return q_sa, target, head_stats
 
     def update(self):
         if len(self.replay) < self.args.min_replay:
-            return (None, None, None, None)
+            return (None, None, None, None, None)
 
         if self.global_step % self.args.train_every != 0:
-            return (None, None, None, None)
+            return (None, None, None, None, None)
 
         batch_list = self.replay.sample(self.args.batch_size)
 
@@ -449,7 +458,7 @@ class QLearningAgent:
         }
 
         # Q-network update
-        q_sa, target = self.compute_targets(
+        q_sa, target, head_stats = self.compute_targets(
             batch_list, hist_h, hist_h_nxt, hist_f, hist_f_nxt
         )
         loss = F.smooth_l1_loss(q_sa, target, reduction="mean")
@@ -471,7 +480,7 @@ class QLearningAgent:
         model_loss = self.model.train_step(om_batch, cached_features=True)
         team_loss = self.team_model.train_step(team_batch, cached_features=True)
 
-        return loss_val, model_loss, team_loss, grad_norm
+        return loss_val, model_loss, team_loss, grad_norm, head_stats
 
     def _apply_hindsight_relabeling(
         self,
@@ -594,6 +603,7 @@ class QLearningAgent:
         ep_shaped = 0.0
         ep_qspread = 0.0
         q_losses, model_losses, team_losses, grad_norms = [], [], [], []
+        val_abses, adv_spreads = [], []
 
         # History buffers for the transformer (team-level: anchor obs stream;
         # team members' obs differ only in the self channel). One rolling
@@ -709,11 +719,14 @@ class QLearningAgent:
             # Train step (skipped in DQfD warmup: collection only).
             if demo_policy is None:
                 self.global_step += 1
-                Q_loss, model_loss, team_loss, grad_norm = self.update()
+                Q_loss, model_loss, team_loss, grad_norm, head_stats = self.update()
                 q_losses.append(Q_loss)
                 model_losses.append(model_loss)
                 team_losses.append(team_loss)
                 grad_norms.append(grad_norm)
+                if head_stats is not None:
+                    val_abses.append(head_stats["val_abs"])
+                    adv_spreads.append(head_stats["adv_spread"])
 
             obs = next_obs
 
@@ -767,6 +780,8 @@ class QLearningAgent:
             "avg_model_loss": _avg(model_losses),
             "avg_team_model_loss": _avg(team_losses),
             "avg_grad_norm": _avg(grad_norms),
+            "avg_val_abs": _avg(val_abses),
+            "avg_adv_spread": _avg(adv_spreads),
             "frac_clipped": (
                 float(np.mean([g > 5.0 for g in grad_norms if g is not None]))
                 if any(g is not None for g in grad_norms)

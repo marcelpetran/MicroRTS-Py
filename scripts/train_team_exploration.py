@@ -6,10 +6,6 @@ vs. a scripted greedy TeamAgent on a MovingAI benchmark map.
 Run (from project root):
   python scripts/train_team_exploration.py --map den312d --episodes 3000
 
-Ablation (Q-net without friendly-OM conditioning; OM still trained for
-comparable metrics):
-  ... --no_friendly_om
-
 Defaults are sized for the 81x65 den312d map (see roadmap notes):
   max_history_length=8   (one collation = B x L x H x W x F floats)
   capacity=20000         (~200KB/transition in RAM)
@@ -119,15 +115,9 @@ parser.add_argument(
     "--friendly_om",
     dest="friendly_om",
     action="store_true",
-    default=True,
+    default=False,
     help="Condition the Q-net on the friendly-OM heatmap (ablation flag; the "
     "friendly OM is trained and logged either way)",
-)
-parser.add_argument(
-    "--no_friendly_om",
-    dest="friendly_om",
-    action="store_false",
-    help="Ablation: Q-net without friendly-OM conditioning",
 )
 parser.add_argument(
     "--pretrained_om",
@@ -177,6 +167,14 @@ parser.add_argument(
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--folder_id", type=int, default=0)
 parser.add_argument("--wandb_project", type=str, default="om-team-exploration")
+parser.add_argument(
+    "--opponent_personas",
+    type=str,
+    default="random",
+    help="Comma-separated scripted-opponent personas (team_agents.PERSONAS: "
+    "greedy, simple, switch, stalker, random). A single entry repeats for "
+    "every opponent member, so the same config works for any team size.",
+)
 parser.add_argument(
     "--no_wandb", action="store_true", help="Disable wandb (local logging only)"
 )
@@ -270,7 +268,19 @@ AgentCls = (
     QLearningAgentTemporal if args_parsed.qnet_arch == "temporal" else QLearningAgent
 )
 agent = AgentCls(env, hostile_om, friendly_om, args=args)
-opponent = TeamAgent(env, team_id=1, personas=("random", "random"))
+opp_team_size = len(env.get_team_members(1))
+opp_personas = tuple(
+    p.strip() for p in args_parsed.opponent_personas.split(",") if p.strip()
+)
+if len(opp_personas) == 1:
+    opp_personas = opp_personas * opp_team_size
+if len(opp_personas) != opp_team_size:
+    parser.error(
+        f"--opponent_personas {args_parsed.opponent_personas!r} gives "
+        f"{len(opp_personas)} entries but the opponent team has "
+        f"{opp_team_size} members"
+    )
+opponent = TeamAgent(env, team_id=1, personas=opp_personas)
 
 print(f"learn_ids={agent.learn_ids} hostile_ids={agent.hostile_ids}")
 print(
@@ -343,6 +353,7 @@ for epoch in range(num_epochs):
         desc=f"Epoch {epoch + 1:02d}/{num_epochs} [Train]",
         leave=False,
     )
+    ep_val, ep_advspd = [], []
     for _ in pbar:
         stats = agent.run_episode(opponent, max_steps=args_parsed.max_steps)
         ep_returns.append(stats["return"])
@@ -355,6 +366,8 @@ for epoch in range(num_epochs):
         ep_sh.append(stats["shaped_return"])
         ep_qspd.append(stats["avg_q_spread"])
         ep_gn.append(stats["avg_grad_norm"])
+        ep_val.append(stats["avg_val_abs"])
+        ep_advspd.append(stats["avg_adv_spread"])
         ep_clip.append(stats["frac_clipped"])
         pbar.set_postfix(
             ret=f"{stats['return']:.1f}",
@@ -398,6 +411,8 @@ for epoch in range(num_epochs):
         "train_shaped_return": _avg(ep_sh),
         "train_q_spread": _avg(ep_qspd),
         "train_grad_norm": _avg(ep_gn),
+        "train_val_abs": _avg(ep_val),
+        "train_adv_spread": _avg(ep_advspd),
         "train_frac_clipped": _avg(ep_clip),
         "eval_return": _avg(ev_rets),
         "eval_opp_return": _avg(ev_opp),
@@ -453,6 +468,8 @@ for epoch in range(num_epochs):
         f"(opp {avg['eval_opp_coverage']:.3f}) | Q {avg['train_q_loss']:.3f} "
         f"| OM {avg['train_model_loss']:.3f} | tOM {avg['train_team_model_loss']:.3f} "
         f"| ΔQ(max-min) {avg['train_q_spread']:.3f} "
+        f"train val {avg['train_val_abs']:.3f} "
+        f"adv spread {avg['train_adv_spread']:.3f} "
         f"| ‖∇‖ {avg['train_grad_norm']:.2f} "
         f"(clip {avg['train_frac_clipped'] * 100:.0f}%) "
         f"| Entropy {avg['train_entropy']:.3f} "
