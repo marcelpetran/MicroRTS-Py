@@ -86,6 +86,25 @@ parser.add_argument(
     "Rainbow-style 3-5 recommended)",
 )
 parser.add_argument(
+    "--lam",
+    type=float,
+    default=-1.0,
+    help="TD(lambda) compound returns (Daley & Amato 2019): geometrically "
+    "mixture all n-step returns computed fresh at train time from the "
+    "stored episode tails. >= 0 enables (0.8-0.9 typical with gamma~0.9); "
+    "negative (default) keeps the n-step target. Requires --qnet_arch temporal "
+    "and the circular FIFO replay (the tail walk needs contiguous episodes). "
+    "n_step is ignored in this mode.",
+)
+parser.add_argument(
+    "--lam_horizon",
+    type=int,
+    default=0,
+    help="Max lambda-recursion tail length per target (0 = whole episode). "
+    "Cap this on long-episode maps to bound the per-update V-evaluation "
+    "cost; truncation bias is O((gamma*lam)^horizon).",
+)
+parser.add_argument(
     "--qnet_arch",
     type=str,
     choices=["cnn", "temporal"],
@@ -231,6 +250,8 @@ args = OMGArgs(
     max_steps=args_parsed.max_steps,
     gamma=args_parsed.gamma,
     n_step=args_parsed.n_step,
+    lam=args_parsed.lam,
+    lam_horizon=args_parsed.lam_horizon,
     target_clamp=args_parsed.target_clamp,
     tau_start=args_parsed.tau_start,
     tau_end=args_parsed.tau_end,
@@ -267,6 +288,11 @@ if args_parsed.pretrained_om:
 AgentCls = (
     QLearningAgentTemporal if args_parsed.qnet_arch == "temporal" else QLearningAgent
 )
+if args_parsed.lam >= 0 and args_parsed.qnet_arch != "temporal":
+    parser.error(
+        "--lam requires --qnet_arch temporal (lambda-returns are "
+        "implemented in temporal_agent.py only)"
+    )
 agent = AgentCls(env, hostile_om, friendly_om, args=args)
 opp_team_size = len(env.get_team_members(1))
 opp_personas = tuple(

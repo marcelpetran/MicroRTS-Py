@@ -6,6 +6,10 @@ class OMGArgs:
     device: str = "cpu"  # cpu, cuda, mps
     gamma: float = 0.985
     n_step: int = 1  # n-step returns for the DDQN target (1 = plain 1-step TD)
+    lam: float = (
+        -1.0
+    )  # lambda for lambda-returns (Daley & Amato 2019); <0 = off (n-step)
+    lam_horizon: int = 0  # max lambda-recursion tail length (0 = whole episode)
     target_clamp: float = 15.0
     lr: float = 3e-4
     lr_om: float = 1e-4

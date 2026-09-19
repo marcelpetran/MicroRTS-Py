@@ -89,6 +89,9 @@ class QLearningAgent:
 
         # Schedules
         self.global_step = 0
+        # Unique id per collected episode: lets the lambda-return walk find
+        # a sampled transition's same-episode successors in the replay buffer.
+        self._episode_counter = 0
 
     def reset(self):
         pass
@@ -329,6 +332,7 @@ class QLearningAgent:
         hist_h_nxt: Dict[str, torch.Tensor],
         hist_f: Dict[str, torch.Tensor],
         hist_f_nxt: Dict[str, torch.Tensor],
+        lam_targets: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, Dict[str, float]]:
         """
         DDQN target computation using cached OM histories.
@@ -337,6 +341,11 @@ class QLearningAgent:
             + (1 - done_n) * gamma^n * Q_tgt(s_{t+n}, argmax_a Q(s_{t+n}, a)).
         For n_step=1 this reduces exactly to the previous 1-step target
         (n_reward = r, next_state_n = next_state, done_n = done).
+
+        lam_targets: precomputed lambda-return targets (see
+        _compute_lambda_targets). When given, the bootstrap section below is
+        skipped entirely -- the mixed multi-step return is already stored in
+        the tensor -- and only the clamp (if configured) is applied.
 
         hist_h / hist_h_nxt: hostile-OM cached histories; the "nxt" windows are
         collated at hist_len_n (the bootstrap state t+n).
@@ -348,25 +357,9 @@ class QLearningAgent:
         squ = torch.from_numpy(
             np.stack([self._augment(b["state"], b["belief"]) for b in batch])
         ).to(self.device)
-        # Bootstrap state / belief at t+n (== next_state / next_belief when
-        # n_step=1).
-        sp = torch.from_numpy(
-            np.array([b["next_state_n"] for b in batch], dtype=np.float32)
-        ).to(self.device)
-        spu = torch.from_numpy(
-            np.stack(
-                [self._augment(b["next_state_n"], b["next_belief_n"]) for b in batch]
-            )
-        ).to(self.device)
         a = torch.from_numpy(np.array([b["action"] for b in batch], dtype=np.int64)).to(
             self.device
         )
-        r = torch.from_numpy(
-            np.array([b["n_reward"] for b in batch], dtype=np.float32)
-        ).to(self.device)
-        done = torch.from_numpy(
-            np.array([b["done_n"] for b in batch], dtype=np.float32)
-        ).to(self.device)
 
         with torch.no_grad():
             g_logits = self.model.tgt_model(s, hist_h, cached_features=True)
@@ -375,18 +368,9 @@ class QLearningAgent:
             # Friendly claim maps from the same team-level history (the acting
             # agent's own goal is not part of the label/prediction).
             g_team_map = None
-            g_team_map_next = None
             if self.args.friendly_om:
                 gt_logits = self.team_model.tgt_model(s, hist_f, cached_features=True)
                 g_team_map = torch.sigmoid(gt_logits)  # (B, H, W)
-
-            g_logits_next = self.model.tgt_model(sp, hist_h_nxt, cached_features=True)
-            g_map_next = torch.sigmoid(g_logits_next)  # (B, H, W)
-            if self.args.friendly_om:
-                gt_logits_next = self.team_model.tgt_model(
-                    sp, hist_f_nxt, cached_features=True
-                )
-                g_team_map_next = torch.sigmoid(gt_logits_next)  # (B, H, W)
 
         # 1. Q(s, g, a)
         q_all = self.q(squ, g_map, g_team_map)
@@ -399,6 +383,44 @@ class QLearningAgent:
                 .mean()
                 .item(),
             }
+
+        # Lambda-return path: the target tensor is already the full mixed
+        # return; only the safety clamp remains.
+        if lam_targets is not None:
+            with torch.no_grad():
+                target = lam_targets
+                clamp = self.args.target_clamp
+                if clamp > 0:
+                    target = torch.clamp(target, min=-clamp, max=clamp)
+            return q_sa, target, head_stats
+
+        # Bootstrap state / belief at t+n (== next_state / next_belief when
+        # n_step=1).
+        sp = torch.from_numpy(
+            np.array([b["next_state_n"] for b in batch], dtype=np.float32)
+        ).to(self.device)
+        spu = torch.from_numpy(
+            np.stack(
+                [self._augment(b["next_state_n"], b["next_belief_n"]) for b in batch]
+            )
+        ).to(self.device)
+        r = torch.from_numpy(
+            np.array([b["n_reward"] for b in batch], dtype=np.float32)
+        ).to(self.device)
+        done = torch.from_numpy(
+            np.array([b["done_n"] for b in batch], dtype=np.float32)
+        ).to(self.device)
+
+        with torch.no_grad():
+            g_logits_next = self.model.tgt_model(sp, hist_h_nxt, cached_features=True)
+            g_map_next = torch.sigmoid(g_logits_next)  # (B, H, W)
+            if self.args.friendly_om:
+                gt_logits_next = self.team_model.tgt_model(
+                    sp, hist_f_nxt, cached_features=True
+                )
+                g_team_map_next = torch.sigmoid(gt_logits_next)  # (B, H, W)
+            else:
+                g_team_map_next = None
 
         # 2. Target = n-step return + gamma^n * max_a' Q_tgt(s_{t+n}, a')
         with torch.no_grad():
@@ -426,7 +448,12 @@ class QLearningAgent:
         if self.global_step % self.args.train_every != 0:
             return (None, None, None, None, None)
 
-        batch_list = self.replay.sample(self.args.batch_size)
+        lam_targets = None
+        if self.args.lam >= 0:
+            idxs, batch_list = self.replay.sample_with_indices(self.args.batch_size)
+            lam_targets = self._compute_lambda_targets(idxs)
+        else:
+            batch_list = self.replay.sample(self.args.batch_size)
 
         # One shared cache: per-step OM features stored at rollout are collated
         # into the current/next history windows for each OM (no re-embedding).
@@ -459,7 +486,7 @@ class QLearningAgent:
 
         # Q-network update
         q_sa, target, head_stats = self.compute_targets(
-            batch_list, hist_h, hist_h_nxt, hist_f, hist_f_nxt
+            batch_list, hist_h, hist_h_nxt, hist_f, hist_f_nxt, lam_targets=lam_targets
         )
         loss = F.smooth_l1_loss(q_sa, target, reduction="mean")
         loss_val = loss.item()
@@ -533,8 +560,15 @@ class QLearningAgent:
         gets done_n=True (no bootstrap). n_step=1 reproduces the previous
         1-step semantics exactly ("n_reward" == "reward", next_state_n ==
         next_state, done_n == done).
+
+        With lambda-returns enabled (args.lam >= 0) the n-step machinery is
+        forced to 1-step semantics: the lambda walk bootstraps every stream
+        position from its OWN next state, so next_state_n / next_belief_n /
+        hist_len_n must describe t+1 (exactly the fields the 1-step DDQN
+        baseline used). The lambda target itself is computed at train time
+        in _compute_lambda_targets; n_step is ignored in this mode.
         """
-        n = max(1, int(self.args.n_step))
+        n = 1 if self.args.lam >= 0 else max(1, int(self.args.n_step))
         gamma = self.args.gamma
         by_agent: Dict[int, List[Dict]] = {}
         for t in episode_transitions:
@@ -559,7 +593,135 @@ class QLearningAgent:
                     t["next_belief_n"] = last["next_belief"]
                     t["hist_len_n"] = last["hist_len"] + 1
 
-    # ------------- rollout -------------
+    # ------------- lambda-returns (Daley & Amato 2019) -------------
+
+    def _has_successor(self, slot: int, key, aid: int, step_idx: int) -> bool:
+        """True if the same-agent, same-episode transition at step_idx+1 is
+        still resident at slot+stride (episode pushes are contiguous and
+        FIFO eviction is oldest-first, so successors outlive their
+        predecessors -- the same invariant next_state_n references rely on)."""
+        stride = max(1, len(self.learn_ids))
+        nxt = (slot + stride) % self.replay.capacity
+        if nxt >= self.replay.size:
+            return False
+        cand = self.replay.buf[nxt]
+        return (
+            cand is not None
+            and cand["episode_key"] == key
+            and cand["agent_id"] == aid
+            and cand["step_idx"] == step_idx + 1
+        )
+
+    def _walk_tail(self, slot: int) -> tuple[List[int], bool]:
+        """Collect the contiguous successor slots of a sampled transition.
+
+        Returns (tail, cut): tail = [slot, successor, ...] along one agent's
+        stream within one episode; cut = True when the walk stopped at
+        lam_horizon while the episode continues (the recursion then ends with
+        a 1-step bootstrap instead of the terminal reward).
+        """
+        buf = self.replay.buf
+        head = buf[slot]
+        key, aid, sid = head["episode_key"], head["agent_id"], head["step_idx"]
+        horizon = int(self.args.lam_horizon)
+        tail = [slot]
+        while True:
+            if not self._has_successor(tail[-1], key, aid, sid + len(tail) - 1):
+                return tail, False
+            if horizon > 0 and len(tail) >= horizon:
+                return tail, True
+            tail.append((tail[-1] + max(1, len(self.learn_ids))) % self.replay.capacity)
+
+    def _eval_next_values(self, transitions: List[Dict]) -> torch.Tensor:
+        """DDQN value estimates V(s') for each transition's 1-step bootstrap
+        state, using the cached OM next-windows -- exactly the estimator
+        compute_targets uses for its n-step bootstrap (online-net argmax,
+        target-net evaluation)."""
+        sp = torch.from_numpy(
+            np.array([b["next_state_n"] for b in transitions], dtype=np.float32)
+        ).to(self.device)
+        spu = torch.from_numpy(
+            np.stack(
+                [
+                    self._augment(b["next_state_n"], b["next_belief_n"])
+                    for b in transitions
+                ]
+            )
+        ).to(self.device)
+        hist_h_nxt = self.model.collate_cached_history_pair(
+            transitions, "feats_hostile"
+        )["nxt"]
+        hist_f_nxt = self.team_model.collate_cached_history_pair(
+            transitions, "feats_friendly"
+        )["nxt"]
+        with torch.no_grad():
+            g_map_next = torch.sigmoid(
+                self.model.tgt_model(sp, hist_h_nxt, cached_features=True)
+            )
+            g_team_map_next = None
+            if self.args.friendly_om:
+                g_team_map_next = torch.sigmoid(
+                    self.team_model.tgt_model(sp, hist_f_nxt, cached_features=True)
+                )
+            q_val = self.q(spu, g_map_next, g_team_map_next)
+            noise = torch.rand_like(q_val) * 1e-6  # tie-breaking noise
+            best_actions = (q_val + noise).argmax(dim=1, keepdim=True)
+            v_next = (
+                self.q_tgt(spu, g_map_next, g_team_map_next)
+                .gather(1, best_actions)
+                .squeeze(1)
+            )
+        return v_next
+
+    def _compute_lambda_targets(self, idxs: List[int]) -> torch.Tensor:
+        """On-the-fly lambda-return targets for the sampled transitions.
+
+        Forward-view TD(lambda) over the stored episode tails (the compound
+        return of Daley & Amato, "Reconciling lambda-Returns with Experience
+        Replay", 2019), evaluated with the CURRENT networks so the bootstrap
+        terms are as fresh as the 1-step baseline's:
+
+            T_t = r_t + gamma*(1-lam)*V(s_{t+1}) + gamma*lam*T_{t+1}
+
+        with T = r at the episode's last transition (terminal, matching the
+        n-step done_n semantics) and T = r + gamma*V at a lam_horizon cut.
+        V uses the same DDQN double estimator as the n-step bootstrap.
+
+        The successor walk relies on the FIFO circular replay: transitions of
+        an episode are pushed contiguously (interleaved per agent), so the
+        same-agent successor of slot j is j+stride while episode_key,
+        agent_id and step_idx all match.
+        """
+        walks = [self._walk_tail(slot) for slot in idxs]
+
+        # Deduplicated bootstrap evaluations: overlapping tails share V(s').
+        eval_slots: Dict[int, None] = {}
+        for tail, cut in walks:
+            for s in tail if cut else tail[:-1]:
+                eval_slots.setdefault(s, None)
+        vnext: Dict[int, float] = {}
+        if eval_slots:
+            slots = list(eval_slots)
+            values = self._eval_next_values(
+                [self.replay.buf[s] for s in slots]
+            ).tolist()
+            vnext = dict(zip(slots, values))
+
+        gamma, lam = self.args.gamma, self.args.lam
+        buf = self.replay.buf
+        targets = []
+        for tail, cut in walks:
+            # Seed: value-bootstrap at a horizon cut; plain 0 at the terminal
+            # transition (its reward-only handling below yields T = r).
+            T = vnext[tail[-1]] if cut else 0.0
+            for slot in reversed(tail):
+                tr = buf[slot]
+                v = vnext.get(slot, 0.0)  # absent for the terminal transition
+                T = tr["reward"] + gamma * (1.0 - lam) * v + gamma * lam * T
+            targets.append(T)
+        return torch.tensor(targets, dtype=torch.float32, device=self.device)
+
+    # ------------- rollout --------------
 
     def run_episode(
         self, opponent_agent, max_steps: int = 500, demo_policy=None
@@ -626,6 +788,8 @@ class QLearningAgent:
         ep_feats_hostile = []
         ep_feats_friendly = []
         step_records = []
+        ep_key = self._episode_counter
+        self._episode_counter += 1
 
         for step in range(max_steps):
             history = {
@@ -675,6 +839,7 @@ class QLearningAgent:
                 episode_transitions.append(
                     {
                         "agent_id": a,
+                        "episode_key": ep_key,
                         "state": obs[a].copy(),
                         "belief": belief_now.copy(),
                         "action": actions[a],
