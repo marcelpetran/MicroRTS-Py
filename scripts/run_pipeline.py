@@ -88,6 +88,7 @@ SPEC = {
     "device": ("--device", ("pretrain", "train")),
     "qnet_arch": ("--qnet_arch", ("train",)),
     "lam": ("--lam", ("train",)),
+    "lam_horizon": ("--lam_horizon", ("train",)),
 }
 
 # Boolean keys: "key=true|false" (flag carries no value on the CLI).
