@@ -141,11 +141,20 @@ obs_sample = env.reset()
 H, W, F_dim = obs_sample[0].shape
 NUM_ACTIONS = 4
 
-wandb.init(
-    project="om-simple-foraging",
-    config=args_parsed,
-    name=f"map{args_parsed.map}_vs_{args_parsed.opponent}_id{args_parsed.folder_id}",
-)
+run_name = f"map{args_parsed.map}_vs_{args_parsed.opponent}_id{args_parsed.folder_id}"
+try:
+    wandb.init(project="om-simple-foraging", config=args_parsed, name=run_name)
+except wandb.errors.CommError as e:
+    print(
+        f"wandb.init failed ({e}); switching to offline mode. "
+        "Sync the run afterwards with: wandb sync ./wandb/offline-run-*"
+    )
+    wandb.init(
+        project="om-simple-foraging",
+        config=args_parsed,
+        name=run_name,
+        mode="offline",
+    )
 
 args = OMGArgs(
     device=device,
