@@ -32,7 +32,7 @@ from tqdm import tqdm
 warnings.filterwarnings("ignore", message=".*HIPBLAS_STATUS_NOT_SUPPORTED.*")
 
 import wandb
-from omexplore.agents.q_agent import QLearningAgent
+from omexplore.agents.q_agent_team import QLearningAgent
 from omexplore.agents.team_agents import TeamAgent
 from omexplore.agents.temporal_agent import QLearningAgent as QLearningAgentTemporal
 from omexplore.envs.roadmap_foraging_env import TeamRoadmapEnv

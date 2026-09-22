@@ -169,6 +169,10 @@ args = OMGArgs(
     dim_feedforward=args_parsed.dim_feedforward,
     dropout=args_parsed.dropout,
     true_intent=args_parsed.true_intent,
+    # 1v1: no teammate to model. Disables the friendly-OM input channel in
+    # QNet so the network matches the thesis-era Q(s, g) interface.
+    # Friendly OM is only used in the team/graph (MTSP) settings.
+    friendly_om=False,
 )
 
 # Initialize Heuristic Opponent
@@ -317,7 +321,7 @@ for epoch in range(num_epochs):
         [],
         [],
     )
-    epoch_eval_mae_errors, epoch_eval_spatial_errors = [], []
+    epoch_eval_kl_errors, epoch_eval_spatial_errors = [], []
 
     # Training
     pbar = tqdm(
@@ -342,15 +346,17 @@ for epoch in range(num_epochs):
         eval_rets.append(test_stats["return"])
         eval_opp_rets.append(test_stats["opp_return"])
         eval_steps.append(test_stats["steps"])
-        epoch_eval_mae_errors.append(test_stats["avg_mae_error"])
+        epoch_eval_kl_errors.append(test_stats["avg_kl_error"])
         epoch_eval_spatial_errors.append(test_stats["avg_spatial_error"])
 
     avg_eval_ret = sum(eval_rets) / eval_episodes
     avg_eval_opp = sum(eval_opp_rets) / eval_episodes
     avg_eval_steps = sum(eval_steps) / eval_episodes
-    avg_eval_mae_error = sum(epoch_eval_mae_errors) / len(epoch_eval_mae_errors)
-    avg_eval_spatial_error = sum(epoch_eval_spatial_errors) / len(
-        epoch_eval_spatial_errors
+    valid_kl = [e for e in epoch_eval_kl_errors if e is not None]
+    valid_spatial = [e for e in epoch_eval_spatial_errors if e is not None]
+    avg_eval_kl_error = sum(valid_kl) / len(valid_kl) if valid_kl else 0.0
+    avg_eval_spatial_error = (
+        sum(valid_spatial) / len(valid_spatial) if valid_spatial else 0.0
     )
 
     avg_train_ret = sum(epoch_returns) / len(epoch_returns)
@@ -379,7 +385,7 @@ for epoch in range(num_epochs):
             "om/eval_return": avg_eval_ret,
             "om/eval_opp_return": avg_eval_opp,
             "om/eval_steps": avg_eval_steps,
-            "om/eval_mae": avg_eval_mae_error,
+            "om/eval_kl_error": avg_eval_kl_error,
             "om/eval_spatial_error": avg_eval_spatial_error,
             "epoch": epoch + 1,
         }

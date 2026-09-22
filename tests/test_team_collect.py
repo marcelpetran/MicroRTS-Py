@@ -25,7 +25,7 @@ import numpy as np
 import torch
 
 import wandb
-from omexplore.agents.q_agent import QLearningAgent
+from omexplore.agents.q_agent_team import QLearningAgent
 from omexplore.agents.team_agents import TeamAgent
 from omexplore.collect_data import run_team_collection_episode
 from omexplore.envs.roadmap_foraging_env import TeamRoadmapEnv

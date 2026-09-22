@@ -23,7 +23,7 @@ import numpy as np
 import torch
 
 import wandb
-from omexplore.agents.q_agent import QLearningAgent
+from omexplore.agents.q_agent_team import QLearningAgent
 from omexplore.agents.team_agents import TeamAgent
 from omexplore.envs.roadmap_foraging_env import TeamRoadmapEnv
 from omexplore.models.opponent_model import OpponentModel
@@ -246,7 +246,7 @@ def t_update_plumbing():
     # Force an update by driving global_step to a train_every boundary.
     while agent.global_step % agent.args.train_every != 0:
         agent.global_step += 1
-    loss_val, model_loss, team_loss = agent.update()
+    loss_val, model_loss, team_loss, grad_norm = agent.update()
 
     assert loss_val is not None, "update() did not run (min_replay/step guard)"
     assert torch.isfinite(torch.tensor(loss_val)), f"Q loss non-finite: {loss_val}"

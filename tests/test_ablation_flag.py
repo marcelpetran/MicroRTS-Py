@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 import wandb
-from omexplore.agents.q_agent import QLearningAgent
+from omexplore.agents.q_agent_team import QLearningAgent
 from omexplore.agents.team_agents import TeamAgent
 from omexplore.envs.roadmap_foraging_env import TeamRoadmapEnv
 from omexplore.models.opponent_model import OpponentModel

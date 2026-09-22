@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
 
 import wandb
-from omexplore.agents.q_agent import QLearningAgent
+from omexplore.agents.q_agent_team import QLearningAgent
 from omexplore.agents.team_agents import TeamAgent
 from omexplore.envs.roadmap_foraging_env import REWARD_GOAL, TeamRoadmapEnv
 from omexplore.models.opponent_model import OpponentModel
