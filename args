@@ -5,11 +5,11 @@ greedy
 --max_steps
 50
 --episodes
-100
+30_000
 --episodes_per_epoch
-10
+500
 --pretrain_epochs
-1
+20
 --batch_size
 128
 --replay_capacity
