@@ -322,11 +322,11 @@ class QLearningAgent:
         sp = torch.from_numpy(
             np.array([b["next_state_n"] for b in batch], dtype=np.float32)
         ).to(self.device)
-        spu = torch.from_numpy(
-            np.stack(
-                [self._augment(b["next_state_n"], b["next_belief_n"]) for b in batch]
-            )
-        ).to(self.device)
+        spu = (
+            torch.from_numpy(np.stack([b["next_state_aug_n"] for b in batch]))
+            .float()
+            .to(self.device)
+        )
         a = torch.from_numpy(np.array([b["action"] for b in batch], dtype=np.int64)).to(
             self.device
         )
@@ -341,17 +341,6 @@ class QLearningAgent:
             hist = history
             g_logits = self.model.tgt_model(s, hist, cached_features=False)
             g_map = F.softmax(g_logits.view(len(batch), -1), dim=-1).view_as(g_logits)
-
-            hist_states = history["states"].clone()  # [B, max_len, H, W, F_dim]
-            hist_mask = history["mask"].clone()  # [B, max_len]
-
-            # Shift left: drop timestep 0, move everything back
-            hist_states[:, :-1] = hist_states[:, 1:]
-            hist_mask[:, :-1] = hist_mask[:, 1:]
-
-            hist_states[:, -1] = s
-            hist_mask[:, -1] = True
-
             hist_next = self.model.collate_history(batch, len_key="hist_len_n")
             g_logits_next = self.model.tgt_model(sp, hist_next, cached_features=False)
             g_map_next = F.softmax(g_logits_next.view(len(batch), -1), dim=-1).view_as(
@@ -361,7 +350,6 @@ class QLearningAgent:
         # 1. Q(s, g, a)
         q_sa = self.q(squ, g_map).gather(1, a.unsqueeze(1)).squeeze(1)
 
-        # 2. Target = r + gamma * max_a' Q_tgt(s', g, a')
         with torch.no_grad():
             q_val = self.q(spu, g_map_next)
             noise = torch.rand_like(q_val) * 1e-6
@@ -369,7 +357,7 @@ class QLearningAgent:
 
             q_next = self.q_tgt(spu, g_map_next).gather(1, best_actions).squeeze(1)
 
-            target = r + (1.0 - done) * self.args.gamma * q_next
+            target = r + (1.0 - done) * (self.args.gamma**self.args.n_step) * q_next
             target = torch.clamp(target, min=-15.0, max=15.0)
 
         return q_sa, target
