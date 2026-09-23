@@ -129,6 +129,12 @@ parser.add_argument(
     default=1,
     help="Number of steps for n-step returns in Q-learning",
 )
+parser.add_argument(
+    "--vision_radius",
+    type=int,
+    default=5,
+    help="Vision radius for the agents in the environment",
+)
 args_parsed = parser.parse_args()
 
 # Setup directories
@@ -140,7 +146,9 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 
 env = SimpleForagingEnv(
-    max_steps=args_parsed.max_steps, map_layout=map_layouts[args_parsed.map - 1]
+    max_steps=args_parsed.max_steps,
+    map_layout=map_layouts[args_parsed.map - 1],
+    vision_radius=args_parsed.vision_radius,
 )
 
 obs_sample = env.reset()
