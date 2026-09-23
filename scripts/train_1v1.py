@@ -184,7 +184,7 @@ args = OMGArgs(
     dim_feedforward=args_parsed.dim_feedforward,
     dropout=args_parsed.dropout,
     true_intent=args_parsed.true_intent,
-    n_step=args_parsed.parsed.n_step,
+    n_step=args_parsed.n_step,
     friendly_om=False,
 )
 
