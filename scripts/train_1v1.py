@@ -123,6 +123,12 @@ parser.add_argument(
     default=False,
     help="Watch the global state, shrouded maps, and OM predictions in real-time",
 )
+parser.add_argument(
+    "--n_step",
+    type=int,
+    default=3,
+    help="Number of steps for n-step returns in Q-learning",
+)
 args_parsed = parser.parse_args()
 
 # Setup directories
@@ -178,9 +184,7 @@ args = OMGArgs(
     dim_feedforward=args_parsed.dim_feedforward,
     dropout=args_parsed.dropout,
     true_intent=args_parsed.true_intent,
-    # 1v1: no teammate to model. Disables the friendly-OM input channel in
-    # QNet so the network matches the thesis-era Q(s, g) interface.
-    # Friendly OM is only used in the team/graph (MTSP) settings.
+    n_step=args_parsed.parsed.n_step,
     friendly_om=False,
 )
 
