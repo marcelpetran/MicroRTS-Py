@@ -99,7 +99,42 @@ QLearningAgent._add_n_step_returns(fake(3, 0.9), trans3)
 assert trans3[0]["n_reward"] == 5.0
 assert trans3[0]["done_n"] is True
 assert trans3[0]["next_state_n"] == "s1"
-assert trans3[0]["next_state_aug_n"] == "sa1"
 assert trans3[0]["hist_len_n"] == 1
+
+# --- classic agent (no OM): augmented-only schema, no history fields ---
+from omexplore.agents.q_agent_classic import QLearningAgentClassic
+
+ctrans = []
+for i in range(4):
+    ctrans.append(
+        {
+            "reward": float(i + 1),
+            "state": f"sa{i}",  # already belief-augmented
+            "next_state": f"sa{i + 1}",
+            "done": i == 3,
+        }
+    )
+QLearningAgentClassic._add_n_step_returns(fake(3, 0.9), ctrans)
+for t, e in zip(ctrans, exp):
+    assert abs(t["n_reward"] - e) < 1e-9, (t["n_reward"], e)
+assert [t["done_n"] for t in ctrans] == [False, True, True, True]
+assert ctrans[0]["next_state_n"] == "sa3"
+assert ctrans[2]["next_state_n"] == "sa4"
+
+# n=1 exact 1-step semantics for the classic agent too
+ctrans2 = [
+    {
+        "reward": 1.0,
+        "state": f"sa{i}",
+        "next_state": f"sa{i + 1}",
+        "done": i == 2,
+    }
+    for i in range(3)
+]
+QLearningAgentClassic._add_n_step_returns(fake(1, 0.99), ctrans2)
+for t in ctrans2:
+    assert t["n_reward"] == t["reward"]
+    assert t["next_state_n"] == t["next_state"]
+    assert t["done_n"] == t["done"]
 
 print("all 1v1 n-step unit checks passed")

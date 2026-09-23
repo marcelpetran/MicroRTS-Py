@@ -199,20 +199,18 @@ class QLearningAgentClassic:
             .float()
             .to(self.device)
         )
-        sp = (
-            torch.from_numpy(np.stack([b["next_state"] for b in batch]))
-            .float()
-            .to(self.device)
-        )
+        sp = torch.from_numpy(
+            np.array([b["next_state_n"] for b in batch], dtype=np.float32)
+        ).to(self.device)
 
         a = torch.from_numpy(np.array([b["action"] for b in batch], dtype=np.int64)).to(
             self.device
         )
         r = torch.from_numpy(
-            np.array([b["reward"] for b in batch], dtype=np.float32)
+            np.array([b["n_reward"] for b in batch], dtype=np.float32)
         ).to(self.device)
         done = torch.from_numpy(
-            np.array([b["done"] for b in batch], dtype=np.float32)
+            np.array([b["done_n"] for b in batch], dtype=np.float32)
         ).to(self.device)
 
         # Q(s,a) and target r + gamma * max_{a'} Q(s',a')
@@ -225,7 +223,7 @@ class QLearningAgentClassic:
 
             q_next = self.q_tgt(sp).gather(1, best_actions).squeeze(1)
 
-            target = r + (1.0 - done) * self.args.gamma * q_next
+            target = r + (1.0 - done) * (self.args.gamma**self.args.n_step) * q_next
             target = torch.clamp(target, min=-15.0, max=15.0)
 
         return q_sa, target
@@ -264,6 +262,33 @@ class QLearningAgentClassic:
             self.model.inference_model.load_state_dict(om_state_dict)
             self.model.inference_model.eval()
 
+    def _add_n_step_returns(self, episode_transitions: List[Dict]):
+        """Rewrite each transition as an n-step transition (Dopamine-style).
+
+        Classic schema: a single learner stream whose "state"/"next_state"
+        are ALREADY belief-augmented (no separate raw state, no OM history),
+        so the bootstrap only needs the augmented state at i+n. Must be
+        called ONCE per episode (future rewards are needed), mirroring the
+        OM agent's rollout structure. n_step=1 reproduces the 1-step
+        semantics exactly ("n_reward" == "reward", next_state_n ==
+        next_state, done_n == done).
+        """
+        n = max(1, int(self.args.n_step))
+        gamma = self.args.gamma
+        stream = episode_transitions
+        L = len(stream)
+        for i, t in enumerate(stream):
+            n_eff = min(n, L - i)
+            t["n_reward"] = sum(
+                (gamma**k) * stream[i + k]["reward"] for k in range(n_eff)
+            )
+            if i + n < L:
+                t["done_n"] = False
+                t["next_state_n"] = stream[i + n]["state"]  # belief-aug, Q input
+            else:
+                t["done_n"] = True
+                t["next_state_n"] = stream[-1]["next_state"]
+
     # ------------- rollout -------------
 
     def run_episode(self, opponent_agent, max_steps: int = 500) -> Dict[str, float]:
@@ -288,6 +313,11 @@ class QLearningAgentClassic:
 
         q_losses = []
         opp_losses = []
+
+        # Buffer the episode; n-step returns need the full stream, so the
+        # transitions enter the replay only at episode end (same structure
+        # as the OM agent's rollout — the agents differ only in the OM).
+        episode_transitions = []
 
         for step in range(max_steps):
             s_aug = self.tracker.augment(obs[0])
@@ -318,7 +348,7 @@ class QLearningAgentClassic:
                 "next_state": next_aug.copy(),
                 "done": bool(done),
             }
-            self.replay.push(step_info)
+            episode_transitions.append(step_info)
 
             ep_ret += reward[0]
             opp_ret += reward[1]
@@ -331,6 +361,10 @@ class QLearningAgentClassic:
 
             if done:
                 break
+
+        self._add_n_step_returns(episode_transitions)
+        for t in episode_transitions:
+            self.replay.push(t)
 
         valid_q_losses = [l for l in q_losses if l is not None]
         valid_opp_losses = [l for l in opp_losses if l is not None]
