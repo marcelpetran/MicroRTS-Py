@@ -126,7 +126,7 @@ parser.add_argument(
 parser.add_argument(
     "--n_step",
     type=int,
-    default=3,
+    default=1,
     help="Number of steps for n-step returns in Q-learning",
 )
 args_parsed = parser.parse_args()
