@@ -301,6 +301,9 @@ class QLearningAgent:
         return a, g_map.squeeze(0), entropy
 
     # ------------- training -------------
+    @staticmethod
+    def _augment(state: np.ndarray, belief: np.ndarray) -> np.ndarray:
+        return np.concatenate([state.astype(np.float32), belief], axis=-1)
 
     def compute_targets(
         self, batch: List[Dict], history: Dict[str, torch.Tensor]
@@ -317,21 +320,21 @@ class QLearningAgent:
             .to(self.device)
         )
         sp = torch.from_numpy(
-            np.array([b["next_state"] for b in batch], dtype=np.float32)
+            np.array([b["next_state_n"] for b in batch], dtype=np.float32)
         ).to(self.device)
-        spu = (
-            torch.from_numpy(np.stack([b["next_state_aug"] for b in batch]))
-            .float()
-            .to(self.device)
-        )
+        spu = torch.from_numpy(
+            np.stack(
+                [self._augment(b["next_state_n"], b["next_belief_n"]) for b in batch]
+            )
+        ).to(self.device)
         a = torch.from_numpy(np.array([b["action"] for b in batch], dtype=np.int64)).to(
             self.device
         )
         r = torch.from_numpy(
-            np.array([b["reward"] for b in batch], dtype=np.float32)
+            np.array([b["n_reward"] for b in batch], dtype=np.float32)
         ).to(self.device)
         done = torch.from_numpy(
-            np.array([b["done"] for b in batch], dtype=np.float32)
+            np.array([b["done_n"] for b in batch], dtype=np.float32)
         ).to(self.device)
 
         with torch.no_grad():
@@ -349,7 +352,7 @@ class QLearningAgent:
             hist_states[:, -1] = s
             hist_mask[:, -1] = True
 
-            hist_next = {"states": hist_states, "mask": hist_mask}
+            hist_next = self.model.collate_history(batch, len_key="hist_len_n")
             g_logits_next = self.model.tgt_model(sp, hist_next, cached_features=False)
             g_map_next = F.softmax(g_logits_next.view(len(batch), -1), dim=-1).view_as(
                 g_logits_next
@@ -446,6 +449,41 @@ class QLearningAgent:
             t["true_goal_map"] = true_map
 
             del t["opp_reward"]
+
+    def _add_n_step_returns(self, episode_transitions: List[Dict]):
+        """Rewrite each transition as an n-step transition (Dopamine-style).
+
+        1v1: a single learner stream (no per-agent grouping as in the team
+        agent). For each transition i, store the discounted reward sum over
+        the next n steps plus, when i+n is still inside the episode, the
+        raw state (OM input), belief-augmented state (Q input) and history
+        index at i+n used for bootstrapping. Bootstrapped arrays are shared
+        by reference with the transition at i+n. Episodes end at their last transition, so
+        i+n past the end gets done_n=True (no bootstrap). n_step=1
+        reproduces the 1-step semantics exactly ("n_reward" == "reward",
+        next_state_n == next_state, done_n == done).
+        """
+        n = max(1, int(self.args.n_step))
+        gamma = self.args.gamma
+        stream = episode_transitions
+        L = len(stream)
+        for i, t in enumerate(stream):
+            n_eff = min(n, L - i)
+            t["n_reward"] = sum(
+                (gamma**k) * stream[i + k]["reward"] for k in range(n_eff)
+            )
+            if i + n < L:
+                nxt = stream[i + n]
+                t["done_n"] = False
+                t["next_state_n"] = nxt["state"]  # raw obs, OM input
+                t["next_state_aug_n"] = nxt["state_aug"]  # belief-aug, Q input
+                t["hist_len_n"] = nxt["hist_len"]
+            else:
+                last = stream[-1]
+                t["done_n"] = True
+                t["next_state_n"] = last["next_state"]
+                t["next_state_aug_n"] = last["next_state_aug"]
+                t["hist_len_n"] = last["hist_len"] + 1
 
     # ------------- rollout -------------
 
@@ -578,6 +616,7 @@ class QLearningAgent:
                 break
 
         self._apply_hindsight_relabeling(episode_transitions, H, W)
+        self._add_n_step_returns(episode_transitions)
 
         # 3. Push to replay buffer
         states_arr = np.stack(ep_states)

@@ -49,7 +49,9 @@ class OpponentModel(nn.Module):
         )
         return max(sigma, self.args.sigma_end)
 
-    def collate_history(self, items, extra: int = 0) -> Dict[str, torch.Tensor]:
+    def collate_history(
+        self, items, extra: int = 0, len_key: str = "hist_len"
+    ) -> Dict[str, torch.Tensor]:
         max_len = self.args.max_history_length
         B = len(items)
         H, W, F_dim = self.args.state_shape
@@ -67,7 +69,7 @@ class OpponentModel(nn.Module):
             seq = t["history"]["states"]
             if not isinstance(seq, np.ndarray):
                 seq = np.stack(seq)
-            end = min(t["hist_len"] + extra, len(seq))
+            end = min(t[len_key] + extra, len(seq))
             L = min(end, max_len)
             if L <= 0:
                 continue
