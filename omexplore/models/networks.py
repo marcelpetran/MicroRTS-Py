@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 
+from omexplore.models.graph_features import GLOBAL_FEATURES, N_NODE_FEATURES
 from omexplore.utils.omg_args import OMGArgs
 
 
@@ -285,3 +286,30 @@ class SLnet(nn.Module):
         features = self.cnn(s)
         logits = self.value_head(features)
         return logits
+
+
+class Structure2Vec(nn.Module):
+    """
+    Message-passing backbone for graph neural networks, that embeds the graph into a vector representation.
+    """
+
+    def __init__(self, args: OMGArgs):
+        super().__init__()
+
+    def forward(x, edge_index, edge_weight):
+        # → μ (B, N, s2v_dim)
+        raise NotImplementedError("Structure2Vec forward pass not implemented.")
+
+
+class QNetGraph(nn.Module):
+    """Owns a Structure2Vec plus the dueling heads."""
+
+    def __init__(self, args: OMGArgs):
+        super().__init__()
+        self.s2v = Structure2Vec(args)
+        self.advantage_head = ...
+        self.value_head = ...
+
+    def forward(x, edge_index, edge_weight, g):
+        # → (B, N)
+        raise NotImplementedError("GNNet forward pass not implemented.")
