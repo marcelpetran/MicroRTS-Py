@@ -139,9 +139,10 @@ parser.add_argument(
 )
 parser.add_argument(
     "--belief_map_prior",
-    action="store_true",
+    action=argparse.BooleanOptionalAction,
     default=True,
-    help="Whether to use map prior for belief initialization in the opponent model",
+    help="Whether to use map prior for belief initialization in the opponent model "
+    "(--no-belief_map_prior to disable)",
 )
 args_parsed = parser.parse_args()
 
