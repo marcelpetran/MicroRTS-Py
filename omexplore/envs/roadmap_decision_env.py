@@ -137,6 +137,7 @@ class RoadmapDecisionEnv:
         # know_all_goals heuristic opponents (scenario knowledge).
         self.belief.set_food_prior(self.env.food_positions)
         self.belief.reset(use_map_prior=True)
+        self.initial_goal_count = len(self.belief.belief_food)
         self.paths = {}
         self.commit = {}
         self.decision_age = {aid: 0 for aid in self.learn_ids}

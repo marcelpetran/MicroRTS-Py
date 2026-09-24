@@ -53,3 +53,4 @@ class OMGArgs:
     num_encoder_layers: int = 1
     dim_feedforward: int = 256
     dropout: float = 0.1
+    s2v_dim: int = 64

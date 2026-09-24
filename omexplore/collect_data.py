@@ -57,9 +57,14 @@ def collect_offline_data(
     save_path: str = "./dataset/dataset.pt",
     map_layout: list[str] = MAP_1,
     om_args: OMGArgs = OMGArgs(),
+    vision_radius: int = 2,
 ):
     args = om_args
-    env = SimpleForagingEnv(max_steps=args.max_steps, map_layout=map_layout)
+    env = SimpleForagingEnv(
+        max_steps=args.max_steps,
+        map_layout=map_layout,
+        vision_radius=vision_radius,
+    )
     obs = env.reset()
     agent_0 = SimpleAgent(0, map_layout=map_layout)
     # precompute paths for other agents to use during data collection

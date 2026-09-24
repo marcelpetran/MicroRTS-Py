@@ -29,6 +29,8 @@ class BeliefTracker:
         self.horizon = horizon
         self.FOOD_CH, self.OPP_CH, self.VIS_CH = channels
         self.prior_food, self.prior_opp = set(), set()
+        self.belief_food, self.belief_opp = set(), set()
+        self.opp_age = 0
         if map_layout is not None:  # same 'o'/'B' static prior heuristics get [6]
             for r, row in enumerate(map_layout):
                 for c, ch in enumerate(row):

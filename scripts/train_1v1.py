@@ -4,6 +4,8 @@ import random
 import sys
 from pathlib import Path
 
+from pandas.core.arrays.period import np
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import matplotlib
@@ -135,7 +137,18 @@ parser.add_argument(
     default=5,
     help="Vision radius for the agents in the environment",
 )
+parser.add_argument(
+    "--belief_map_prior",
+    action="store_true",
+    default=True,
+    help="Whether to use map prior for belief initialization in the opponent model",
+)
 args_parsed = parser.parse_args()
+
+# set seed for reproducibility
+random.seed(args_parsed.seed)
+torch.manual_seed(args_parsed.seed)
+np.random.seed(args_parsed.seed)
 
 # Setup directories
 os.makedirs(f"./models/{args_parsed.folder_id}", exist_ok=True)
@@ -155,7 +168,11 @@ obs_sample = env.reset()
 H, W, F_dim = obs_sample[0].shape
 NUM_ACTIONS = 4
 
-run_name = f"map{args_parsed.map}_vs_{args_parsed.opponent}_id{args_parsed.folder_id}"
+run_name = (
+    f"map{args_parsed.map}_{args_parsed.opponent}"
+    f"_v{args_parsed.vision_radius}_p{int(args_parsed.belief_map_prior)}"
+    f"_n{args_parsed.n_step}_s{args_parsed.seed}_id{args_parsed.folder_id}"
+)
 try:
     wandb.init(project="om-simple-foraging", config=args_parsed, name=run_name)
 except wandb.errors.CommError as e:
@@ -169,6 +186,20 @@ except wandb.errors.CommError as e:
         name=run_name,
         mode="offline",
     )
+
+# Offline-synced runs don't carry git metadata; record the commit explicitly
+# so every run in the UI is pinned to a code version.
+try:
+    import subprocess
+
+    git_commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        text=True,
+    ).strip()
+    wandb.config.update({"git_commit": git_commit})
+except Exception as e:
+    print(f"Could not record git commit: {e}")
 
 args = OMGArgs(
     device=device,
@@ -194,6 +225,7 @@ args = OMGArgs(
     true_intent=args_parsed.true_intent,
     n_step=args_parsed.n_step,
     friendly_om=False,
+    belief_map_prior=args_parsed.belief_map_prior,
 )
 
 # Initialize Heuristic Opponent
@@ -308,7 +340,11 @@ op_model = OpponentModel(inference_model, args=args)
 agent_om = QLearningAgent(env, op_model, args=args)
 
 # OM Pretraining
-dataset_path = f"./dataset/dataset_map_{args_parsed.map}.pt"
+# OM pretraining dataset: cached per (map, vision_radius) — obs content depends
+# on the vision radius, so the cache key must too.
+dataset_path = (
+    f"./dataset/dataset_map_{args_parsed.map}_v{args_parsed.vision_radius}.pt"
+)
 if not os.path.exists(dataset_path):
     print("Collecting Offline Data for OM Pretraining...")
     collect_offline_data(
@@ -316,6 +352,7 @@ if not os.path.exists(dataset_path):
         save_path=dataset_path,
         map_layout=map_layouts[args_parsed.map - 1],
         om_args=args,
+        vision_radius=args_parsed.vision_radius,
     )
 
 print("Loading dataset and pretraining OM...")
