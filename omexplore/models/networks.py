@@ -1,7 +1,10 @@
 import torch
 from torch import nn
 
-from omexplore.models.graph_features import GLOBAL_FEATURES, N_NODE_FEATURES
+from omexplore.models.graph_features import (
+    N_GLOBAL_FEATURES,
+    N_NODE_FEATURES,
+)
 from omexplore.utils.omg_args import OMGArgs
 
 
@@ -295,10 +298,45 @@ class Structure2Vec(nn.Module):
 
     def __init__(self, args: OMGArgs):
         super().__init__()
+        # Paper original formulation:
+        # μ_v^(t+1) = ReLU(
+        # θ1·x_v + θ2·Σ_{u∈N(v)} μ_u^(t) + θ3·Σ_{u∈N(v)} ReLU(θ4·w_{u,v}) + θ5·Σ_{u∈N(v)} ReLU(θ6·μ_u^(t) ⊙ w_{u,v})
+        # )
 
-    def forward(x, edge_index, edge_weight):
-        # → μ (B, N, s2v_dim)
-        raise NotImplementedError("Structure2Vec forward pass not implemented.")
+        # Simplified formulation drops θ3 and θ4,
+        # because they contain no state-dependent information, edge weights are constant (static roadmap env)
+        # μ_v^(t+1) = ReLU( θ_1·x_v + θ_2·Σ_{u∈N(v)} μ_u^(t) + θ_5·Σ_{u∈N(v)} ReLU(θ_6·μ_u^(t)) ⊙ w_{u,v} )
+
+        self.s2v_dim = args.s2v_dim
+        self.s2v_rounds = args.s2v_rounds
+        self.theta1 = nn.Linear(N_NODE_FEATURES, self.s2v_dim)
+        self.theta2 = nn.Linear(self.s2v_dim, self.s2v_dim)
+        self.theta5 = nn.Linear(self.s2v_dim, self.s2v_dim)
+        self.theta6 = nn.Linear(self.s2v_dim, self.s2v_dim)
+
+    def _aggregate(self, mu, edge_index, edge_weight):
+        src, dst = edge_index[0], edge_index[1]
+        nbrs = mu[:, src, :]  # (B, E, d)
+        plain = mu.new_zeros(mu.shape)
+        plain.index_add_(1, dst, nbrs)  # Σ μ_u
+        gated = mu.new_zeros(mu.shape)
+        gated.index_add_(
+            1, dst, torch.relu(self.theta6(nbrs)) * edge_weight[None, :, None]
+        )
+        return plain, gated
+
+    def forward(self, x, edge_index, edge_weight):
+        """returns → μ (B, N, s2v_dim)"""
+        mu = torch.zeros(x.size(0), x.size(1), self.s2v_dim, device=x.device)
+        for _ in range(self.s2v_rounds):
+            plain, gated = self._aggregate(
+                mu,
+                edge_index,
+                edge_weight,
+            )
+            mu = torch.relu(self.theta1(x) + self.theta2(plain) + self.theta5(gated))
+
+        return mu
 
 
 class QNetGraph(nn.Module):
@@ -307,9 +345,31 @@ class QNetGraph(nn.Module):
     def __init__(self, args: OMGArgs):
         super().__init__()
         self.s2v = Structure2Vec(args)
-        self.advantage_head = ...
-        self.value_head = ...
 
-    def forward(x, edge_index, edge_weight, g):
-        # → (B, N)
-        raise NotImplementedError("GNNet forward pass not implemented.")
+        self.advantage_head = nn.Sequential(
+            nn.Linear(args.s2v_dim, args.qnet_hidden),
+            nn.ReLU(),
+            nn.Linear(args.qnet_hidden, 1),
+        )
+
+        self.value_head = nn.Sequential(
+            nn.Linear(args.s2v_dim + N_GLOBAL_FEATURES, args.qnet_hidden),
+            nn.ReLU(),
+            nn.Linear(args.qnet_hidden, 1),
+        )
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0.01)
+
+    def forward(self, x, edge_index, edge_weight, g):
+        """returns → (B, N)"""
+        mu = self.s2v(x, edge_index, edge_weight)  # (B, N, s2v_dim)
+        pooled = mu.mean(dim=1)  # (B, s2v_dim)
+        value = self.value_head(torch.cat([pooled, g], dim=1))  # (B, 1)
+        adv = self.advantage_head(mu).squeeze(-1)  # (B, N)
+        q = value + adv - adv.mean(dim=1, keepdim=True)  # (B, N)
+        return q
