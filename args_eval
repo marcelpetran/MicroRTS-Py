@@ -1,0 +1,22 @@
+--opponent=oracle_stalker
+--map=4
+--max_steps=50
+--episodes=1000
+--batch_size=128
+--replay_capacity=450_000
+--train_every=4
+--qnet_dim=256
+--cnn_hidden=64
+--d_model=128
+--nhead=4
+--num_encoder_layers=2
+--dim_feedforward=256
+--dropout=0.05
+--tau_start=1.5
+--tau_end=0.05
+--tau_decay_steps=650_000
+--vision_radius=2
+--n_step=1
+--belief_map_prior
+--swap_prob=0.5
+--folder_ids=11696343,11701840,11701841,11701845, 11701948, 11701952

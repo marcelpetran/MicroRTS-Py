@@ -964,6 +964,25 @@ class StalkerAgent:
             return np.random.randint(0, 4), None, heatmap
 
 
+class OracleStalkerAgent(StalkerAgent):
+    """
+    Stalker with ground-truth beliefs (full observability), regardless of the learner's vision radius.
+    """
+
+    def __init__(self, agent_id, env, map_layout=None):
+        super().__init__(agent_id, map_layout=map_layout)
+        self._env = env
+
+    def select_action(self, observation, eval=False):
+        # Overwrite beliefs with ground truth before deciding. update_belief
+        # (called inside) then cannot contradict the truth: a visible true
+        # opponent position is confirmed by the opp channel, and an invisible
+        # one is never cleared (clearing requires seeing the cell).
+        self.belief_opp_pos = self._env.agents[1 - self.agent_id]
+        self.belief_food = set(self._env.food_positions)
+        return super().select_action(observation, eval)
+
+
 class ChameleonAgent:
     """
     Opponent that switches between Simple and Greedy.
@@ -1013,3 +1032,32 @@ class ChameleonAgent:
             action, _, _ = self.greedy_agent.select_action(observation, eval)
 
         return action, None, heatmap
+
+
+if __name__ == "__main__":
+    from omexplore.utils.maps import MAP_4
+
+    agent0 = GreedySwitchAgent(agent_id=0, map_layout=MAP_4)
+    agent1 = GreedySwitchAgent(agent_id=1, map_layout=MAP_4)
+    env = SimpleForagingEnv(map_layout=MAP_4, max_steps=50, vision_radius=2)
+
+    avg_returns = {0: [], 1: []}
+    for ep in range(10000):
+        ep_returns = {0: 0.0, 1: 0.0}
+        obs = env.reset()
+        if np.random.rand() < 0.5:
+            obs = env.swap_agents()
+        agent0.reset(initial_food=env.food_positions, initial_opp_pos=env.agents[1])
+        agent1.reset(initial_food=env.food_positions, initial_opp_pos=env.agents[0])
+        done = False
+        while not done:
+            action0, _, _ = agent0.select_action(obs[0])
+            action1, _, _ = agent1.select_action(obs[1])
+            actions = {0: action0, 1: action1}
+            obs, rewards, done, _ = env.step(actions)
+            ep_returns[0] += rewards[0]
+            ep_returns[1] += rewards[1]
+        avg_returns[0].append(ep_returns[0])
+        avg_returns[1].append(ep_returns[1])
+
+    print(f"\nAgent 0: {np.mean(avg_returns[0])}\nAgent 1: {np.mean(avg_returns[1])}")

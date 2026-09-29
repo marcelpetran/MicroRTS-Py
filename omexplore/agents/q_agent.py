@@ -487,7 +487,12 @@ class QLearningAgent:
         elif random.random() < 0.5:
             # 50% of the time swap spawns to add more diversity
             obs = self.env.swap_agents()
-        opponent_agent.reset()
+        opponent_agent.reset(
+            initial_food=self.env.food_positions,
+            initial_opp_pos=self.env.agents[0],
+        )
+        self.tracker.set_food_prior(self.env.food_positions)
+        self.tracker.set_opp_prior([self.env.agents[1]])
         self.tracker.reset(use_map_prior=self.args.belief_map_prior)
         self.tracker.update(obs[0])
 
@@ -629,13 +634,28 @@ class QLearningAgent:
         }
 
     def run_test_episode(
-        self, opponent_agent, max_steps: int = 500, render: bool = False
+        self,
+        opponent_agent,
+        max_steps: int = 500,
+        render: bool = False,
+        swap_prob: float = 0.0,
     ) -> Dict[str, float]:
         self.model.inference_model.eval()
         obs = self.env.reset()
-        opponent_agent.reset()
+        swapped = False
+        if random.random() < swap_prob:
+            obs = self.env.swap_agents()
+            swapped = True
+        # Seed both sides' beliefs from the true post-swap state: the no-arg
+        # fallbacks use the default-corner prior, which is wrong after a swap.
+        self.tracker.set_food_prior(self.env.food_positions)
+        self.tracker.set_opp_prior([self.env.agents[1]])
         self.tracker.reset(use_map_prior=self.args.belief_map_prior)
         self.tracker.update(obs[0])
+        opponent_agent.reset(
+            initial_food=self.env.food_positions,
+            initial_opp_pos=self.env.agents[0],
+        )
 
         done = False
         renderer = RealtimeRenderer() if render else None
@@ -747,4 +767,5 @@ class QLearningAgent:
             "avg_entropy": ep_entropy / (step + 1),
             "avg_kl_error": np.mean(kd_errors) if kd_errors else None,
             "avg_spatial_error": np.mean(spatial_errors) if spatial_errors else None,
+            "swapped": swapped,
         }

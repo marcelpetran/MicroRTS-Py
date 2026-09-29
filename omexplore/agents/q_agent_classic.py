@@ -302,7 +302,12 @@ class QLearningAgentClassic:
         elif random.random() < 0.5:
             # 50% of the time swap spawns to add more diversity
             obs = self.env.swap_agents()
-        opponent_agent.reset()
+        opponent_agent.reset(
+            initial_food=self.env.food_positions,
+            initial_opp_pos=self.env.agents[0],
+        )
+        self.tracker.set_food_prior(self.env.food_positions)
+        self.tracker.set_opp_prior([self.env.agents[1]])
         self.tracker.reset(use_map_prior=self.args.belief_map_prior)
         self.tracker.update(obs[0])
 
@@ -379,12 +384,27 @@ class QLearningAgentClassic:
         }
 
     def run_test_episode(
-        self, opponent_agent, max_steps: int = 500, render: bool = False
+        self,
+        opponent_agent,
+        max_steps: int = 500,
+        render: bool = False,
+        swap_prob: float = 0.0,
     ) -> Dict[str, float]:
         obs = self.env.reset()
-        opponent_agent.reset()
+        swapped = False
+        if random.random() < swap_prob:
+            obs = self.env.swap_agents()
+            swapped = True
+        # Seed both sides' beliefs from the true post-swap state: the no-arg
+        # fallbacks use the default-corner prior, which is wrong after a swap.
+        self.tracker.set_food_prior(self.env.food_positions)
+        self.tracker.set_opp_prior([self.env.agents[1]])
         self.tracker.reset(use_map_prior=self.args.belief_map_prior)
         self.tracker.update(obs[0])
+        opponent_agent.reset(
+            initial_food=self.env.food_positions,
+            initial_opp_pos=self.env.agents[0],
+        )
 
         done = False
         ep_ret = 0.0
@@ -420,4 +440,5 @@ class QLearningAgentClassic:
             "steps": step + 1,
             "opp_return": opp_ret,
             "avg_entropy": ep_entropy / (step + 1),
+            "swapped": swapped,
         }

@@ -22,6 +22,7 @@ from omexplore.collect_data import collect_offline_data
 from omexplore.envs.simple_foraging_env import (
     ChameleonAgent,
     GreedySwitchAgent,
+    OracleStalkerAgent,
     SimpleAgent,
     SimpleForagingEnv,
     StalkerAgent,
@@ -42,8 +43,9 @@ parser.add_argument(
     "--opponent",
     type=str,
     default="simple",
-    choices=["simple", "greedy", "stalker", "chameleon"],
-    help="Type of heuristic opponent agent to play against",
+    choices=["simple", "greedy", "stalker", "oracle_stalker", "chameleon"],
+    help="Type of heuristic opponent agent to play against (oracle_stalker = "
+    "thesis-faithful deceptive adversary with full observability)",
 )
 parser.add_argument(
     "--map",
@@ -136,6 +138,13 @@ parser.add_argument(
     type=int,
     default=5,
     help="Vision radius for the agents in the environment",
+)
+parser.add_argument(
+    "--eval_swap_prob",
+    type=float,
+    default=0.0,
+    help="Probability of swapping seats each EVAL episode (0.5 = both-seat eval, "
+    "recommended for reporting; training always uses random swaps for diversity)",
 )
 parser.add_argument(
     "--belief_map_prior",
@@ -242,6 +251,10 @@ elif args_parsed.opponent == "stalker":
     opponent_agent = StalkerAgent(
         agent_id=1, map_layout=map_layouts[args_parsed.map - 1]
     )
+elif args_parsed.opponent == "oracle_stalker":
+    opponent_agent = OracleStalkerAgent(
+        agent_id=1, env=env, map_layout=map_layouts[args_parsed.map - 1]
+    )
 elif args_parsed.opponent == "chameleon":
     opponent_agent = ChameleonAgent(
         agent_id=1, map_layout=map_layouts[args_parsed.map - 1]
@@ -286,7 +299,10 @@ for epoch in range(num_epochs):
     eval_rets, eval_opp_rets, eval_steps = [], [], []
     for _ in range(eval_episodes):
         test_stats = agent_classic.run_test_episode(
-            opponent_agent, max_steps=args.max_steps, render=False
+            opponent_agent,
+            max_steps=args.max_steps,
+            render=False,
+            swap_prob=args_parsed.eval_swap_prob,
         )
         eval_rets.append(test_stats["return"])
         eval_opp_rets.append(test_stats["opp_return"])
@@ -400,7 +416,10 @@ for epoch in range(num_epochs):
     eval_rets, eval_opp_rets, eval_steps = [], [], []
     for _ in range(eval_episodes):
         test_stats = agent_om.run_test_episode(
-            opponent_agent, max_steps=args.max_steps, render=args_parsed.render
+            opponent_agent,
+            max_steps=args.max_steps,
+            render=args_parsed.render,
+            swap_prob=args_parsed.eval_swap_prob,
         )
         eval_rets.append(test_stats["return"])
         eval_opp_rets.append(test_stats["opp_return"])
