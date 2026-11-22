@@ -310,6 +310,9 @@ class OpponentModel(nn.Module):
     ) -> torch.Tensor:
         """Predict the subgoal heatmap (B, H, W) for state x (B, H, W, F)."""
         self.inference_model.eval()
+        if self.args.blind_om:
+            # Blind OM: ignore the current state and only use the history.
+            x = torch.zeros_like(x)
         return self.inference_model(x, history, cached_features=cached_features)
 
     def _bce_loss(self, pred_logits: torch.Tensor, soft_targets: torch.Tensor):

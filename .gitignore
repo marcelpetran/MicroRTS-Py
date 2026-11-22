@@ -164,3 +164,4 @@ cmapf_unified/qtable_11v11.json
 cmapf_unified/qtable_11v11.json.npz
 cmapf_unified/README.md
 cmapf_unified/server.py
+scripts/pull_models_from_cluster.sh

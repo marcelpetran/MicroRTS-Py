@@ -55,3 +55,4 @@ class OMGArgs:
     dropout: float = 0.1
     s2v_dim: int = 64
     s2v_rounds: int = 3
+    blind_om: bool = False

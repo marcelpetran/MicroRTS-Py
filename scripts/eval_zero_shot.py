@@ -103,6 +103,12 @@ parser.add_argument(
     default=True,
     help="Must match training; seeds the learner's belief channels",
 )
+parser.add_argument(
+    "--blind_om",
+    action="store_true",
+    default=False,
+    help="Disable the opponent model",
+)
 args_parsed = parser.parse_args()
 
 random.seed(args_parsed.seed)
@@ -153,6 +159,7 @@ args = OMGArgs(
     n_step=args_parsed.n_step,
     friendly_om=False,
     belief_map_prior=args_parsed.belief_map_prior,
+    blind_om=args_parsed.blind_om,
 )
 
 
@@ -320,7 +327,7 @@ os.makedirs(out_dir, exist_ok=True)
 out_path = os.path.join(
     out_dir,
     f"map{args_parsed.map}_{args_parsed.opponent}_v{args_parsed.vision_radius}"
-    f"_p{int(args_parsed.belief_map_prior)}_n{args_parsed.n_step}_sw{args_parsed.swap_prob}.json",
+    f"_p{int(args_parsed.belief_map_prior)}_n{args_parsed.n_step}_sw{args_parsed.swap_prob}_blind{'T' if args_parsed.blind_om else 'F'}.json",
 )
 with open(out_path, "w") as f:
     json.dump(results, f, indent=2)

@@ -1035,11 +1035,11 @@ class ChameleonAgent:
 
 
 if __name__ == "__main__":
-    from omexplore.utils.maps import MAP_4
+    from omexplore.utils.maps import MAP_3, MAP_4
 
-    agent0 = GreedySwitchAgent(agent_id=0, map_layout=MAP_4)
-    agent1 = GreedySwitchAgent(agent_id=1, map_layout=MAP_4)
-    env = SimpleForagingEnv(map_layout=MAP_4, max_steps=50, vision_radius=2)
+    agent0 = GreedySwitchAgent(agent_id=0, map_layout=MAP_3)
+    agent1 = GreedySwitchAgent(agent_id=1, map_layout=MAP_3)
+    env = SimpleForagingEnv(map_layout=MAP_3, max_steps=50, vision_radius=2)
 
     avg_returns = {0: [], 1: []}
     for ep in range(10000):

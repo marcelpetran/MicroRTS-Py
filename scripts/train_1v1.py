@@ -18,6 +18,7 @@ import wandb
 # Import the standard RL agents
 from omexplore.agents.q_agent import QLearningAgent
 from omexplore.agents.q_agent_classic import QLearningAgentClassic
+from omexplore.agents.q_agent_classic_h import QLearningAgentClassicH
 from omexplore.collect_data import collect_offline_data
 from omexplore.envs.simple_foraging_env import (
     ChameleonAgent,
@@ -147,6 +148,13 @@ parser.add_argument(
     "recommended for reporting; training always uses random swaps for diversity)",
 )
 parser.add_argument(
+    "--classic_h",
+    action="store_true",
+    default=False,
+    help="Train the history-matched Classic baseline (Classic-H: Q-driven history\n"
+    "transformer, no opponent-subgoal supervision) instead of plain Classic in Phase 1.",
+)
+parser.add_argument(
     "--belief_map_prior",
     action=argparse.BooleanOptionalAction,
     default=True,
@@ -267,9 +275,17 @@ eval_episodes = 100
 # PHASE 1: TRAIN CLASSIC AGENT
 # ==========================================
 print(
-    f"\n--- PHASE 1: Training Classic Agent vs {args_parsed.opponent.capitalize()} ---"
+    f"\n--- PHASE 1: Training {'Classic-H (history control)' if args_parsed.classic_h else 'Classic Agent'} vs {args_parsed.opponent.capitalize()} ---"
 )
-agent_classic = QLearningAgentClassic(env, args=args)
+_run_name = run_name + ("_classicH" if args_parsed.classic_h else "")
+if args_parsed.classic_h:
+    from omexplore.models.transformers import SpatialOpponentModel as _SOM
+
+    _inf = _SOM(args=args).to(device)
+    _om = OpponentModel(_inf, args=args)
+    agent_classic = QLearningAgentClassicH(env, _om, args=args)
+else:
+    agent_classic = QLearningAgentClassic(env, args=args)
 
 phase1_train_returns, phase1_train_steps, phase1_entropies, phase1_q_losses = (
     [],

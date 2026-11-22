@@ -1,5 +1,5 @@
---opponent=oracle_stalker
---map=4
+--opponent=greedy
+--map=3
 --max_steps=50
 --episodes=1000
 --batch_size=128
@@ -15,8 +15,9 @@
 --tau_start=1.5
 --tau_end=0.05
 --tau_decay_steps=650_000
---vision_radius=2
+--vision_radius=5
 --n_step=1
 --belief_map_prior
 --swap_prob=0.5
---folder_ids=11696343,11701840,11701841,11701845, 11701948, 11701952
+--folder_ids=11739441, 11740166, 11740229, 11744046, 11744048, 11744054
+--blind_om
