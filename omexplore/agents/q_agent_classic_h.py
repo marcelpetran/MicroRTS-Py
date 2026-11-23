@@ -107,7 +107,10 @@ class QLearningAgentClassicH(QLearningAgent):
     def select_action(self, s_t, s_aug, history, eval=False):
         x = torch.from_numpy(s_t).float().unsqueeze(0).to(self.device)
         x_aug = torch.from_numpy(s_aug).float().unsqueeze(0).to(self.device)
-        # Rollout passes cached feature buffers -> use cached_features=True.
+        # Acting must be deterministic: the encoder (pos_encoder + transformer)
+        # applies dropout in train mode, which would noisify every action. Force
+        # no-dropout for acting only; update() puts the encoder back in train().
+        self.encoder.om.eval()
         g_latent = self.encoder(x, history, cached_features=True)  # (1, H, W)
         qvals = self.q(x_aug, g_latent)
         tau = 0.05 if eval else self._tau()
@@ -164,6 +167,8 @@ class QLearningAgentClassicH(QLearningAgent):
             return (None, None)
         if self.global_step % self.args.train_every != 0:
             return (None, None)
+        # Encoder trains ONLY here (dropout on for representation regularisation).
+        self.encoder.om.train()
         batch_list = self.replay.sample(self.args.batch_size)
         hist = self.model.collate_history(batch_list)
         q_sa, target = self.compute_targets(batch_list, hist)
