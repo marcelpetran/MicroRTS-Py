@@ -107,9 +107,23 @@ parser.add_argument(
     "--blind_om",
     action="store_true",
     default=False,
-    help="Disable the opponent model",
+    help="Disable the opponent model (zero out the fused heatmap during eval)",
+)
+parser.add_argument(
+    "--om_control",
+    type=str,
+    default="none",
+    choices=["none", "blind", "shuffled", "uniform", "random_window"],
+    help="Ablation control on the OM heatmap at eval time (no retraining): "
+    "blind = zero heatmap; shuffled = permute H*W cells each step (same "
+    "magnitudes, content spatially decoupled) — R3's content-vs-channel "
+    "control; uniform = uniform free-cell distribution; "
+    "random_window = heatmap from an unrelated trajectory. "
+    "('--blind_om' is an alias for --om_control=blind.)",
 )
 args_parsed = parser.parse_args()
+if args_parsed.blind_om and args_parsed.om_control == "none":
+    args_parsed.om_control = "blind"
 
 random.seed(args_parsed.seed)
 np.random.seed(args_parsed.seed)
@@ -196,6 +210,45 @@ def summarize(rets: list) -> dict:
     }
 
 
+class _UnrelatedPool:
+    """Heatmaps from an UNRELATED trajectory distribution (R3 random_window
+    control). Stateless generator: for each draw it refills with a fresh random
+    observation history forwarded through the loaded transformer so Q consumes
+    a real, valid heatmap that has no correspondence with the live episode."""
+
+    def __init__(self, agent_om, env, H, W, seed):
+        self.om = agent_om.model.inference_model
+        self.args = agent_om.args
+        self.device = agent_om.device
+        self.env = env
+        self.H, self.W = H, W
+        self.rng = np.random.default_rng(seed)
+        self.be_library = []
+
+    def fill(self, n=32):
+        """Produce n unrelated heatmaps by advancing the real feature extractor
+        through fresh env resets (valid learned representations, no live-episode
+        correspondence)."""
+        import torch.nn.functional as _F
+
+        for _ in range(n):
+            obs = self.env.reset()
+            T = self.args.max_history_length
+            rf = torch.zeros(1, T, self.args.d_model, device=self.device)
+            mask = torch.zeros(1, T, dtype=torch.bool, device=self.device)
+            L = self.rng.integers(3, T + 1)
+            mask[0, -L:] = True
+            prev = torch.zeros(1, *obs[0].shape, device=self.device)
+            x = torch.from_numpy(obs[0]).float().unsqueeze(0).to(self.device)
+            feat = self.om.get_features(x, prev)
+            rf[0, -L:] = feat
+            hist = {"state_features": rf, "mask": mask, "prev_obs": prev}
+            with torch.no_grad():
+                gl = self.om(x, hist)
+                g = _F.softmax(gl.view(gl.shape[0], -1), dim=-1).view_as(gl)
+            self.be_library.append(g.cpu())
+
+
 folder_ids = [f.strip() for f in args_parsed.folder_ids.split(",") if f.strip()]
 results = {"config": vars(args_parsed), "seeds": [], "agents": {}, "paired": {}}
 
@@ -247,6 +300,58 @@ for fid in folder_ids:
         )
     )
     agent_om.q.eval()
+
+    # ---- OM ablation controls (R3: separate meaningful content from an
+    # extra channel / input-distribution shift). Override the agent's
+    # select_action so the heatmap is post-processed BEFORE Q consumes it.
+    _mode = args_parsed.om_control
+    if _mode != "none":
+        import torch.nn.functional as _F
+        from torch.distributions import Categorical as _Cat
+
+        _rng = np.random.default_rng(args_parsed.seed + 7)
+        if _mode == "random_window":
+            _pool = _UnrelatedPool(agent_om, env, H, W, args_parsed.seed)
+            _pool.fill(48)
+
+        def _apply_control(gh, s_raw):
+            """gh: (1, H, W) softmaxed. s_raw: raw obs (H, W, F). -> (1, H, W)"""
+            if _mode == "blind":
+                return torch.zeros_like(gh)
+            if _mode == "uniform":
+                # Uniform over ACCESSIBLE cells = complement of walls (channel 4).
+                # Raw obs channel 0 is *visible empty* (fog-masked), which would
+                # not match the Q-net's heatmap support: use 1 - wall instead.
+                free = 1.0 - torch.from_numpy(s_raw[:, :, 4]).float().to(gh.device)
+                free = free / free.sum().clamp(min=1e-8)
+                return free.view_as(gh)
+            if _mode == "shuffled":
+                flat = gh.reshape(-1).detach().cpu().numpy().copy()
+                _rng.shuffle(flat)
+                return torch.from_numpy(flat).to(gh.device).view_as(gh)
+            if _mode == "random_window":
+                pick = _pool.be_library[_rng.integers(len(_pool.be_library))]
+                return pick.to(gh.device).view_as(gh)
+            return gh
+
+        @torch.no_grad()
+        def _om_select_controlled(s_t, s_aug, history, eval=False):
+            a_dummy = None
+            x = torch.from_numpy(s_t).float().unsqueeze(0).to(device)
+            x_aug = torch.from_numpy(s_aug).float().unsqueeze(0).to(device)
+            g_logits = agent_om.model(x, history)
+            g_real = _F.softmax(g_logits.view(g_logits.shape[0], -1), dim=-1).view_as(
+                g_logits
+            )
+            g_mod = _apply_control(g_real, s_t)
+
+            qvals = agent_om.q(x_aug, g_mod)
+            tau = 0.05 if eval else agent_om._tau()
+            entropy = _Cat(logits=qvals / 0.05).entropy().item()
+            a = agent_om.choose_action(qvals, tau, eval)
+            return a, g_mod.squeeze(0), entropy
+
+        agent_om.select_action = _om_select_controlled
 
     opp = make_opponent()
     om_stats = []
@@ -327,7 +432,9 @@ os.makedirs(out_dir, exist_ok=True)
 out_path = os.path.join(
     out_dir,
     f"map{args_parsed.map}_{args_parsed.opponent}_v{args_parsed.vision_radius}"
-    f"_p{int(args_parsed.belief_map_prior)}_n{args_parsed.n_step}_sw{args_parsed.swap_prob}_blind{'T' if args_parsed.blind_om else 'F'}.json",
+    f"_p{int(args_parsed.belief_map_prior)}_n{args_parsed.n_step}_sw{args_parsed.swap_prob}"
+    f"_blind{'T' if args_parsed.om_control == 'blind' else 'F'}"
+    f"{'_' + args_parsed.om_control if args_parsed.om_control not in ('none', 'blind') else ''}.json",
 )
 with open(out_path, "w") as f:
     json.dump(results, f, indent=2)
