@@ -151,8 +151,9 @@ parser.add_argument(
     "--classic_h",
     action="store_true",
     default=False,
-    help="Train the history-matched Classic baseline (Classic-H: Q-driven history\n"
-    "transformer, no opponent-subgoal supervision) instead of plain Classic in Phase 1.",
+    help="Train the history-matched Classic baseline (Classic-H: Q-driven "
+    "history transformer, no opponent-subgoal supervision). Runs Phase 1 "
+    "only, skipping the OM phase; saves both Q-net and encoder checkpoints.",
 )
 parser.add_argument(
     "--belief_map_prior",
@@ -190,6 +191,7 @@ run_name = (
     f"map{args_parsed.map}_{args_parsed.opponent}"
     f"_v{args_parsed.vision_radius}_p{int(args_parsed.belief_map_prior)}"
     f"_n{args_parsed.n_step}_s{args_parsed.seed}_id{args_parsed.folder_id}"
+    f"{'_classicH' if args_parsed.classic_h else ''}"
 )
 try:
     wandb.init(project="om-simple-foraging", config=args_parsed, name=run_name)
@@ -277,7 +279,6 @@ eval_episodes = 100
 print(
     f"\n--- PHASE 1: Training {'Classic-H (history control)' if args_parsed.classic_h else 'Classic Agent'} vs {args_parsed.opponent.capitalize()} ---"
 )
-_run_name = run_name + ("_classicH" if args_parsed.classic_h else "")
 if args_parsed.classic_h:
     from omexplore.models.transformers import SpatialOpponentModel as _SOM
 
@@ -359,9 +360,23 @@ for epoch in range(num_epochs):
         agent_classic.q.state_dict(),
         f"./models/{args.folder_id}/classic_qnet_ep{epoch + 1}.pth",
     )
+    if args_parsed.classic_h:
+        torch.save(
+            agent_classic.encoder.state_dict(),
+            f"./models/{args.folder_id}/classic_h_encoder_ep{epoch + 1}.pth",
+        )
     print(
         f"Phase 1 | Epoch {epoch + 1:02d} | Train Ret: {avg_train_ret:>4.1f} | Eval Ret: {avg_eval_ret:>4.2f} | Eval Opp: {avg_eval_opp:>4.2f} | Entropy: {avg_entropy:.4f}"
     )
+
+if args_parsed.classic_h:
+    # The control study needs only this phase: no OM pre-training or training.
+    wandb.finish()
+    print(
+        "Classic-H training complete. Saved classic_qnet_ep*.pth and the "
+        "inference-required classic_h_encoder_ep*.pth checkpoints."
+    )
+    sys.exit(0)
 
 
 # ==========================================

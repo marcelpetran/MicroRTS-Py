@@ -31,6 +31,7 @@ import torch
 
 from omexplore.agents.q_agent import QLearningAgent
 from omexplore.agents.q_agent_classic import QLearningAgentClassic
+from omexplore.agents.q_agent_classic_h import QLearningAgentClassicH
 from omexplore.envs.simple_foraging_env import (
     ChameleonAgent,
     GreedySwitchAgent,
@@ -108,6 +109,15 @@ parser.add_argument(
     action="store_true",
     default=False,
     help="Disable the opponent model (zero out the fused heatmap during eval)",
+)
+parser.add_argument(
+    "--classic_h",
+    action="store_true",
+    default=False,
+    help="Evaluate the history-matched Classic-H baseline instead of the plain "
+    "Classic agent: expects classic_qnet_ep*.pth AND "
+    "classic_h_encoder_ep*.pth in each folder. OM is evaluated as usual "
+    "and the paired column is OM minus Classic-H.",
 )
 parser.add_argument(
     "--om_control",
@@ -257,8 +267,20 @@ for fid in folder_ids:
     epoch = args_parsed.epoch or latest_epoch(folder, "classic_qnet")
     print(f"\n=== Seed folder {fid} (epoch {epoch}) ===")
 
-    # ---- Classic ----
-    agent_classic = QLearningAgentClassic(env, args=args)
+    # ---- Classic or history-matched Classic-H ----
+    if args_parsed.classic_h:
+        _inf = SpatialOpponentModel(args=args).to(device)
+        _op_model = OpponentModel(_inf, args=args)
+        agent_classic = QLearningAgentClassicH(env, _op_model, args=args)
+        agent_classic.encoder.load_state_dict(
+            torch.load(
+                f"{folder}/classic_h_encoder_ep{epoch}.pth",
+                map_location=device,
+                weights_only=True,
+            )
+        )
+    else:
+        agent_classic = QLearningAgentClassic(env, args=args)
     agent_classic.q.load_state_dict(
         torch.load(
             f"{folder}/classic_qnet_ep{epoch}.pth",
@@ -282,6 +304,31 @@ for fid in folder_ids:
         "seat_A": summarize([s["return"] for s in classic_stats if not s["swapped"]]),
         "seat_B": summarize([s["return"] for s in classic_stats if s["swapped"]]),
     }
+
+    # The new classic-only training runs don't contain OM artifacts. Keep
+    # those evaluations usable without requiring a phantom Phase-2 model.
+    _has_om = os.path.exists(f"{folder}/om_qnet_ep{epoch}.pth") and os.path.exists(
+        f"{folder}/om_inference_ep{epoch}.pth"
+    )
+    if not _has_om:
+        if not args_parsed.classic_h:
+            raise FileNotFoundError(
+                f"Missing OM checkpoints in {folder} at epoch {epoch}"
+            )
+        results["seeds"].append(
+            {
+                "folder_id": fid,
+                "epoch": epoch,
+                "classic": {
+                    "return": summarize(classic_rets),
+                    "opp_return": summarize(classic_opp_rets),
+                    "seats": classic_seat,
+                },
+                "om": None,
+            }
+        )
+        print("  No OM checkpoint present; evaluated Classic-H only.")
+        continue
 
     # ---- OM ----
     inference_model = SpatialOpponentModel(args=args).to(device)
@@ -388,7 +435,7 @@ for fid in folder_ids:
     )
 
     print(
-        f"  classic: {np.mean(classic_rets):.3f} +- {np.std(classic_rets, ddof=1):.3f} "
+        f"  {'classic-H' if args_parsed.classic_h else 'classic'}: {np.mean(classic_rets):.3f} +- {np.std(classic_rets, ddof=1):.3f} "
         f"(opp {np.mean(classic_opp_rets):.3f}) | "
         f"seat A {classic_seat['seat_A']['mean']:.3f} / seat B {classic_seat['seat_B']['mean']:.3f}"
     )
@@ -400,17 +447,25 @@ for fid in folder_ids:
 
 # ---- Aggregate across seeds ----
 classic_means = [s["classic"]["return"]["mean"] for s in results["seeds"]]
-om_means = [s["om"]["return"]["mean"] for s in results["seeds"]]
+om_means = [s["om"]["return"]["mean"] for s in results["seeds"] if s["om"] is not None]
 results["agents"] = {
     "classic": summarize(classic_means),
-    "om": summarize(om_means),
+    "om": summarize(om_means) if om_means else None,
     "classic_opp": summarize(
         [s["classic"]["opp_return"]["mean"] for s in results["seeds"]]
     ),
-    "om_opp": summarize([s["om"]["opp_return"]["mean"] for s in results["seeds"]]),
+    "om_opp": summarize(
+        [s["om"]["opp_return"]["mean"] for s in results["seeds"] if s["om"] is not None]
+    )
+    if om_means
+    else None,
 }
-if len(folder_ids) > 1:
-    diffs = [o - c for o, c in zip(om_means, classic_means)]
+if len(om_means) > 1:
+    diffs = [
+        s["om"]["return"]["mean"] - s["classic"]["return"]["mean"]
+        for s in results["seeds"]
+        if s["om"] is not None
+    ]
     results["paired"] = {"om_minus_classic": summarize(diffs)}
 
 print(
@@ -418,11 +473,12 @@ print(
     f"(swap_prob={args_parsed.swap_prob}, {args_parsed.episodes} eps each) ==="
 )
 print(
-    f"classic: {np.mean(classic_means):.3f} +- {np.std(classic_means, ddof=1) if len(classic_means) > 1 else 0:.3f}"
+    f"{'classic-H' if args_parsed.classic_h else 'classic'}: {np.mean(classic_means):.3f} +- {np.std(classic_means, ddof=1) if len(classic_means) > 1 else 0:.3f}"
 )
-print(
-    f"om:     {np.mean(om_means):.3f} +- {np.std(om_means, ddof=1) if len(om_means) > 1 else 0:.3f}"
-)
+if om_means:
+    print(
+        f"om:     {np.mean(om_means):.3f} +- {np.std(om_means, ddof=1) if len(om_means) > 1 else 0:.3f}"
+    )
 if results["paired"]:
     d = results["paired"]["om_minus_classic"]
     print(f"paired om-classic: {d['mean']:.3f} +- {d['std']:.3f}")
@@ -434,7 +490,8 @@ out_path = os.path.join(
     f"map{args_parsed.map}_{args_parsed.opponent}_v{args_parsed.vision_radius}"
     f"_p{int(args_parsed.belief_map_prior)}_n{args_parsed.n_step}_sw{args_parsed.swap_prob}"
     f"_blind{'T' if args_parsed.om_control == 'blind' else 'F'}"
-    f"{'_' + args_parsed.om_control if args_parsed.om_control not in ('none', 'blind') else ''}.json",
+    f"{'_' + args_parsed.om_control if args_parsed.om_control not in ('none', 'blind') else ''}"
+    f"{'_classicH' if args_parsed.classic_h else ''}.json",
 )
 with open(out_path, "w") as f:
     json.dump(results, f, indent=2)
